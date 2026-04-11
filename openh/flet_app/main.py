@@ -2043,10 +2043,13 @@ class OpenHApp:
                     self.session.tools.extend(extra)
             except Exception:
                 pass
-        # Apply profile color theme
+        # Apply profile color theme + full UI rebuild
         if spec.color_preset:
             theme.set_color_preset(spec.color_preset)
-        # Replace welcome screen with profile-specific one
+            self.page.bgcolor = theme.BG_PAGE
+            # Full rebuild so all widgets pick up new theme colors
+            self._rebuild_ui_after_theme_change()
+        # Show profile welcome screen (after rebuild cleared it)
         self._stop_welcome_wordmark_animation()
         self._welcome_widget = None
         self._welcome_wordmark_host = None

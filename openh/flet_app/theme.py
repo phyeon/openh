@@ -370,42 +370,69 @@ _register_preset("Slate",
 )
 
 # 11. Fruits & Dessert
-# Light: 상큼 과즙 — 딸기 핑크 + 민트 + 피치 화이트. 밝고 발랄.
-# Dark: 금박 엘레강스 — 딥 다크 초콜릿에 골드 액센트. 고급 디저트 부티크.
-_register_preset("Fruits & Dessert",
-    _dark(
-        accent="#d4a857",       # antique gold
-        accent_dk="#b8923e",    # deep gold
-        accent_hv="#e4c47a",    # champagne gold hover
-        accent_pr="#9a7a2c",    # burnished gold press
-        bg="#0e0c08",           # almost black with warmth
-        surface="#1a1610",      # dark chocolate
-        elevated="#262014",     # rich dark truffle
-        hover="#302a1e",        # cocoa hover
-        sidebar="#e01a1610",    # deep dark sidebar
-        text1="#f4e8d0",        # warm champagne
-        text2="#b8a888",        # muted gold
-        text3="#7a6e58",        # aged bronze
-        text_dis="#4a4030",     # dark khaki
-        accent_faint="#1e1a0e", # dark gold tint
-    ),
-    _light(
-        accent="#e05880",       # strawberry pink
-        accent_dk="#c84468",    # deeper berry
-        accent_hv="#f07098",    # light strawberry hover
-        accent_pr="#a83858",    # pressed berry
-        bg="#fffaf8",           # peach cream white
-        surface="#fff0ee",      # very light strawberry milk
-        elevated="#ffffff",     # pure white
-        hover="#ffe4e0",        # light blush hover
-        sidebar="#e8fff0ee",    # blush sidebar
-        text1="#3a1820",        # deep berry text
-        text2="#7a4858",        # muted berry
-        text3="#b08898",        # light mauve
-        text_dis="#d0b8c0",     # faded rose
-        accent_faint="#ffe0e8", # very light pink tint
-    ),
+# Dark: 금박 엘레강스 — 딥 다크 초콜릿 + 앤틱 골드. 고급 디저트 부티크.
+# Light: 딸기 과즙 — 피치 크림 + 스트로베리 핑크. 따뜻하고 상큼.
+_FND_DARK = Tokens(
+    BG_SIDEBAR="#e01a1610",
+    BG_DEEPEST="#0e0c08",
+    BG_PAGE="#1a1610",
+    BG_ELEVATED="#262014",
+    BG_HOVER="#302a1e",
+    BG_SIDEBAR_SELECTED="#24200e",
+    BG_STATUS="#0e0c08",
+    TEXT_PRIMARY="#f4e8d0",
+    TEXT_SECONDARY="#b8a888",
+    TEXT_TERTIARY="#7a6e58",
+    TEXT_DISABLED="#4a4030",
+    TEXT_ON_ACCENT="#1a1610",
+    ACCENT="#d4a857",
+    ACCENT_DARK="#b8923e",
+    ACCENT_HOVER="#e4c47a",
+    ACCENT_PRESSED="#9a7a2c",
+    ACCENT_FAINT="#1e1a0e",
+    BORDER_FAINT="#2a2418",
+    BORDER_SUBTLE="#3a3020",
+    BORDER_STRONG="#4a4030",
+    ERROR="#e86050",
+    WARN="#d4a050",
+    SUCCESS="#6ab860",
+    TOOL_CALL_BG="#1e1a10",
+    TOOL_CALL_BORDER="#302818",
+    TOOL_RESULT_BG="#1a160e",
+    TOOL_RESULT_BORDER="#282014",
+    ERROR_BG="#2a1410",
 )
+_FND_LIGHT = Tokens(
+    BG_SIDEBAR="#e8fef4f0",
+    BG_DEEPEST="#fef4f0",
+    BG_PAGE="#fffaf7",
+    BG_ELEVATED="#ffffff",
+    BG_HOVER="#fee8e0",
+    BG_SIDEBAR_SELECTED="#fcdcd0",
+    BG_STATUS="#fef4f0",
+    TEXT_PRIMARY="#3a1820",
+    TEXT_SECONDARY="#7a4858",
+    TEXT_TERTIARY="#b08898",
+    TEXT_DISABLED="#d0b8c0",
+    TEXT_ON_ACCENT="#ffffff",
+    ACCENT="#e05880",
+    ACCENT_DARK="#c84468",
+    ACCENT_HOVER="#f07098",
+    ACCENT_PRESSED="#a83858",
+    ACCENT_FAINT="#fee0e8",
+    BORDER_FAINT="#f0d8d0",
+    BORDER_SUBTLE="#e0c0b8",
+    BORDER_STRONG="#c8a098",
+    ERROR="#d03838",
+    WARN="#c07a1c",
+    SUCCESS="#3aa169",
+    TOOL_CALL_BG="#fef0ec",
+    TOOL_CALL_BORDER="#f0c8c0",
+    TOOL_RESULT_BG="#fef6f4",
+    TOOL_RESULT_BORDER="#f0d0c8",
+    ERROR_BG="#fde8e8",
+)
+_register_preset("Fruits & Dessert", _FND_DARK, _FND_LIGHT)
 
 
 def set_color_preset(name: str) -> None:
