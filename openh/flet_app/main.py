@@ -138,6 +138,14 @@ class OpenHApp:
         self._stream_message_widget: ft.Container | None = None
         self._thinking_widget: ft.Container | None = None
         self._welcome_widget: ft.Container | None = None
+        self._message_end_spacer = ft.Container(height=20)
+        self._session_cache: dict[str, tuple[int, int, list[Any], dict[str, Any]]] = {}
+        self._queued_turns: list[tuple[str, list[Any]]] = []
+        self._live_tool_entries: list[tuple[str, dict[str, Any], str | None, bool]] = []
+        self._live_tool_stack_widget: ft.Control | None = None
+        self._scroll_in_flight = False
+        self._scroll_requested = False
+        self._pending_scroll_animated = False
 
         self._build_ui()
 
@@ -194,6 +202,7 @@ class OpenHApp:
             scroll=ft.ScrollMode.AUTO,
             expand=True,
         )
+        self._ensure_message_end_spacer()
         self._show_welcome()
 
         # Centered message container (max 760px wide)
@@ -202,7 +211,7 @@ class OpenHApp:
                 content=self.message_column,
                 width=theme.MESSAGE_MAX_WIDTH,
             ),
-            alignment=ft.Alignment(0, 0),
+            alignment=ft.Alignment(0, -1),
             padding=ft.padding.symmetric(horizontal=theme.PADDING_GUTTER),
             expand=True,
         )
@@ -513,6 +522,11 @@ class OpenHApp:
             busy=self._busy,
             on_stop=self._stop_generation,
             attachments=[(i, type(b).__name__, getattr(b, "data_base64", "")) for i, b in enumerate(pending)],
+            queued_inputs=[
+                text + (" [media]" if media_blocks else "")
+                for text, media_blocks in self._queued_turns
+            ],
+            on_remove_queued_input=self._remove_queued_turn,
             on_remove_attachment=self._remove_attachment,
         )
         self.input_holder.content = box
@@ -677,6 +691,11 @@ class OpenHApp:
 
         # Build a map of tool_use_id → ToolResultBlock for matching
         result_map: dict[str, ToolResultBlock] = {}
+        replayed_widgets: list[ft.Control] = []
+
+        def queue(widget: ft.Control) -> None:
+            replayed_widgets.append(widget)
+
         for msg in self.session.messages:
             if msg.role == "user":
                 for b in msg.content:
@@ -692,14 +711,12 @@ class OpenHApp:
                         if t.startswith("<environment>"):
                             continue
                         if t.startswith("[Conversation compacted") or t.startswith("[Prior conversation summary"):
-                            self._append_to_messages(
-                                widgets.system_note(t.splitlines()[0])
-                            )
+                            queue(widgets.system_note(t.splitlines()[0]))
                             continue
                         text_parts.append(b.text)
                     # ToolResultBlocks are rendered with their matching tool_call above
                 if text_parts:
-                    self._append_to_messages(
+                    queue(
                         widgets.user_bubble(
                             "\n".join(text_parts),
                             on_edit=self._on_edit_message,
@@ -708,38 +725,48 @@ class OpenHApp:
                     )
             else:
                 text_parts = []
+                tool_entries: list[tuple[str, dict[str, Any], str | None, bool]] = []
+
+                def flush_tool_entries() -> None:
+                    nonlocal tool_entries
+                    if not tool_entries:
+                        return
+                    queue(self._build_tool_panel(tool_entries))
+                    tool_entries = []
+
                 for b in msg.content:
                     if isinstance(b, TextBlock):
+                        if tool_entries:
+                            flush_tool_entries()
                         t = b.text.strip()
                         if t in ("Acknowledged. Ready to help.", "Understood. Continuing from the recent context."):
                             continue
                         text_parts.append(b.text)
                     elif isinstance(b, ToolUseBlock):
                         if text_parts:
-                            self._append_to_messages(
-                                widgets.assistant_message("".join(text_parts))
-                            )
+                            queue(widgets.assistant_message("".join(text_parts)))
                             text_parts = []
                         # Find matching result
                         result = result_map.get(b.id)
-                        if result:
-                            self._append_to_messages(
-                                widgets.tool_combined_panel(
-                                    b.name, b.input, result.content, is_error=result.is_error,
-                                )
+                        tool_entries.append(
+                            (
+                                b.name,
+                                b.input,
+                                result.content if result else None,
+                                result.is_error if result else False,
                             )
-                        else:
-                            self._append_to_messages(
-                                widgets.tool_call_panel(b.name, b.input)
-                            )
+                        )
+                flush_tool_entries()
                 if text_parts:
-                    self._append_to_messages(
+                    queue(
                         widgets.assistant_message(
-                        "".join(text_parts),
-                        on_retry=self._on_retry_message,
-                        msg_index=msg_index,
+                            "".join(text_parts),
+                            on_retry=self._on_retry_message,
+                            msg_index=msg_index,
+                        )
                     )
-                )
+
+        self._extend_messages(replayed_widgets)
 
     # ---- Edit / Retry ----
 
@@ -1141,16 +1168,22 @@ class OpenHApp:
         text = (self.input_field.value or "").strip()
         if not text:
             return
+        pending_media = list(getattr(self, "_pending_media", None) or [])
+        self._pending_media = []  # type: ignore[attr-defined]
         if self._busy:
-            # Queue the message — show bubble now, send after current turn
-            self._queued_input = text
+            # Queue future steering turns without polluting the transcript.
+            self._queued_turns.append((text, pending_media))
             self.input_field.value = ""
             self.input_field.update()
-            self._append_to_messages(widgets.user_bubble(text))
-            self._scroll_to_end()
+            self._refresh_input()
+            self._focus_input()
             return
         self.input_field.value = ""
         self.input_field.update()
+        self._submit_turn(text, pending_media)
+
+    def _submit_turn(self, text: str, media_blocks: list[Any] | None = None) -> None:
+        media_blocks = list(media_blocks or [])
 
         # Slash command handling — do not send to the model.
         if text.startswith("/"):
@@ -1162,6 +1195,7 @@ class OpenHApp:
                         widgets.system_note(result.output)
                     )
                     self._scroll_to_end()
+                self._drain_queued_turns()
                 return
 
         self._hide_welcome()
@@ -1180,13 +1214,20 @@ class OpenHApp:
                 )
         self._append_to_messages(widgets.user_bubble(text))
         self._scroll_to_end()
+        self._refresh_input()
 
-        pending_media = getattr(self, "_pending_media", None) or []
-        if pending_media:
-            self._pending_media = []  # type: ignore[attr-defined]
-            self._current_task = self.page.run_task(self._run_turn_with_media_async, text, pending_media)
+        if media_blocks:
+            self._current_task = self.page.run_task(self._run_turn_with_media_async, text, media_blocks)
         else:
             self._current_task = self.page.run_task(self._run_turn_async, text)
+
+    def _drain_queued_turns(self) -> None:
+        if self._busy or not self._queued_turns:
+            self._refresh_input()
+            return
+        text, media_blocks = self._queued_turns.pop(0)
+        self._refresh_input()
+        self._submit_turn(text, media_blocks)
 
     async def _run_turn_with_media_async(self, user_text: str, media_blocks: list) -> None:
         """Like _run_turn_async but first injects image/document blocks on the user message."""
@@ -1223,26 +1264,37 @@ class OpenHApp:
             self._autosave()
             self._focus_input()
             self._scroll_to_end()
+            self._drain_queued_turns()
 
     def _append_to_messages(self, widget: ft.Control) -> None:
-        """Append widget and flush."""
-        self.message_column.controls.append(widget)
+        """Append widget just above the bottom spacer and flush."""
+        self._ensure_message_end_spacer()
+        insert_at = max(len(self.message_column.controls) - 1, 0)
+        self.message_column.controls.insert(insert_at, widget)
+        self._flush_message_column()
+
+    def _extend_messages(self, widgets: list[ft.Control]) -> None:
+        if not widgets:
+            return
+        self._ensure_message_end_spacer()
+        insert_at = max(len(self.message_column.controls) - 1, 0)
+        self.message_column.controls[insert_at:insert_at] = widgets
+        self._flush_message_column()
+
+    def _ensure_message_end_spacer(self) -> None:
+        if self._message_end_spacer not in self.message_column.controls:
+            self.message_column.controls.append(self._message_end_spacer)
+
+    def _flush_message_column(self) -> None:
         try:
             self.message_column.update()
         except Exception:
             pass
 
     def _show_thinking(self) -> None:
-        if self._thinking_widget is None:
-            self._thinking_widget = widgets.thinking_indicator()
-            self._append_to_messages(self._thinking_widget)
+        self._thinking_widget = None
     def _hide_thinking(self) -> None:
-        if self._thinking_widget is not None:
-            try:
-                self.message_column.controls.remove(self._thinking_widget)
-            except ValueError:
-                pass
-            self._thinking_widget = None
+        self._thinking_widget = None
 
 
     def _full_update(self) -> None:
@@ -1252,18 +1304,34 @@ class OpenHApp:
         except Exception:
             pass
 
-    def _scroll_to_end(self) -> None:
-        """Scroll to bottom + flush pending control changes."""
+    def _scroll_to_end(self, animated: bool = False) -> None:
+        """Scroll to bottom without stacking dozens of concurrent scroll tasks."""
+        self._scroll_requested = True
+        self._pending_scroll_animated = self._pending_scroll_animated or animated
+        if self._scroll_in_flight:
+            return
+        self._scroll_in_flight = True
         try:
             self.page.run_task(self._scroll_to_end_async)
         except Exception:
-            pass
+            self._scroll_in_flight = False
 
     async def _scroll_to_end_async(self) -> None:
         try:
-            await self.message_column.scroll_to(offset=-1, duration=300)
+            import asyncio
+            while self._scroll_requested:
+                self._scroll_requested = False
+                duration = 180 if self._pending_scroll_animated else 0
+                self._pending_scroll_animated = False
+                await self.message_column.scroll_to(offset=-1, duration=duration)
+                # Flet may settle layout one frame later (input height / thinking row),
+                # so do a second pass to avoid stopping halfway above the composer.
+                await asyncio.sleep(0.03)
+                await self.message_column.scroll_to(offset=-1, duration=0)
         except Exception:
             pass
+        finally:
+            self._scroll_in_flight = False
 
     def _focus_input(self) -> None:
         """Fire-and-forget focus. `TextField.focus` is async in Flet 0.84."""
@@ -1311,13 +1379,7 @@ class OpenHApp:
             self._autosave()
             self._focus_input()
             self._scroll_to_end()
-            # Process queued input if any
-            queued = getattr(self, "_queued_input", None)
-            if queued:
-                self._queued_input = None
-                self.input_field.value = queued
-                self.input_field.update()
-                self._on_submit(None)
+            self._drain_queued_turns()
 
     async def _handle_stream_event(self, event: StreamEvent) -> None:
         if isinstance(event, TextDelta):
@@ -1326,30 +1388,14 @@ class OpenHApp:
             self._finalize_streaming_message()
         elif isinstance(event, ToolUseEnd):
             self._hide_thinking()
-            self._last_tool_call = (event.name, event.input)
-            self._append_to_messages(
-                widgets.tool_call_panel(event.name, event.input)
-            )
+            self._live_tool_entries.append((event.name, event.input, None, False))
+            self._update_live_tool_stack()
             self._scroll_to_end()
         elif isinstance(event, ToolResultEvent):
-            # Replace the pending tool_call panel with combined call+result
-            tc = getattr(self, "_last_tool_call", None)
-            if tc:
-                # Find and replace last tool_call panel
-                for i in range(len(self.message_column.controls) - 1, -1, -1):
-                    ctrl = self.message_column.controls[i]
-                    if getattr(ctrl, "_is_tool_call", False):
-                        self.message_column.controls[i] = widgets.tool_combined_panel(
-                            tc[0], tc[1], event.content, is_error=event.is_error,
-                        )
-                        break
-                else:
-                    self._append_to_messages(
-                        widgets.tool_combined_panel(
-                            tc[0], tc[1], event.content, is_error=event.is_error,
-                        )
-                    )
-                self._last_tool_call = None
+            if self._live_tool_entries:
+                name, input_dict, _result_content, _prev_error = self._live_tool_entries[-1]
+                self._live_tool_entries[-1] = (name, input_dict, event.content, event.is_error)
+                self._update_live_tool_stack()
             else:
                 self._append_to_messages(
                     widgets.tool_result_panel(event.content, is_error=event.is_error)
@@ -1359,9 +1405,12 @@ class OpenHApp:
             self._refresh_top_bar(note="thinking…")
         elif isinstance(event, MessageStop):
             self._finalize_streaming_message()
+            self._reset_live_tool_stack()
 
     def _append_streaming_text(self, delta: str) -> None:
         if self._stream_message_widget is None:
+            if self._live_tool_entries:
+                self._reset_live_tool_stack()
             self._hide_thinking()
             self._stream_text_buf = []
             # Create a bare Markdown for streaming (no retry wrapper)
@@ -1378,23 +1427,31 @@ class OpenHApp:
             )
             self._append_to_messages(self._stream_message_widget)
         self._stream_text_buf.append(delta)
-        joined = "".join(self._stream_text_buf)
+        import time
+        now = time.monotonic()
+        last_flush = getattr(self, "_last_stream_flush", 0.0)
+        if now - last_flush >= 0.06 or delta.endswith(("\n", " ", ".", "!", "?", "`")):
+            self._last_stream_flush = now
+            self._flush_streaming_markdown()
+        # Throttled scroll: only scroll every ~400ms during streaming
+        last = getattr(self, "_last_stream_scroll", 0.0)
+        if now - last > 0.4:
+            self._last_stream_scroll = now
+            self._scroll_to_end()
+
+    def _flush_streaming_markdown(self) -> None:
+        if self._stream_md is None:
+            return
         try:
-            self._stream_md.value = joined
+            self._stream_md.value = "".join(self._stream_text_buf)
             self._stream_md.update()
         except Exception:
             pass
-        # Throttled scroll: only scroll every ~500ms during streaming
-        import time
-        now = time.monotonic()
-        last = getattr(self, "_last_stream_scroll", 0.0)
-        if now - last > 0.5:
-            self._last_stream_scroll = now
-            self._scroll_to_end()
 
     def _finalize_streaming_message(self) -> None:
         self._hide_thinking()
         if self._stream_message_widget is not None:
+            self._flush_streaming_markdown()
             text = "".join(getattr(self, "_stream_text_buf", [])).strip()
             try:
                 idx = self.message_column.controls.index(self._stream_message_widget)
@@ -1411,9 +1468,82 @@ class OpenHApp:
                     on_retry=self._on_retry_message,
                     msg_index=msg_idx,
                 )
+            self._flush_message_column()
             self._stream_message_widget = None
             self._stream_md = None
             self._stream_text_buf = []
+
+    def _load_session_data(self, target: CCSessionMeta) -> tuple[list[Any], dict[str, Any]]:
+        try:
+            stat = target.path.stat()
+        except OSError:
+            return read_session_jsonl(target.path)
+
+        cached = self._session_cache.get(target.session_id)
+        if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+            return list(cached[2]), dict(cached[3])
+
+        messages, metadata = read_session_jsonl(target.path)
+        self._session_cache[target.session_id] = (
+            stat.st_mtime_ns,
+            stat.st_size,
+            list(messages),
+            dict(metadata),
+        )
+        return list(messages), dict(metadata)
+
+    def _cache_current_session(self) -> None:
+        path = session_jsonl_path(self.session.cwd, self.session.session_id)
+        metadata = {
+            "session_id": self.session.session_id,
+            "session_cwd": self.session.cwd,
+            "prompt_override": self.session.prompt_override,
+            "total_input_tokens": self.session.total_input_tokens,
+            "total_output_tokens": self.session.total_output_tokens,
+        }
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        self._session_cache[self.session.session_id] = (
+            stat.st_mtime_ns,
+            stat.st_size,
+            list(self.session.messages),
+            metadata,
+        )
+
+    def _build_tool_panel(
+        self,
+        entries: list[tuple[str, dict[str, Any], str | None, bool]],
+    ) -> ft.Control:
+        if len(entries) > 1:
+            return widgets.tool_stack_panel(entries)
+        name, input_dict, result_content, is_error = entries[0]
+        if result_content is None:
+            return widgets.tool_call_panel(name, input_dict)
+        return widgets.tool_combined_panel(name, input_dict, result_content, is_error=is_error)
+
+    def _reset_live_tool_stack(self) -> None:
+        self._live_tool_entries = []
+        self._live_tool_stack_widget = None
+
+    def _update_live_tool_stack(self) -> None:
+        if not self._live_tool_entries:
+            return
+        panel = self._build_tool_panel(self._live_tool_entries)
+        if self._live_tool_stack_widget is None:
+            self._live_tool_stack_widget = panel
+            self._append_to_messages(panel)
+            return
+        try:
+            idx = self.message_column.controls.index(self._live_tool_stack_widget)
+        except ValueError:
+            self._live_tool_stack_widget = panel
+            self._append_to_messages(panel)
+            return
+        self.message_column.controls[idx] = panel
+        self._live_tool_stack_widget = panel
+        self._flush_message_column()
 
     async def _ask_permission(self, tool_name: str, input_dict: dict[str, Any]) -> bool:
         if self._skip_permissions:
@@ -1459,6 +1589,8 @@ class OpenHApp:
         self.session.created_at = time.time()
         self.session.title = ""
         self._current_title = ""
+        self._queued_turns = []
+        self._reset_live_tool_stack()
         # New JSONL writer for the new session
         self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
         self._jsonl_written_count = 0
@@ -1475,11 +1607,13 @@ class OpenHApp:
     def _select_session(self, session_id: str) -> None:
         if self._busy:
             return
+        if self.session.session_id == session_id:
+            return
         target = next((m for m in self._session_metas if m.session_id == session_id), None)
         if target is None:
             return
         try:
-            messages, metadata = read_session_jsonl(target.path)
+            messages, metadata = self._load_session_data(target)
         except Exception as exc:  # noqa: BLE001
             self._append_to_messages(
                 widgets.error_panel(f"failed to load session: {exc}")
@@ -1497,6 +1631,8 @@ class OpenHApp:
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = target.title or ""
         self._current_title = target.title or ""
+        self._queued_turns = []
+        self._reset_live_tool_stack()
         # Point JSONL writer at the resumed session (append new turns)
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         # Re-render
@@ -1524,6 +1660,7 @@ class OpenHApp:
             target.path.unlink()
         except OSError:
             pass
+        self._session_cache.pop(session_id, None)
         self._session_metas = [m for m in self._session_metas if m.session_id != session_id]
         if self.session.session_id == session_id:
             self._new_chat()
@@ -1570,14 +1707,22 @@ class OpenHApp:
                 session_cwd=self.session.cwd,
                 prompt_override=self.session.prompt_override or None,
             )
+            self._cache_current_session()
             # Update current session in the cached meta list (no full rescan)
             import time as _t
+            try:
+                stat = p.stat()
+                mtime = stat.st_mtime
+                size = stat.st_size
+            except OSError:
+                mtime = _t.time()
+                size = 0
             found = False
             for i, m in enumerate(self._session_metas):
                 if m.session_id == self.session.session_id:
                     self._session_metas[i] = CCSessionMeta(
                         session_id=m.session_id, path=m.path, cwd=self.session.cwd,
-                        mtime=_t.time(), size=m.size,
+                        mtime=mtime, size=size,
                         title=self._current_title or m.title,
                         starred=m.starred, hidden=m.hidden,
                     )
@@ -1587,7 +1732,7 @@ class OpenHApp:
                 p = session_jsonl_path(self.session.cwd, self.session.session_id)
                 self._session_metas.insert(0, CCSessionMeta(
                     session_id=self.session.session_id, path=p, cwd=self.session.cwd,
-                    mtime=_t.time(), size=0,
+                    mtime=mtime, size=size,
                     title=self._current_title or "",
                 ))
             self._refresh_sidebar()
@@ -1599,6 +1744,11 @@ class OpenHApp:
         if 0 <= idx < len(pending):
             pending.pop(idx)
             self._pending_media = pending
+        self._refresh_input()
+
+    def _remove_queued_turn(self, idx: int) -> None:
+        if 0 <= idx < len(self._queued_turns):
+            self._queued_turns.pop(idx)
         self._refresh_input()
 
     def _on_attach(self) -> None:

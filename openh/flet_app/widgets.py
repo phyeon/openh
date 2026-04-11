@@ -295,11 +295,32 @@ def top_bar(
         tooltip="Click to rename conversation",
     )
 
-    note_text = ft.Text(
-        busy_note,
-        color=theme.ACCENT,
-        size=11,
-        italic=True,
+    note_text = ft.Container(
+        content=ft.Row(
+            [
+                ft.ProgressRing(
+                    width=12,
+                    height=12,
+                    stroke_width=2,
+                    color=theme.ACCENT,
+                ),
+                ft.Text(
+                    busy_note,
+                    color=theme.ACCENT,
+                    size=11,
+                    italic=True,
+                ),
+            ],
+            spacing=8,
+            tight=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.symmetric(horizontal=10, vertical=6),
+        border_radius=theme.RADIUS_PILL,
+        bgcolor=theme.ACCENT_FAINT,
+        border=ft.border.all(1, theme.TOOL_CALL_BORDER),
+        animate_opacity=180,
+        animate_scale=180,
     ) if busy_note else ft.Container()
 
     return ft.Container(
@@ -530,7 +551,9 @@ def user_bubble(
 
     return ft.Container(
         content=wrapper,
-        margin=ft.margin.only(top=16, bottom=8, left=80),
+        width=theme.MESSAGE_MAX_WIDTH,
+        alignment=ft.Alignment(1, 0),
+        margin=ft.margin.only(top=16, bottom=8),
     )
 
 
@@ -836,6 +859,146 @@ def tool_combined_panel(
     )
 
 
+def tool_stack_panel(
+    entries: list[tuple[str, dict, str | None, bool]],
+) -> ft.Container:
+    """Grouped command stack for a single turn."""
+    previews: list[str] = []
+    for name, input_dict, _result_content, _is_error in entries[:3]:
+        summary = _tool_call_summary(name, input_dict)
+        previews.append(f"{name} {summary}".strip())
+    preview_text = " • ".join(previews)
+    if len(entries) > 3:
+        preview_text += f"  +{len(entries) - 3}"
+
+    header = ft.Row(
+        [
+            ft.Container(width=6, height=6, border_radius=3, bgcolor=theme.ACCENT),
+            ft.Text(
+                f"{len(entries)} commands",
+                color=theme.ACCENT,
+                size=12,
+                weight=ft.FontWeight.W_700,
+                font_family=theme.FONT_MONO,
+            ),
+            ft.Text(
+                preview_text,
+                color=theme.TEXT_TERTIARY,
+                size=11,
+                font_family=theme.FONT_MONO,
+                no_wrap=True,
+                overflow=ft.TextOverflow.ELLIPSIS,
+                expand=True,
+            ),
+        ],
+        spacing=6,
+        tight=True,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    body_children: list[ft.Control] = []
+    for index, (name, input_dict, result_content, is_error) in enumerate(entries, start=1):
+        try:
+            input_body = json.dumps(input_dict, indent=2, ensure_ascii=False)
+        except Exception:
+            input_body = str(input_dict)
+        if len(input_body) > 700:
+            input_body = input_body[:700] + "\n…"
+
+        result_body = result_content or "running…"
+        if len(result_body) > 1200:
+            result_body = result_body[:1200] + f"\n…(+{len(result_body) - 1200} chars)"
+        result_summary = _result_summary(name, result_content or "", is_error) if result_content else "running…"
+        result_icon = (
+            ft.Icons.ERROR_OUTLINE
+            if is_error else (ft.Icons.CHECK_CIRCLE_OUTLINE if result_content else ft.Icons.MORE_HORIZ)
+        )
+        result_color = (
+            theme.ERROR if is_error else (theme.SUCCESS if result_content else theme.TEXT_TERTIARY)
+        )
+
+        body_children.append(
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    f"{index}.",
+                                    color=theme.TEXT_TERTIARY,
+                                    size=11,
+                                    font_family=theme.FONT_MONO,
+                                ),
+                                ft.Text(
+                                    name,
+                                    color=theme.ACCENT,
+                                    size=12,
+                                    weight=ft.FontWeight.W_700,
+                                    font_family=theme.FONT_MONO,
+                                ),
+                                ft.Text(
+                                    _tool_call_summary(name, input_dict),
+                                    color=theme.TEXT_TERTIARY,
+                                    size=11,
+                                    font_family=theme.FONT_MONO,
+                                    no_wrap=True,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                    expand=True,
+                                ),
+                                ft.Icon(result_icon, color=result_color, size=12),
+                                ft.Text(
+                                    result_summary,
+                                    color=result_color if is_error else theme.TEXT_TERTIARY,
+                                    size=10,
+                                    font_family=theme.FONT_MONO,
+                                    no_wrap=True,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                            ],
+                            spacing=6,
+                            tight=True,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        ft.Container(height=6),
+                        ft.Text("Input:", color=theme.TEXT_TERTIARY, size=10, weight=ft.FontWeight.W_600),
+                        ft.Text(
+                            input_body,
+                            font_family=theme.FONT_MONO,
+                            size=11,
+                            color=theme.TEXT_SECONDARY,
+                            selectable=True,
+                        ),
+                        ft.Container(height=6),
+                        ft.Text("Result:", color=result_color, size=10, weight=ft.FontWeight.W_600),
+                        ft.Text(
+                            result_body,
+                            font_family=theme.FONT_MONO,
+                            size=11,
+                            color=theme.ERROR if is_error else theme.TEXT_SECONDARY,
+                            selectable=True,
+                        ),
+                    ],
+                    spacing=2,
+                    tight=True,
+                ),
+                bgcolor=theme.BG_DEEPEST,
+                border=ft.border.all(1, theme.BORDER_SUBTLE),
+                border_radius=theme.RADIUS_SM,
+                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+            )
+        )
+
+    return _make_collapsible_panel(
+        header,
+        ft.Column(body_children, spacing=8, tight=True),
+        bg=theme.TOOL_CALL_BG,
+        border_color=theme.TOOL_CALL_BORDER,
+        margin_top=4,
+        margin_bottom=4,
+        initially_open=False,
+    )
+
+
 def thinking_indicator() -> ft.Container:
     """Animated thinking indicator shown during streaming."""
     return ft.Container(
@@ -1101,6 +1264,8 @@ def input_area(
     busy: bool = False,
     on_stop: Callable | None = None,
     attachments: list[tuple[int, str]] | None = None,
+    queued_inputs: list[str] | None = None,
+    on_remove_queued_input: Callable[[int], None] | None = None,
     on_remove_attachment: Callable[[int], None] | None = None,
 ) -> ft.Container:
     """Large rounded input box — Claude.app style.
@@ -1141,36 +1306,38 @@ def input_area(
         on_pick=on_pick_model,
     )
 
-    right_buttons: list[ft.Control] = [model_btn, ft.Container(width=6)]
+    right_buttons: list[ft.Control] = [model_btn, ft.Container(width=10)]
 
     if busy and on_stop:
         # Busy: show only stop button (small rounded square)
-        right_buttons.append(ft.IconButton(
-            icon=ft.Icons.STOP_ROUNDED,
-            icon_color=theme.TEXT_SECONDARY,
-            icon_size=16,
-            tooltip="Stop generation (Esc)",
-            on_click=lambda e: on_stop(),
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=ft.padding.all(6),
-                side=ft.BorderSide(1, theme.BORDER_SUBTLE),
-            ),
-        ))
+        right_buttons.append(
+            ft.Container(
+                content=ft.Icon(ft.Icons.STOP_ROUNDED, color=theme.TEXT_SECONDARY, size=16),
+                width=44,
+                height=44,
+                alignment=ft.Alignment(0, 0),
+                border=ft.border.all(1, theme.BORDER_SUBTLE),
+                border_radius=14,
+                ink=True,
+                on_click=lambda e: on_stop(),
+                tooltip="Stop generation (Esc)",
+            )
+        )
     else:
         # Not busy: show send button
-        right_buttons.append(ft.IconButton(
-            icon=ft.Icons.ARROW_UPWARD,
-            icon_color=theme.TEXT_ON_ACCENT,
-            bgcolor=theme.ACCENT,
-            icon_size=18,
-            tooltip="Send (Enter)",
-            on_click=lambda e: on_send(),
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=10),
-                padding=ft.padding.all(10),
-            ),
-        ))
+        right_buttons.append(
+            ft.Container(
+                content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=20),
+                width=48,
+                height=48,
+                alignment=ft.Alignment(0, 0),
+                bgcolor=theme.ACCENT,
+                border_radius=14,
+                ink=True,
+                on_click=lambda e: on_send(),
+                tooltip="Send (Enter)",
+            )
+        )
 
     bottom_row = ft.Row(
         [
@@ -1185,6 +1352,68 @@ def input_area(
 
     # Attachment chips row (above text input)
     box_children: list[ft.Control] = []
+    if queued_inputs:
+        queued_chips: list[ft.Control] = []
+        for idx, text in enumerate(queued_inputs):
+            preview = " ".join(text.split())
+            if len(preview) > 44:
+                preview = preview[:41] + "…"
+            queued_chips.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Text(
+                                f"Q{idx + 1}",
+                                color=theme.ACCENT,
+                                size=11,
+                                font_family=theme.FONT_MONO,
+                                weight=ft.FontWeight.W_700,
+                            ),
+                            ft.Text(
+                                preview,
+                                color=theme.TEXT_SECONDARY,
+                                size=12,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.CLOSE,
+                                icon_color=theme.TEXT_TERTIARY,
+                                icon_size=12,
+                                tooltip="Remove queued turn",
+                                on_click=lambda e, i=idx: on_remove_queued_input(i) if on_remove_queued_input else None,
+                                style=ft.ButtonStyle(
+                                    shape=ft.CircleBorder(),
+                                    padding=ft.padding.all(0),
+                                ),
+                            ),
+                        ],
+                        spacing=6,
+                        tight=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    bgcolor=theme.ACCENT_FAINT,
+                    border=ft.border.all(1, theme.TOOL_CALL_BORDER),
+                    border_radius=theme.RADIUS_SM,
+                    padding=ft.padding.only(left=8, right=4, top=4, bottom=4),
+                )
+            )
+        box_children.append(
+            ft.Row(
+                [
+                    ft.Text(
+                        "Steering queue",
+                        color=theme.TEXT_TERTIARY,
+                        size=11,
+                        font_family=theme.FONT_MONO,
+                    ),
+                    ft.Row(queued_chips, spacing=6, tight=True, wrap=True, expand=True),
+                ],
+                spacing=10,
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        )
+        box_children.append(ft.Container(height=8))
+
     if attachments:
         import base64 as _b64mod
         chips: list[ft.Control] = []
@@ -1252,7 +1481,7 @@ def input_area(
         )
         box_children.append(ft.Container(height=6))
 
-    box_children.extend([input_field, ft.Container(height=4), bottom_row])
+    box_children.extend([input_field, ft.Container(height=8), bottom_row])
 
     box = ft.Container(
         content=ft.Column(
@@ -1263,7 +1492,7 @@ def input_area(
         bgcolor=theme.BG_DEEPEST,
         border=ft.border.all(1, theme.BORDER_SUBTLE),
         border_radius=theme.RADIUS_LG,
-        padding=ft.padding.only(left=14, right=14, top=12, bottom=8),
+        padding=ft.padding.only(left=14, right=14, top=12, bottom=14),
     )
 
     return ft.Container(
@@ -1275,7 +1504,7 @@ def input_area(
         padding=ft.padding.only(
             left=theme.PADDING_GUTTER,
             right=theme.PADDING_GUTTER,
-            top=6,
-            bottom=14,
+            top=8,
+            bottom=12,
         ),
     )
