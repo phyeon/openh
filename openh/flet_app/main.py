@@ -1275,18 +1275,19 @@ class OpenHApp:
             self._thinking_widget = None
 
     def _update_messages(self) -> None:
-        """Update via page.update() to preserve scroll position.
+        """No-op for incremental appends. Flet picks up control changes
+        on the next page.update() or scroll_to call. Avoids scroll reset."""
+        pass
 
-        Column.update() re-renders the entire scroll container and resets
-        scroll. page.update() applies diffs incrementally.
-        """
+    def _full_update(self) -> None:
+        """Full page update — only after replay, clear, or theme change."""
         try:
             self.page.update()
         except Exception:
             pass
 
     def _scroll_to_end(self) -> None:
-        """Fire-and-forget scroll. `Column.scroll_to` is async in Flet 0.84."""
+        """Scroll to bottom + flush pending control changes."""
         try:
             self.page.run_task(self._scroll_to_end_async)
         except Exception:
@@ -1294,9 +1295,10 @@ class OpenHApp:
 
     async def _scroll_to_end_async(self) -> None:
         try:
+            self.page.update()  # flush pending control changes
             import asyncio
             await asyncio.sleep(0.05)
-            await self.message_column.scroll_to(offset=999999, duration=150)
+            await self.message_column.scroll_to(offset=999999, duration=0)
         except Exception:
             pass
 
