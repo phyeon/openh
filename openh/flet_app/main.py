@@ -1964,11 +1964,12 @@ class OpenHApp:
         )
         self._scroll_to_end()
 
-    def _new_chat(self) -> None:
+    def _new_chat(self, _skip_toggle: bool = False) -> None:
         if self._busy:
             return
-        # 웰컴 화면 상태(메시지 0)에서 또 누르면 → 첫 번째 프로필로 전환
-        if (not self.session.messages
+        # 웰컴 화면 상태에서 또 누르면 → 프로필 토글
+        if (not _skip_toggle
+                and not self.session.messages
                 and self.session.profile_id == "default"
                 and self._welcome_widget is not None):
             _profiles = list_profiles()
@@ -2020,8 +2021,8 @@ class OpenHApp:
         spec = get_profile(profile_id)
         if spec is None:
             return
-        # Start with a clean session
-        self._new_chat()
+        # Start with a clean session (skip toggle to avoid recursion)
+        self._new_chat(_skip_toggle=True)
         self.session.profile_id = profile_id
         # Set CWD from profile
         if spec.default_cwd:

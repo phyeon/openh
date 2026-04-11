@@ -234,10 +234,8 @@ def sidebar(
 
     top_section = [
         ft.Container(content=new_chat_btn, padding=ft.padding.only(top=4, bottom=2)),
+        ft.Divider(height=1, color=theme.BORDER_FAINT),
     ]
-    if profile_buttons:
-        top_section.extend(profile_buttons)
-    top_section.append(ft.Divider(height=1, color=theme.BORDER_FAINT))
 
     return ft.Container(
         width=width,
