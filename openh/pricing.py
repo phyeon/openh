@@ -6,11 +6,11 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float]] = {
     "gpt-5.4": (2.50, 15.0),
     "gpt-5.4-mini": (0.75, 4.50),
     "gpt-5.4-nano": (0.20, 1.25),
-    # Anthropic
-    "claude-opus-4-6": (15.0, 75.0),
+    # Anthropic (2026-04 기준)
+    "claude-opus-4-6": (5.0, 25.0),
     "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (0.80, 4.0),
-    # Gemini
+    "claude-haiku-4-5": (1.0, 5.0),
+    # Gemini (2026-04 기준)
     "gemini-3.1-pro-preview": (2.0, 12.0),
     "gemini-3-flash-preview": (0.50, 3.0),
     "gemini-2.5-flash": (0.15, 0.60),
