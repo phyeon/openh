@@ -1543,67 +1543,7 @@ def input_area(
 
     # Attachment chips row (above text input)
     box_children: list[ft.Control] = []
-    if queued_inputs:
-        queued_chips: list[ft.Control] = []
-        for idx, text in enumerate(queued_inputs):
-            preview = " ".join(text.split())
-            if len(preview) > 44:
-                preview = preview[:41] + "…"
-            queued_chips.append(
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Text(
-                                f"Q{idx + 1}",
-                                color=theme.ACCENT,
-                                size=11,
-                                font_family=theme.FONT_MONO,
-                                weight=ft.FontWeight.W_700,
-                            ),
-                            ft.Text(
-                                preview,
-                                color=theme.TEXT_SECONDARY,
-                                size=12,
-                            ),
-                            ft.IconButton(
-                                icon=ft.Icons.CLOSE,
-                                icon_color=theme.TEXT_TERTIARY,
-                                icon_size=12,
-                                tooltip="Remove queued turn",
-                                on_click=lambda e, i=idx: on_remove_queued_input(i) if on_remove_queued_input else None,
-                                style=ft.ButtonStyle(
-                                    shape=ft.CircleBorder(),
-                                    padding=ft.padding.all(0),
-                                ),
-                            ),
-                        ],
-                        spacing=6,
-                        tight=True,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    bgcolor=theme.ACCENT_FAINT,
-                    border=ft.border.all(1, theme.TOOL_CALL_BORDER),
-                    border_radius=theme.RADIUS_SM,
-                    padding=ft.padding.only(left=8, right=4, top=4, bottom=4),
-                )
-            )
-        box_children.append(
-            ft.Row(
-                [
-                    ft.Text(
-                        "Steering queue",
-                        color=theme.TEXT_TERTIARY,
-                        size=11,
-                        font_family=theme.FONT_MONO,
-                    ),
-                    ft.Row(queued_chips, spacing=6, tight=True, wrap=True, expand=True),
-                ],
-                spacing=10,
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            )
-        )
-        box_children.append(ft.Container(height=8))
+    # Steering queue is handled silently in the backend — no UI needed.
 
     if attachments:
         import base64 as _b64mod
@@ -1672,7 +1612,12 @@ def input_area(
         )
         box_children.append(ft.Container(height=6))
 
-    box_children.extend([input_field, ft.Container(height=4), bottom_row])
+    # Wrap input_field in a Row so its expand=True works horizontally, not vertically
+    box_children.extend([
+        ft.Row([input_field], spacing=0, tight=True),
+        ft.Container(height=4),
+        bottom_row,
+    ])
 
     box = ft.Container(
         content=ft.Column(
