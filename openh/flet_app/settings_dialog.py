@@ -375,7 +375,7 @@ class SettingsDialog:
             width=250,
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
-            on_change=lambda e: setattr(self.settings, "color_preset", e.control.value),
+            on_select=lambda e: setattr(self.settings, "color_preset", e.control.value),
         )
 
         font_dropdown = ft.Dropdown(
@@ -384,7 +384,7 @@ class SettingsDialog:
             width=250,
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
-            on_change=lambda e: setattr(self.settings, "font_preset", e.control.value),
+            on_select=lambda e: setattr(self.settings, "font_preset", e.control.value),
         )
 
         return _padded_column(
