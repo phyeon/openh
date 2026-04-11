@@ -1280,7 +1280,11 @@ def input_area(
     )
 
     return ft.Container(
-        content=box,
+        content=ft.Container(
+            content=box,
+            width=theme.MESSAGE_MAX_WIDTH,
+        ),
+        alignment=ft.Alignment(0, 0),
         padding=ft.padding.only(
             left=theme.PADDING_GUTTER,
             right=theme.PADDING_GUTTER,
