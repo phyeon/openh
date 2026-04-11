@@ -22,6 +22,7 @@ class ToolUseBlock:
     name: str
     input: dict[str, Any]
     type: Literal["tool_use"] = "tool_use"
+    _raw_part: Any = field(default=None, repr=False)  # preserve provider-specific Part (e.g. Gemini thought_signature)
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
@@ -122,6 +123,7 @@ class ToolUseEnd:
     id: str
     name: str
     input: dict[str, Any]
+    _raw_part: Any = field(default=None, repr=False)
 
 
 @dataclass

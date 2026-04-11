@@ -68,9 +68,13 @@ class GeminiProvider:
                     except Exception:
                         pass
                 elif isinstance(block, ToolUseBlock):
-                    parts.append(
-                        gtypes.Part.from_function_call(name=block.name, args=block.input or {})
-                    )
+                    # Use raw Part if available (preserves thought_signature for Gemini 3.x)
+                    if getattr(block, "_raw_part", None) is not None:
+                        parts.append(block._raw_part)
+                    else:
+                        parts.append(
+                            gtypes.Part.from_function_call(name=block.name, args=block.input or {})
+                        )
                 elif isinstance(block, ToolResultBlock):
                     tool_name = self._lookup_tool_name(messages, block.tool_use_id) or "tool"
                     response_payload = {"content": block.content}
@@ -169,7 +173,7 @@ class GeminiProvider:
                         except Exception:
                             args = {}
                         yield ToolUseStart(id=tool_id, name=fc.name)
-                        yield ToolUseEnd(id=tool_id, name=fc.name, input=args)
+                        yield ToolUseEnd(id=tool_id, name=fc.name, input=args, _raw_part=part)
 
         if emitted_tool_use and not emitted_text:
             stop_reason = "tool_use"
