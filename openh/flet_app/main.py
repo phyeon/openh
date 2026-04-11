@@ -1180,32 +1180,51 @@ class OpenHApp:
     def _append_streaming_text(self, delta: str) -> None:
         if self._stream_message_widget is None:
             self._stream_text_buf = []
-            self._stream_message_widget = widgets.assistant_message("…")
+            # Create a bare Markdown for streaming (no retry wrapper)
+            self._stream_md = ft.Markdown(
+                "…",
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                selectable=True,
+                code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
+            )
+            self._stream_message_widget = ft.Container(
+                content=self._stream_md,
+                margin=ft.margin.only(top=12, bottom=4, right=40),
+                padding=ft.padding.only(left=4),
+            )
             self.message_column.controls.append(self._stream_message_widget)
             self._update_messages()
         self._stream_text_buf.append(delta)
         joined = "".join(self._stream_text_buf)
         try:
-            md = self._stream_message_widget.content
-            md.value = joined
-            md.update()
+            self._stream_md.value = joined
+            self._stream_md.update()
         except Exception:
-            try:
-                self._stream_message_widget.update()
-            except Exception:
-                pass
+            pass
         self._scroll_to_end()
 
     def _finalize_streaming_message(self) -> None:
         if self._stream_message_widget is not None:
-            text = "".join(self._stream_text_buf).strip()
+            text = "".join(getattr(self, "_stream_text_buf", [])).strip()
+            try:
+                idx = self.message_column.controls.index(self._stream_message_widget)
+            except ValueError:
+                idx = -1
             if not text:
-                try:
-                    self.message_column.controls.remove(self._stream_message_widget)
+                if idx >= 0:
+                    self.message_column.controls.pop(idx)
                     self._update_messages()
-                except ValueError:
-                    pass
+            elif idx >= 0:
+                # Replace bare streaming widget with full assistant_message (with retry)
+                msg_idx = len(self.session.messages) - 1
+                self.message_column.controls[idx] = widgets.assistant_message(
+                    text,
+                    on_retry=self._on_retry_message,
+                    msg_index=msg_idx,
+                )
+                self._update_messages()
             self._stream_message_widget = None
+            self._stream_md = None
             self._stream_text_buf = []
 
     async def _ask_permission(self, tool_name: str, input_dict: dict[str, Any]) -> bool:
