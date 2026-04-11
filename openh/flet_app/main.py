@@ -189,13 +189,10 @@ class OpenHApp:
         self._refresh_top_bar()
 
         # --- message column ---
-        # A trailing spacer is appended so the last message sits well above
-        # the input box when scrolled to the bottom.
-        self.message_column = ft.ListView(
+        self.message_column = ft.Column(
             spacing=0,
-            auto_scroll=True,
+            scroll=ft.ScrollMode.AUTO,
             expand=True,
-            padding=ft.padding.only(bottom=48),
         )
         self._show_welcome()
 
@@ -1228,10 +1225,10 @@ class OpenHApp:
             self._scroll_to_end()
 
     def _append_to_messages(self, widget: ft.Control) -> None:
-        """Append widget and flush. ListView auto_scroll handles position."""
+        """Append widget and flush."""
         self.message_column.controls.append(widget)
         try:
-            self.page.update()
+            self.message_column.update()
         except Exception:
             pass
 
@@ -1264,7 +1261,7 @@ class OpenHApp:
 
     async def _scroll_to_end_async(self) -> None:
         try:
-            await self.message_column.scroll_to(offset=999999, duration=0)
+            await self.message_column.scroll_to(offset=-1, duration=300)
         except Exception:
             pass
 
