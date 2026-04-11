@@ -409,8 +409,17 @@ class OpenHApp:
             pinned = [m for m in self._session_metas if m.starred]
             if pinned:
                 pinned.sort(key=lambda m: -m.mtime)
+                def _session_title(m):
+                    t = m.title or "Untitled"
+                    pid = getattr(m, "profile_id", "default")
+                    if pid != "default":
+                        p = get_profile(pid)
+                        if p:
+                            t = f"{p.icon} {t}"
+                    return t
+
                 groups_by_name["Pinned"] = [
-                    (m.session_id, m.title or "Untitled", project_display(m.cwd), m.starred, m.hidden)
+                    (m.session_id, _session_title(m), project_display(m.cwd), m.starred, m.hidden)
                     for m in pinned
                 ]
             pinned_ids = {m.session_id for m in pinned}
@@ -418,7 +427,7 @@ class OpenHApp:
             for gname, items in grouped.items():
                 sorted_items = sorted(items, key=lambda m: -m.mtime)
                 entries = [
-                    (m.session_id, m.title or "Untitled", project_display(m.cwd), m.starred, m.hidden)
+                    (m.session_id, _session_title(m), project_display(m.cwd), m.starred, m.hidden)
                     for m in sorted_items if m.session_id not in pinned_ids
                 ]
                 if entries:
@@ -2174,7 +2183,7 @@ class OpenHApp:
             self._set_runtime_cwd(target_cwd, save=False)
         self.session.prompt_override = metadata.get("prompt_override", "")
         self.session.profile_id = metadata.get("profile_id", "default")
-        # Restore profile state: regenerate system prompt + extra tools
+        # Restore profile state: regenerate system prompt + extra tools + theme
         restored_profile = get_profile(self.session.profile_id)
         if restored_profile is not None and self.session.profile_id != "default":
             if restored_profile.system_prompt_fn:
@@ -2192,6 +2201,17 @@ class OpenHApp:
                                 self.session.tools.append(t)
                 except Exception:
                     pass
+            # Apply profile theme
+            if restored_profile.color_preset:
+                theme.set_color_preset(restored_profile.color_preset)
+                self.page.bgcolor = theme.BG_PAGE
+        else:
+            # Non-profile session → restore default theme
+            from ..settings import load_settings
+            _s = load_settings()
+            _cp = getattr(_s, "color_preset", "Claude")
+            theme.set_color_preset(_cp)
+            self.page.bgcolor = theme.BG_PAGE
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = metadata.get("title") or target.title or ""
         self._current_title = self.session.title or target.title or ""
@@ -2200,17 +2220,21 @@ class OpenHApp:
         # Point JSONL writer at the resumed session (append new turns)
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         self._jsonl_written_count = len(self.session.messages)
-        # Re-render
+        # Full rebuild for theme change + re-render messages
+        self._rebuild_ui_after_theme_change()
         self._stop_welcome_wordmark_animation()
-        self.message_column.controls.clear()
         self._welcome_widget = None
         self._welcome_wordmark_host = None
         self._welcome_wordmark_letters = []
         self._stream_message_widget = None
+        self.message_column.controls.clear()
         if messages:
             self._replay_messages_all()
         else:
-            self._show_welcome()
+            if restored_profile and self.session.profile_id != "default":
+                self._show_profile_welcome(restored_profile)
+            else:
+                self._show_welcome()
         self._refresh_top_bar()
         self._refresh_status_bar()
         self._refresh_input()

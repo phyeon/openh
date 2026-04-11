@@ -186,7 +186,7 @@ register(ProfileSpec(
     default_cwd=str(WIFI_REPO),
     system_prompt_fn=_build_fnd_system_prompt,
     extra_tools_fn=lambda: __import__("openh.tools", fromlist=["fnd_extra_tools"]).fnd_extra_tools(),
-    accent_color="#d4a857",
+    accent_color="#ff2a8f",
     color_preset="Fruits & Dessert",
     placeholder="\uc5b4\ub5a4 \uc7a5\ube44\ub97c \uad00\ucc30\ud560\uae4c\uc694?",
     subtitle="ESP32 \u00b7 nRF52840 \u00b7 Pi5 \u00b7 RTL8812BU",

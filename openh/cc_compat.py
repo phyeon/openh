@@ -366,6 +366,7 @@ class CCSessionMeta:
     title: str = ""         # derived from first user turn (best-effort)
     starred: bool = False
     hidden: bool = False
+    profile_id: str = "default"
 
     def date_group(self, now: float | None = None) -> str:
         import time
@@ -393,6 +394,7 @@ def list_sessions_for_cwd(cwd: str) -> list[CCSessionMeta]:
             continue
         # Peek title from first user message (expensive but only at listing time)
         title = _peek_title(p)
+        pid = _peek_profile_id(p)
         metas.append(
             CCSessionMeta(
                 session_id=p.stem,
@@ -401,6 +403,7 @@ def list_sessions_for_cwd(cwd: str) -> list[CCSessionMeta]:
                 mtime=stat.st_mtime,
                 size=stat.st_size,
                 title=title,
+                profile_id=pid,
             )
         )
     metas.sort(key=lambda m: m.mtime, reverse=True)
@@ -509,6 +512,22 @@ def _unhash_project_dir_name(name: str) -> str:
     return "/" + "/".join(name.lstrip("-").split("-"))
 
 
+def _peek_profile_id(path: Path) -> str:
+    """Read __meta__ lines to find profile_id. Returns 'default' if not found."""
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "__meta__" and obj.get("profile_id"):
+                    return obj["profile_id"]
+    except OSError:
+        pass
+    return "default"
+
+
 def _peek_title(path: Path) -> str:
     """Read user text messages and return the first real one as a title.
 
@@ -528,8 +547,9 @@ def _peek_title(path: Path) -> str:
                 except json.JSONDecodeError:
                     continue
                 # Explicit title metadata (written by rename) — last one wins
-                if obj.get("type") == "__meta__" and obj.get("title"):
-                    explicit_title = obj["title"][:70]
+                if obj.get("type") == "__meta__":
+                    if obj.get("title"):
+                        explicit_title = obj["title"][:70]
                     continue
                 if first_user_title or obj.get("type") != "user":
                     continue

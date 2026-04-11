@@ -370,37 +370,37 @@ _register_preset("Slate",
 )
 
 # 11. Fruits & Dessert
-# Dark: 금박 엘레강스 — 딥 다크 초콜릿 + 앤틱 골드. 고급 디저트 부티크.
+# Dark: strawberry dashboard 감성 — 딥 네이비 + 네온 핑크/시안/퍼플.
 # Light: 딸기 과즙 — 피치 크림 + 스트로베리 핑크. 따뜻하고 상큼.
 _FND_DARK = Tokens(
-    BG_SIDEBAR="#e01a1610",
-    BG_DEEPEST="#0e0c08",
-    BG_PAGE="#1a1610",
-    BG_ELEVATED="#262014",
-    BG_HOVER="#302a1e",
-    BG_SIDEBAR_SELECTED="#24200e",
-    BG_STATUS="#0e0c08",
-    TEXT_PRIMARY="#f4e8d0",
-    TEXT_SECONDARY="#b8a888",
-    TEXT_TERTIARY="#7a6e58",
-    TEXT_DISABLED="#4a4030",
-    TEXT_ON_ACCENT="#1a1610",
-    ACCENT="#d4a857",
-    ACCENT_DARK="#b8923e",
-    ACCENT_HOVER="#e4c47a",
-    ACCENT_PRESSED="#9a7a2c",
-    ACCENT_FAINT="#1e1a0e",
-    BORDER_FAINT="#2a2418",
-    BORDER_SUBTLE="#3a3020",
-    BORDER_STRONG="#4a4030",
-    ERROR="#e86050",
-    WARN="#d4a050",
-    SUCCESS="#6ab860",
-    TOOL_CALL_BG="#1e1a10",
-    TOOL_CALL_BORDER="#302818",
-    TOOL_RESULT_BG="#1a160e",
-    TOOL_RESULT_BORDER="#282014",
-    ERROR_BG="#2a1410",
+    BG_SIDEBAR="#e00a0e1a",     # straw --bg with alpha
+    BG_DEEPEST="#070a13",       # straw --bg2
+    BG_PAGE="#0a0e1a",          # straw --bg
+    BG_ELEVATED="#111726",      # straw --card
+    BG_HOVER="#1a2235",         # straw --card2
+    BG_SIDEBAR_SELECTED="#1a2040",
+    BG_STATUS="#070a13",
+    TEXT_PRIMARY="#e5ebff",      # straw --text
+    TEXT_SECONDARY="#8a95b8",    # straw --dim
+    TEXT_TERTIARY="#566580",     # straw --gray
+    TEXT_DISABLED="#3a4560",
+    TEXT_ON_ACCENT="#0a0e1a",
+    ACCENT="#ff2a8f",           # straw --pink (네온 핑크!)
+    ACCENT_DARK="#e0207a",
+    ACCENT_HOVER="#ff6ab5",     # straw --pink2
+    ACCENT_PRESSED="#cc1870",
+    ACCENT_FAINT="#1a0c18",
+    BORDER_FAINT="#2a3656",     # straw --border
+    BORDER_SUBTLE="#3a4a6a",
+    BORDER_STRONG="#4a5a7a",
+    ERROR="#ff3366",            # straw --red
+    WARN="#ffa94d",             # straw --orange
+    SUCCESS="#22ff88",          # straw --green
+    TOOL_CALL_BG="#0e1220",
+    TOOL_CALL_BORDER="#2a3656",
+    TOOL_RESULT_BG="#0a0e18",
+    TOOL_RESULT_BORDER="#1a2240",
+    ERROR_BG="#1a0a10",
 )
 _FND_LIGHT = Tokens(
     BG_SIDEBAR="#e8fef4f0",
