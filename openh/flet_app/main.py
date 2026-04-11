@@ -543,8 +543,6 @@ class OpenHApp:
         self._scroll_to_end()
 
     def _open_settings(self) -> None:
-        if self._busy:
-            return
         dialog = SettingsDialog(
             page=self.page,
             current=self.settings,
@@ -1389,7 +1387,13 @@ class OpenHApp:
             self._stream_md.update()
         except Exception:
             pass
-        self._scroll_to_end()
+        # Throttled scroll: only scroll every ~500ms during streaming
+        import time
+        now = time.monotonic()
+        last = getattr(self, "_last_stream_scroll", 0.0)
+        if now - last > 0.5:
+            self._last_stream_scroll = now
+            self._scroll_to_end()
 
     def _finalize_streaming_message(self) -> None:
         if self._stream_message_widget is not None:

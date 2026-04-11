@@ -134,14 +134,28 @@ class GeminiProvider:
         emitted_tool_use = False
         emitted_text = False
 
-        try:
-            stream = await self._client.aio.models.generate_content_stream(
-                model=self.model,
-                contents=contents,
-                config=config,
-            )
-        except Exception as exc:  # noqa: BLE001
-            yield TextDelta(text=f"[gemini error: {exc}]")
+        # Retry on transient errors (503, 429, etc.)
+        import asyncio as _aio
+        stream = None
+        for _attempt in range(3):
+            try:
+                stream = await self._client.aio.models.generate_content_stream(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                err_str = str(exc)
+                if _attempt < 2 and ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "overloaded" in err_str.lower()):
+                    yield TextDelta(text=f"[retrying ({_attempt+1}/3)… {err_str[:80]}]\n")
+                    await _aio.sleep(2 ** (_attempt + 1))
+                    continue
+                yield TextDelta(text=f"[gemini error: {exc}]")
+                yield Usage(input_tokens=0, output_tokens=0)
+                yield MessageStop(stop_reason="error")
+                return
+        if stream is None:
             yield Usage(input_tokens=0, output_tokens=0)
             yield MessageStop(stop_reason="error")
             return
