@@ -45,7 +45,6 @@ from ..cc_compat import (
     new_session_uuid,
     apply_flags,
     read_session_jsonl,
-    read_session_meta,
     save_session_meta,
     session_jsonl_path,
     set_session_flag,
@@ -1498,13 +1497,12 @@ class OpenHApp:
         self.session.messages = messages
         self.session.read_files.clear()
         self.session.always_allow.clear()
-        # Restore persisted token counts
-        meta = read_session_meta(target.path)
-        self.session.total_input_tokens = meta.get("total_input_tokens", 0)
-        self.session.total_output_tokens = meta.get("total_output_tokens", 0)
-        if meta.get("session_cwd"):
-            self.session.cwd = meta["session_cwd"]
-        self.session.prompt_override = meta.get("prompt_override", "")
+        # Restore persisted state from metadata (includes __meta__ fields)
+        self.session.total_input_tokens = metadata.get("total_input_tokens", 0)
+        self.session.total_output_tokens = metadata.get("total_output_tokens", 0)
+        if metadata.get("session_cwd"):
+            self.session.cwd = metadata["session_cwd"]
+        self.session.prompt_override = metadata.get("prompt_override", "")
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = target.title or ""
         self._current_title = target.title or ""
@@ -1582,7 +1580,26 @@ class OpenHApp:
                 session_cwd=self.session.cwd,
                 prompt_override=self.session.prompt_override or None,
             )
-            self._session_metas = apply_flags(list_all_recent_sessions())
+            # Update current session in the cached meta list (no full rescan)
+            import time as _t
+            found = False
+            for i, m in enumerate(self._session_metas):
+                if m.session_id == self.session.session_id:
+                    self._session_metas[i] = CCSessionMeta(
+                        session_id=m.session_id, path=m.path, cwd=self.session.cwd,
+                        mtime=_t.time(), size=m.size,
+                        title=self._current_title or m.title,
+                        starred=m.starred, hidden=m.hidden,
+                    )
+                    found = True
+                    break
+            if not found:
+                p = session_jsonl_path(self.session.cwd, self.session.session_id)
+                self._session_metas.insert(0, CCSessionMeta(
+                    session_id=self.session.session_id, path=p, cwd=self.session.cwd,
+                    mtime=_t.time(), size=0,
+                    title=self._current_title or "",
+                ))
             self._refresh_sidebar()
         except Exception:
             pass

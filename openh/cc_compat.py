@@ -320,6 +320,13 @@ def read_session_jsonl(path: Path) -> tuple[list[Message], dict[str, Any]]:
             if "gitBranch" in obj:
                 metadata["gitBranch"] = obj["gitBranch"]
 
+            if entry_type == "__meta__":
+                # Merge __meta__ fields into metadata (last wins)
+                for k, v in obj.items():
+                    if k != "type":
+                        metadata[k] = v
+                continue
+
             if entry_type in ("user", "assistant"):
                 msg_field = obj.get("message") or {}
                 role = msg_field.get("role")
