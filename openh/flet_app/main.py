@@ -1,0 +1,1320 @@
+"""Flet desktop chat app — Claude.app-style GUI on top of openh's backend.
+
+Layout:
+  ┌──────────┬──────────────────────────────────────┐
+  │ sidebar  │  top bar (model pill + tokens)      │
+  │          ├──────────────────────────────────────┤
+  │ new chat │                                      │
+  │ recents  │    scrollable messages column        │
+  │          │    (centered, max 760px wide)        │
+  │ profile  │                                      │
+  │          │    ┌────────────────────────────┐   │
+  │          │    │   rounded input box        │   │
+  │          │    │   [+]                [↑]   │   │
+  │          │    └────────────────────────────┘   │
+  └──────────┴──────────────────────────────────────┘
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import flet as ft
+
+from ..agent import Agent
+from ..commands import CommandContext, CommandDispatcher
+from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
+from .. import prompts as prompts_mod
+from ..settings import Settings, load_settings, save_settings
+from .settings_dialog import SettingsDialog
+from ..messages import (
+    MessageStop,
+    StreamEvent,
+    TextDelta,
+    ToolResultEvent,
+    ToolUseEnd,
+    ToolUseStart,
+    Usage,
+)
+from ..cc_compat import (
+    CCSessionMeta,
+    JsonlSessionWriter,
+    ensure_project_dirs,
+    group_sessions,
+    list_all_recent_sessions,
+    list_sessions_for_cwd,
+    new_session_uuid,
+    apply_flags,
+    read_session_jsonl,
+    session_jsonl_path,
+    set_session_flag,
+)
+# Keep old persistence module for backward compat (no longer used)
+SessionMeta = CCSessionMeta
+from ..providers import get_provider
+from ..session import AgentSession
+from ..tools import default_tools
+from . import theme, widgets
+from .permission_dialog import PermissionDialog
+
+
+class OpenHApp:
+    def __init__(self, page: ft.Page) -> None:
+        self.page = page
+        self.config = load_config()
+        self.settings: Settings = load_settings()
+
+        # Apply persisted model choice onto the config (before constructing provider)
+        if self.settings.anthropic_model:
+            self.config = type(self.config)(
+                anthropic_api_key=self.config.anthropic_api_key,
+                gemini_api_key=self.config.gemini_api_key,
+                anthropic_model=self.settings.anthropic_model,
+                gemini_model=self.settings.gemini_model,
+                cwd=self.config.cwd,
+            )
+
+        if not self.config.anthropic_api_key and not self.config.gemini_api_key:
+            page.add(
+                widgets.error_panel(
+                    "No API keys found in /Users/hyeon/Projects/.env. "
+                    "Set ANTHROPIC_API_KEY and/or GEMINI_API_KEY."
+                )
+            )
+            return
+
+        # Prefer the persisted provider if its key is available
+        initial = self.settings.active_provider
+        if initial == "anthropic" and not self.config.anthropic_api_key:
+            initial = "gemini"
+        elif initial == "gemini" and not self.config.gemini_api_key:
+            initial = "anthropic"
+        try:
+            provider = get_provider(initial, self.config)
+        except Exception as exc:  # noqa: BLE001
+            page.add(widgets.error_panel(f"Failed to start provider {initial}: {exc}"))
+            return
+
+        import time
+        sid = new_session_uuid()
+        self.session = AgentSession(
+            config=self.config,
+            provider=provider,
+            tools=default_tools(),
+            session_id=sid,
+            title="",
+            created_at=time.time(),
+        )
+        ensure_project_dirs(self.config.cwd)
+        self._jsonl_writer = JsonlSessionWriter(self.config.cwd, sid)
+        # Load MCP tools asynchronously
+        self._mcp_loaded = False
+        self.permission_dialog = PermissionDialog(page)
+        self._busy = False
+        self._skip_permissions = self.settings.skip_permissions
+        self._file_picker = ft.FilePicker()
+        self._dispatcher = CommandDispatcher()
+        self._window_initialized = False
+
+        # Apply persisted theme
+        import openh.flet_app.theme as theme_mod
+        theme_mod.set_mode(self.settings.theme_mode if self.settings.theme_mode in ("dark", "light") else "dark")
+
+        # Sidebar state
+        self._sidebar_visible = True
+        self._sidebar_width: float = float(self.settings.sidebar_width or theme.SIDEBAR_WIDTH)
+        self._sidebar_width_min = 200.0
+        self._sidebar_width_max = 500.0
+
+        # All recent sessions across every project dir (flat, newest first)
+        self._session_metas: list[CCSessionMeta] = apply_flags(list_all_recent_sessions())
+        self._current_title = ""
+
+        # Streaming state
+        self._stream_text_buf: list[str] = []
+        self._stream_message_widget: ft.Container | None = None
+        self._welcome_widget: ft.Container | None = None
+
+        self._build_ui()
+
+    # ---------------- UI scaffolding ----------------
+
+    def _build_ui(self) -> None:
+        self.page.title = "openh"
+        self.page.bgcolor = theme.BG_PAGE
+        self.page.padding = 0
+        self.page.theme_mode = ft.ThemeMode.DARK if theme.is_dark() else ft.ThemeMode.LIGHT
+        self.page.theme = ft.Theme(
+            color_scheme_seed=theme.ACCENT,
+            font_family=theme.FONT_SANS,
+        )
+        # Set window size ONLY on the very first build. Rebuilds (e.g. theme
+        # toggle) must not touch user-controlled window geometry.
+        if not self._window_initialized:
+            self.page.window.width = self.settings.window_width
+            self.page.window.height = self.settings.window_height
+            self.page.window.min_width = 760
+            self.page.window.min_height = 540
+            self.page.window.on_event = self._on_window_event
+            self._window_initialized = True
+
+        # --- sidebar ---
+        self.sidebar_holder = ft.Container()
+        self._refresh_sidebar()
+
+        # --- top bar ---
+        self.top_bar_holder = ft.Container()
+        self._refresh_top_bar()
+
+        # --- message column ---
+        self.message_column = ft.Column(
+            spacing=0,
+            tight=False,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            controls=[],
+        )
+        self._show_welcome()
+
+        # Centered message container (max 760px wide)
+        message_area = ft.Container(
+            content=ft.Container(
+                content=self.message_column,
+                width=theme.MESSAGE_MAX_WIDTH,
+            ),
+            alignment=ft.Alignment(0, -1),  # top center
+            padding=ft.padding.only(
+                left=theme.PADDING_GUTTER,
+                right=theme.PADDING_GUTTER,
+                bottom=80,  # breathing room above input
+            ),
+            expand=True,
+        )
+
+        # --- input ---
+        self.input_field = ft.TextField(
+            hint_text="Reply to openh…",
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=15),
+            text_style=ft.TextStyle(
+                color=theme.TEXT_PRIMARY,
+                size=15,
+                font_family=theme.FONT_SANS,
+            ),
+            border=ft.InputBorder.NONE,
+            filled=False,
+            multiline=True,
+            min_lines=1,
+            max_lines=10,
+            shift_enter=True,
+            on_submit=self._on_submit,
+            autofocus=True,
+            content_padding=ft.padding.only(top=4, bottom=4),
+            cursor_color=theme.ACCENT,
+        )
+        self.input_holder = ft.Container()
+        self._refresh_input()
+
+        # --- bottom status bar ---
+        self.status_bar_holder = ft.Container()
+        self._refresh_status_bar()
+
+        # --- assemble main column (top bar + messages + input) ---
+        main_col = ft.Container(
+            content=ft.Column(
+                [
+                    self.top_bar_holder,
+                    message_area,
+                    self.input_holder,
+                ],
+                spacing=0,
+                expand=True,
+            ),
+            expand=True,
+            bgcolor=theme.BG_PAGE,
+        )
+
+        # --- resize handle for the sidebar ---
+        # Thin vertical bar wrapped in a GestureDetector listening for
+        # horizontal drags. Fixed width so the hit area is always 6px wide.
+        # We keep a reference so it can be hidden when the sidebar collapses.
+        self._resize_handle = ft.GestureDetector(
+            content=ft.Container(
+                width=6,
+                bgcolor=theme.BORDER_FAINT,
+            ),
+            drag_interval=10,
+            on_horizontal_drag_update=self._on_sidebar_drag,
+            on_horizontal_drag_end=self._flush_sidebar_width,
+            mouse_cursor=ft.MouseCursor.RESIZE_LEFT_RIGHT,
+            visible=self._sidebar_visible,
+        )
+        resize_handle = self._resize_handle
+
+        # --- file picker (Service, must be registered before first use) ---
+        self.page.services.append(self._file_picker)
+
+        # --- full layout: (sidebar | handle | main) + bottom status bar ---
+        self.page.add(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.sidebar_holder,
+                            resize_handle,
+                            main_col,
+                        ],
+                        spacing=0,
+                        expand=True,
+                        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+                    ),
+                    self.status_bar_holder,
+                ],
+                spacing=0,
+                expand=True,
+            )
+        )
+
+        self.page.on_keyboard_event = self._on_key
+
+        # Load MCP tools in the background
+        if not self._mcp_loaded:
+            self.page.run_task(self._load_mcp_tools_async)
+
+    async def _load_mcp_tools_async(self) -> None:
+        if self._mcp_loaded:
+            return
+        self._mcp_loaded = True
+        try:
+            from ..mcp import build_mcp_tools
+            tools = await build_mcp_tools()
+            if tools:
+                self.session.tools.extend(tools)
+                self.message_column.controls.append(
+                    widgets.system_note(f"loaded {len(tools)} MCP tool(s)")
+                )
+                self.message_column.update()
+        except Exception:
+            pass
+
+    # ---------------- refreshers ----------------
+
+    def _refresh_sidebar(self) -> None:
+        if self._sidebar_visible:
+            import os
+            from pathlib import Path
+            groups_by_name: dict[str, list[tuple[str, str, str, bool, bool]]] = {}
+            grouped = group_sessions(self._session_metas)
+
+            def project_display(cwd: str) -> str:
+                if not cwd:
+                    return ""
+                p = Path(cwd)
+                parts = p.parts
+                if len(parts) >= 2:
+                    return ".../" + "/".join(parts[-2:])
+                return str(p)
+
+            for gname, items in grouped.items():
+                # Starred first within each group
+                sorted_items = sorted(items, key=lambda m: (not m.starred, -m.mtime))
+                groups_by_name[gname] = [
+                    (
+                        m.session_id,
+                        m.title or "Untitled",
+                        project_display(m.cwd),
+                        m.starred,
+                        m.hidden,
+                    )
+                    for m in sorted_items
+                ]
+            bar = widgets.sidebar(
+                groups=groups_by_name,
+                active_session_id=self.session.session_id,
+                on_new_chat=self._new_chat,
+                on_select=self._select_session,
+                on_delete=self._delete_session_by_id,
+                on_star=self._toggle_star,
+                on_hide=self._toggle_hide,
+                show_hidden=getattr(self, "_show_hidden", False),
+                width=int(self._sidebar_width),
+            )
+        else:
+            bar = ft.Container(width=0)
+        self.sidebar_holder.content = bar
+        try:
+            self.sidebar_holder.update()
+        except Exception:
+            pass
+
+    def _on_sidebar_drag(self, e) -> None:
+        if not self._sidebar_visible:
+            return
+        # Flet 0.84: DragUpdateEvent exposes `primary_delta` (main axis)
+        # and `local_delta` / `global_delta` (Offset with x, y).
+        delta = float(getattr(e, "primary_delta", 0.0) or 0.0)
+        if delta == 0.0:
+            ld = getattr(e, "local_delta", None)
+            if ld is not None:
+                delta = float(getattr(ld, "x", 0.0) or 0.0)
+        if delta == 0.0:
+            return
+        new_w = self._sidebar_width + delta
+        if new_w < self._sidebar_width_min:
+            new_w = self._sidebar_width_min
+        elif new_w > self._sidebar_width_max:
+            new_w = self._sidebar_width_max
+        if abs(new_w - self._sidebar_width) < 0.5:
+            return
+        self._sidebar_width = new_w
+        self.sidebar_holder.width = new_w
+        # Also resize the widget inside the holder if it has its own width
+        inner = self.sidebar_holder.content
+        if inner is not None and hasattr(inner, "width"):
+            try:
+                inner.width = new_w
+            except Exception:
+                pass
+        try:
+            self.sidebar_holder.update()
+        except Exception:
+            pass
+        # Mark dirty; actual save happens on drag-end (see below).
+        self.settings.sidebar_width = int(new_w)
+        self._sidebar_width_dirty = True
+
+    def _flush_sidebar_width(self, e=None) -> None:
+        if getattr(self, "_sidebar_width_dirty", False):
+            self._sidebar_width_dirty = False
+            try:
+                save_settings(self.settings)
+            except Exception:
+                pass
+
+    def _on_window_event(self, e) -> None:
+        try:
+            event_type = getattr(e, "data", "") or getattr(e, "type", "") or str(e)
+            w = int(self.page.window.width or 0)
+            h = int(self.page.window.height or 0)
+            if w > 100 and h > 100:
+                changed = (w != self.settings.window_width or h != self.settings.window_height)
+                if changed:
+                    self.settings.window_width = w
+                    self.settings.window_height = h
+                    save_settings(self.settings)
+        except Exception:
+            pass
+
+    def _get_system_prompt(self) -> str:
+        """Return the effective system prompt.
+
+        Priority: settings.active_prompt preset > env var / ~/.openh/system_prompt.md > built-in.
+        """
+        active = (self.settings.active_prompt or "").strip()
+        if active and active.lower() != prompts_mod.BUILTIN_NAME:
+            preset = prompts_mod.get_preset(active)
+            if preset is not None and preset.text.strip():
+                return preset.text
+        return load_system_prompt()
+
+    def _refresh_top_bar(self, note: str = "") -> None:
+        bar = widgets.top_bar(
+            title=self._current_title or "New chat",
+            on_toggle_sidebar=self._toggle_sidebar,
+            on_rename=self._open_rename_dialog,
+            on_toggle_theme=self._toggle_theme,
+            on_open_settings=self._open_settings,
+            busy_note=note,
+        )
+        self.top_bar_holder.content = bar
+        try:
+            self.top_bar_holder.update()
+        except Exception:
+            pass
+
+    def _refresh_status_bar(self) -> None:
+        model = getattr(self.session.provider, "model", "")
+        # Last turn's input_tokens approximates current context size
+        context_tokens = self.session.last_input_tokens if hasattr(self.session, "last_input_tokens") else 0
+        # Context limit per model
+        ctx_limits = {
+            "claude-opus-4-6": 1_000_000, "claude-opus-4": 200_000,
+            "claude-sonnet-4-6": 1_000_000, "claude-sonnet-4-5": 200_000,
+            "claude-sonnet-4": 200_000, "claude-haiku-4-5": 200_000,
+            "claude-haiku-4": 200_000,
+            "gemini-3.1-pro-preview": 1_000_000, "gemini-2.5-pro": 1_000_000,
+            "gemini-2.5-flash": 1_000_000, "gemini-2.0-flash": 1_000_000,
+            "gemini-2.0-flash-exp": 1_000_000,
+        }
+        context_limit = ctx_limits.get(model, 200_000)
+        bar = widgets.bottom_status_bar(
+            cwd=self.session.cwd,
+            in_tokens=self.session.total_input_tokens,
+            out_tokens=self.session.total_output_tokens,
+            model=model,
+            context_tokens=context_tokens,
+            context_limit=context_limit,
+        )
+        self.status_bar_holder.content = bar
+        try:
+            self.status_bar_holder.update()
+        except Exception:
+            pass
+
+    def _refresh_input(self) -> None:
+        pending = getattr(self, "_pending_media", None) or []
+        box = widgets.input_area(
+            input_field=self.input_field,
+            on_send=lambda: self._on_submit(None),
+            on_attach=self._on_attach,
+            on_toggle_permissions=self._toggle_permissions,
+            on_pick_model=self._pick_model,
+            provider_name=self.session.provider.name,
+            model=self.session.provider.model,
+            skip_permissions=self._skip_permissions,
+            busy=self._busy,
+            attachments=[(i, type(b).__name__, getattr(b, "data_base64", "")) for i, b in enumerate(pending)],
+            on_remove_attachment=self._remove_attachment,
+        )
+        self.input_holder.content = box
+        try:
+            self.input_holder.update()
+        except Exception:
+            pass
+
+    def _pick_model(self, provider_name: str, model: str) -> None:
+        """Called when the user picks a specific provider+model from the dropdown."""
+        if self._busy:
+            return
+        # Update settings
+        self.settings.active_provider = provider_name
+        if provider_name == "anthropic":
+            self.settings.anthropic_model = model
+        else:
+            self.settings.gemini_model = model
+
+        # Rebuild config + provider
+        new_config = type(self.config)(
+            anthropic_api_key=self.config.anthropic_api_key,
+            gemini_api_key=self.config.gemini_api_key,
+            anthropic_model=self.settings.anthropic_model,
+            gemini_model=self.settings.gemini_model,
+            cwd=self.config.cwd,
+        )
+        self.config = new_config
+        self.session.config = new_config
+        try:
+            new_provider = get_provider(provider_name, self.config)
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"can't switch: {exc}")
+            )
+            self.message_column.update()
+            return
+        self.session.switch_provider(new_provider)
+        save_settings(self.settings)
+        self._refresh_top_bar()
+        self._refresh_input()
+        self.message_column.controls.append(
+            widgets.system_note(f"switched to {provider_name}:{model}")
+        )
+        self.message_column.update()
+        self._scroll_to_end()
+
+    def _open_settings(self) -> None:
+        if self._busy:
+            return
+        dialog = SettingsDialog(
+            page=self.page,
+            current=self.settings,
+            on_save=self._apply_settings,
+            session=self.session,
+        )
+        dialog.open()
+
+    def _apply_settings(self, new_settings: Settings) -> None:
+        """Called when the user clicks Save in the SettingsDialog."""
+        old_provider = self.settings.active_provider
+        old_anth = self.settings.anthropic_model
+        old_gem = self.settings.gemini_model
+
+        self.settings = new_settings
+        self._skip_permissions = new_settings.skip_permissions
+
+        # Update Config + reload provider if model changed
+        new_config = type(self.config)(
+            anthropic_api_key=self.config.anthropic_api_key,
+            gemini_api_key=self.config.gemini_api_key,
+            anthropic_model=new_settings.anthropic_model,
+            gemini_model=new_settings.gemini_model,
+            cwd=self.config.cwd,
+        )
+        self.config = new_config
+        self.session.config = new_config
+
+        provider_needs_reload = (
+            new_settings.active_provider != old_provider
+            or (new_settings.active_provider == "anthropic" and new_settings.anthropic_model != old_anth)
+            or (new_settings.active_provider == "gemini" and new_settings.gemini_model != old_gem)
+        )
+        if provider_needs_reload:
+            try:
+                new_provider = get_provider(new_settings.active_provider, self.config)
+                self.session.switch_provider(new_provider)
+            except Exception as exc:  # noqa: BLE001
+                self.message_column.controls.append(
+                    widgets.error_panel(f"provider reload failed: {exc}")
+                )
+                self.message_column.update()
+
+        # Propagate the new auto-compact threshold globally
+        import openh.config as cfg_mod
+        cfg_mod.AUTO_COMPACT_THRESHOLD = int(new_settings.auto_compact_threshold)
+        cfg_mod.MAX_OUTPUT_TOKENS = int(new_settings.max_output_tokens)
+
+        save_settings(self.settings)
+        self._refresh_top_bar()
+        self._refresh_input()
+        self._refresh_status_bar()
+        self.message_column.controls.append(
+            widgets.system_note("settings saved")
+        )
+        self.message_column.update()
+
+    def _toggle_sidebar(self) -> None:
+        self._sidebar_visible = not self._sidebar_visible
+        if hasattr(self, "_resize_handle") and self._resize_handle is not None:
+            self._resize_handle.visible = self._sidebar_visible
+            try:
+                self._resize_handle.update()
+            except Exception:
+                pass
+        self._refresh_sidebar()
+
+    def _toggle_permissions(self) -> None:
+        self._skip_permissions = not self._skip_permissions
+        self._refresh_input()
+
+    def _toggle_theme(self) -> None:
+        theme.set_mode("light" if theme.is_dark() else "dark")
+        self.settings.theme_mode = "dark" if theme.is_dark() else "light"
+        save_settings(self.settings)
+        self.page.theme_mode = ft.ThemeMode.DARK if theme.is_dark() else ft.ThemeMode.LIGHT
+        self.page.bgcolor = theme.BG_PAGE
+        # Re-render everything that reads theme tokens
+        self._rebuild_ui_after_theme_change()
+
+    def _rebuild_ui_after_theme_change(self) -> None:
+        """Full page rebuild after toggling the theme."""
+        self.page.controls.clear()
+        self._welcome_widget = None
+        self._stream_message_widget = None
+        self._build_ui()
+        if self.session.messages:
+            self._hide_welcome()
+            for msg in self.session.messages:
+                self._replay_message(msg)
+            try:
+                self.message_column.update()
+            except Exception:
+                pass
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _replay_message(self, msg) -> None:
+        from ..messages import TextBlock, ToolResultBlock, ToolUseBlock
+        if msg.role == "user":
+            text_parts = []
+            for b in msg.content:
+                if isinstance(b, TextBlock):
+                    # Skip system context injections
+                    if b.text.strip().startswith("<environment>"):
+                        continue
+                    text_parts.append(b.text)
+                elif isinstance(b, ToolResultBlock):
+                    self.message_column.controls.append(
+                        widgets.tool_result_panel(b.content, is_error=b.is_error)
+                    )
+            if text_parts:
+                self.message_column.controls.append(widgets.user_bubble("\n".join(text_parts)))
+        else:
+            text_parts = []
+            for b in msg.content:
+                if isinstance(b, TextBlock):
+                    # Skip the synthetic ack for system context
+                    if b.text.strip() == "Acknowledged. Ready to help.":
+                        continue
+                    text_parts.append(b.text)
+                elif isinstance(b, ToolUseBlock):
+                    if text_parts:
+                        self.message_column.controls.append(
+                            widgets.assistant_message("".join(text_parts))
+                        )
+                        text_parts = []
+                    self.message_column.controls.append(
+                        widgets.tool_call_panel(b.name, b.input)
+                    )
+            if text_parts:
+                self.message_column.controls.append(
+                    widgets.assistant_message("".join(text_parts))
+                )
+
+    def _open_rename_dialog(self) -> None:
+        field = ft.TextField(
+            value=self._current_title,
+            autofocus=True,
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=14),
+            on_submit=lambda e: (self._apply_rename(field.value or ""), self.page.pop_dialog()),
+        )
+        dialog = ft.AlertDialog(
+            modal=True,
+            bgcolor=theme.BG_ELEVATED,
+            title=ft.Text("Rename conversation", color=theme.TEXT_PRIMARY, size=16),
+            content=ft.Container(content=field, width=480),
+            actions=[
+                ft.TextButton(
+                    content=ft.Text("Cancel", color=theme.TEXT_SECONDARY, size=13),
+                    on_click=lambda e: self.page.pop_dialog(),
+                ),
+                ft.FilledButton(
+                    content=ft.Text("Save", color=theme.TEXT_ON_ACCENT, size=13, weight=ft.FontWeight.W_600),
+                    on_click=lambda e: (self._apply_rename(field.value or ""), self.page.pop_dialog()),
+                    style=ft.ButtonStyle(bgcolor=theme.ACCENT, color=theme.TEXT_ON_ACCENT),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.show_dialog(dialog)
+
+    def _apply_rename(self, new_title: str) -> None:
+        new_title = new_title.strip()
+        if not new_title:
+            return
+        self._current_title = new_title
+        # Update sidebar meta
+        for m in self._session_metas:
+            if m.session_id == self.session.session_id:
+                m.title = new_title
+                break
+        # Persist title to JSONL
+        from ..cc_compat import save_session_title, session_jsonl_path
+        try:
+            p = session_jsonl_path(self.session.cwd, self.session.session_id)
+            save_session_title(p, new_title)
+        except Exception:
+            pass
+        self._refresh_top_bar()
+        self._refresh_sidebar()
+
+    def _show_welcome(self) -> None:
+        if self._welcome_widget is None:
+            self._welcome_widget = widgets.welcome_screen(
+                cwd=self.session.cwd,
+                on_change_cwd=self._change_workspace,
+            )
+            self.message_column.controls.append(self._welcome_widget)
+
+    def _change_workspace(self) -> None:
+        self.page.run_task(self._change_workspace_async)
+
+    async def _change_workspace_async(self) -> None:
+        import os
+        result = await self._file_picker.get_directory_path(
+            dialog_title="Select workspace",
+        )
+        if result:
+            os.chdir(result)
+            self.session.cwd = result
+            # Rebuild welcome to show new cwd
+            self._welcome_widget = None
+            self.message_column.controls.clear()
+            self._show_welcome()
+            self.message_column.update()
+            self._refresh_status_bar()
+
+    def _hide_welcome(self) -> None:
+        if self._welcome_widget is not None:
+            try:
+                self.message_column.controls.remove(self._welcome_widget)
+            except ValueError:
+                pass
+            self._welcome_widget = None
+            try:
+                self.message_column.update()
+            except Exception:
+                pass
+
+    # ---------------- handlers ----------------
+
+    def _on_key(self, e: ft.KeyboardEvent) -> None:
+        if e.meta and e.key == "M":
+            self._switch_model()
+        elif e.meta and e.key == "L":
+            self._new_chat()
+        elif e.meta and e.key == "V":
+            self.page.run_task(self._paste_image_async)
+
+    async def _paste_image_async(self) -> None:
+        """Handle Ctrl/Cmd+V — check for clipboard image."""
+        try:
+            if not hasattr(self, "_clipboard"):
+                self._clipboard = ft.Clipboard()
+                self.page.services.append(self._clipboard)
+                self.page.update()
+            img_bytes = await self._clipboard.get_image()
+            if not img_bytes:
+                return  # No image in clipboard, let normal paste happen
+            import base64
+            from ..messages import ImageBlock
+            b64 = base64.b64encode(img_bytes).decode()
+            if not hasattr(self, "_pending_media"):
+                self._pending_media = []
+            self._pending_media.append(ImageBlock(data_base64=b64, media_type="image/png"))
+            self._refresh_input()
+        except Exception:
+            pass  # No image, normal paste proceeds
+
+    def _build_command_ctx(self) -> CommandContext:
+        def switch_to(target: str) -> None:
+            try:
+                new_provider = get_provider(target, self.config)
+                self.session.switch_provider(new_provider)
+                self._refresh_top_bar()
+                self._refresh_input()
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(str(exc))
+
+        def set_title(new_title: str) -> None:
+            self._current_title = new_title
+            self._refresh_top_bar()
+
+        def compact_now() -> None:
+            self.page.run_task(self._compact_now_async)
+
+        def init_claude_md() -> None:
+            self.page.run_task(self._init_claude_md_async)
+
+        return CommandContext(
+            session=self.session,
+            on_clear=self._new_chat,
+            on_switch_model=switch_to,
+            on_toggle_theme=self._toggle_theme,
+            on_compact_now=compact_now,
+            on_init=init_claude_md,
+            set_title=set_title,
+        )
+
+    async def _compact_now_async(self) -> None:
+        from ..compaction import compact_messages
+        if self._busy or not self.session.messages:
+            return
+        self._busy = True
+        self._refresh_top_bar(note="compacting…")
+        try:
+            self.session.messages = await compact_messages(
+                self.session.messages, self.session.provider
+            )
+            self.message_column.controls.clear()
+            self._welcome_widget = None
+            self._stream_message_widget = None
+            for msg in self.session.messages:
+                self._replay_message(msg)
+            self.message_column.update()
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"compact failed: {exc}")
+            )
+            self.message_column.update()
+        finally:
+            self._busy = False
+            self._refresh_top_bar()
+            self._refresh_input()
+            self._autosave()
+
+    async def _init_claude_md_async(self) -> None:
+        from pathlib import Path
+        target = Path(self.session.cwd) / "CLAUDE.md"
+        if target.exists():
+            self.message_column.controls.append(
+                widgets.system_note(f"{target} already exists")
+            )
+            self.message_column.update()
+            return
+        template = _STARTER_CLAUDE_MD
+        try:
+            target.write_text(template, encoding="utf-8")
+            self.session.read_files.add(str(target.resolve()))
+            self.message_column.controls.append(
+                widgets.system_note(f"created {target}")
+            )
+        except OSError as exc:
+            self.message_column.controls.append(
+                widgets.error_panel(f"failed: {exc}")
+            )
+        self.message_column.update()
+
+    def _on_submit(self, e) -> None:
+        text = (self.input_field.value or "").strip()
+        if not text or self._busy:
+            return
+        self.input_field.value = ""
+        self.input_field.update()
+
+        # Slash command handling — do not send to the model.
+        if text.startswith("/"):
+            result = self._dispatcher.dispatch(text, self._build_command_ctx())
+            if result is not None and result.handled:
+                if result.output:
+                    self._hide_welcome()
+                    self.message_column.controls.append(
+                        widgets.system_note(result.output)
+                    )
+                    self.message_column.update()
+                    self._scroll_to_end()
+                return
+
+        self._hide_welcome()
+        # Inject system context (cwd + memory) on the first user turn
+        if not self.session.messages:
+            from ..memory import build_system_context
+            from datetime import date
+            from ..messages import Message, TextBlock
+            ctx = build_system_context(self.session.cwd, date.today().isoformat())
+            if ctx.strip():
+                self.session.messages.append(
+                    Message(role="user", content=[TextBlock(text=ctx)])
+                )
+                self.session.messages.append(
+                    Message(role="assistant", content=[TextBlock(text="Acknowledged. Ready to help.")])
+                )
+        self.message_column.controls.append(widgets.user_bubble(text))
+        self.message_column.update()
+        self._scroll_to_end()
+
+        pending_media = getattr(self, "_pending_media", None) or []
+        if pending_media:
+            self._pending_media = []  # type: ignore[attr-defined]
+            self.page.run_task(self._run_turn_with_media_async, text, pending_media)
+        else:
+            self.page.run_task(self._run_turn_async, text)
+
+    async def _run_turn_with_media_async(self, user_text: str, media_blocks: list) -> None:
+        """Like _run_turn_async but first injects image/document blocks on the user message."""
+        from ..messages import Message, TextBlock
+        # Append user message with media + text
+        content = list(media_blocks) + [TextBlock(text=user_text)]
+        self.session.messages.append(Message(role="user", content=content))
+
+        # Now run the loop manually (skip the append inside Agent.run_turn by
+        # calling a bypass method). Simpler: invoke the agent loop but with
+        # an empty user_text — we already appended. Easiest: replicate the loop.
+        self._busy = True
+        self._refresh_input()
+        self._refresh_top_bar(note="thinking…")
+
+        agent = Agent(
+            session=self.session,
+            system_prompt=self._get_system_prompt(),
+            event_sink=self._handle_stream_event,
+            permission_cb=self._ask_permission,
+        )
+        try:
+            await agent._drive_loop()  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"{type(exc).__name__}: {exc}")
+            )
+            self.message_column.update()
+        finally:
+            self._finalize_streaming_message()
+            self._busy = False
+            self._refresh_input()
+            self._refresh_top_bar()
+            self._refresh_status_bar()
+            self._autosave()
+            self._focus_input()
+            self._scroll_to_end()
+
+    def _scroll_to_end(self) -> None:
+        """Fire-and-forget scroll. `Column.scroll_to` is async in Flet 0.84."""
+        try:
+            self.page.run_task(self._scroll_to_end_async)
+        except Exception:
+            pass
+
+    async def _scroll_to_end_async(self) -> None:
+        try:
+            await self.message_column.scroll_to(offset=-1, duration=300)
+        except Exception:
+            pass
+
+    def _focus_input(self) -> None:
+        """Fire-and-forget focus. `TextField.focus` is async in Flet 0.84."""
+        try:
+            self.page.run_task(self._focus_input_async)
+        except Exception:
+            pass
+
+    async def _focus_input_async(self) -> None:
+        try:
+            await self.input_field.focus()
+        except Exception:
+            pass
+
+    async def _run_turn_async(self, user_text: str) -> None:
+        self._busy = True
+        self._refresh_input()
+        self._refresh_top_bar(note="thinking…")
+
+        agent = Agent(
+            session=self.session,
+            system_prompt=self._get_system_prompt(),
+            event_sink=self._handle_stream_event,
+            permission_cb=self._ask_permission,
+        )
+        # Auto-set title from first user message if not yet set
+        if not self._current_title:
+            self._current_title = user_text[:60]
+            self._refresh_top_bar(note="thinking…")
+
+        try:
+            await agent.run_turn(user_text)
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"{type(exc).__name__}: {exc}")
+            )
+            self.message_column.update()
+        finally:
+            self._finalize_streaming_message()
+            self._busy = False
+            self._refresh_input()
+            self._refresh_top_bar()
+            self._refresh_status_bar()
+            self._autosave()
+            self._focus_input()
+            self._scroll_to_end()
+
+    async def _handle_stream_event(self, event: StreamEvent) -> None:
+        if isinstance(event, TextDelta):
+            self._append_streaming_text(event.text)
+        elif isinstance(event, ToolUseStart):
+            self._finalize_streaming_message()
+        elif isinstance(event, ToolUseEnd):
+            self.message_column.controls.append(
+                widgets.tool_call_panel(event.name, event.input)
+            )
+            self.message_column.update()
+            self._scroll_to_end()
+        elif isinstance(event, ToolResultEvent):
+            self.message_column.controls.append(
+                widgets.tool_result_panel(event.content, is_error=event.is_error)
+            )
+            self.message_column.update()
+            self._scroll_to_end()
+        elif isinstance(event, Usage):
+            self._refresh_top_bar(note="thinking…")
+        elif isinstance(event, MessageStop):
+            self._finalize_streaming_message()
+
+    def _append_streaming_text(self, delta: str) -> None:
+        if self._stream_message_widget is None:
+            self._stream_text_buf = []
+            self._stream_message_widget = widgets.assistant_message("…")
+            self.message_column.controls.append(self._stream_message_widget)
+            self.message_column.update()
+        self._stream_text_buf.append(delta)
+        joined = "".join(self._stream_text_buf)
+        try:
+            md = self._stream_message_widget.content
+            md.value = joined
+            md.update()
+        except Exception:
+            try:
+                self._stream_message_widget.update()
+            except Exception:
+                pass
+        self._scroll_to_end()
+
+    def _finalize_streaming_message(self) -> None:
+        if self._stream_message_widget is not None:
+            text = "".join(self._stream_text_buf).strip()
+            if not text:
+                try:
+                    self.message_column.controls.remove(self._stream_message_widget)
+                    self.message_column.update()
+                except ValueError:
+                    pass
+            self._stream_message_widget = None
+            self._stream_text_buf = []
+
+    async def _ask_permission(self, tool_name: str, input_dict: dict[str, Any]) -> bool:
+        if self._skip_permissions:
+            return True
+        if (tool_name, "*") in self.session.always_allow:
+            return True
+        decision = await self.permission_dialog.ask(tool_name, input_dict)
+        if decision == "always":
+            self.session.always_allow.add((tool_name, "*"))
+            return True
+        return decision == "allow"
+
+    def _switch_model(self) -> None:
+        if self._busy:
+            return
+        current = self.session.provider.name
+        target = "gemini" if current == "anthropic" else "anthropic"
+        try:
+            new_provider = get_provider(target, self.config)
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"can't switch to {target}: {exc}")
+            )
+            self.message_column.update()
+            return
+        self.session.switch_provider(new_provider)
+        self._refresh_top_bar()
+        self._refresh_input()
+        self.message_column.controls.append(
+            widgets.system_note(f"switched to {target}:{new_provider.model}")
+        )
+        self.message_column.update()
+        self._scroll_to_end()
+
+    def _new_chat(self) -> None:
+        if self._busy:
+            return
+        import time
+        self.session.messages.clear()
+        self.session.read_files.clear()
+        self.session.always_allow.clear()
+        self.session.total_input_tokens = 0
+        self.session.total_output_tokens = 0
+        self.session.session_id = new_session_uuid()
+        self.session.created_at = time.time()
+        self.session.title = ""
+        self._current_title = ""
+        # New JSONL writer for the new session
+        self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
+        self._jsonl_written_count = 0
+        self.message_column.controls.clear()
+        self._stream_message_widget = None
+        self._welcome_widget = None
+        self._show_welcome()
+        self.message_column.update()
+        self._refresh_top_bar()
+        self._refresh_status_bar()
+        self._refresh_input()
+        self._refresh_sidebar()
+
+    def _select_session(self, session_id: str) -> None:
+        if self._busy:
+            return
+        target = next((m for m in self._session_metas if m.session_id == session_id), None)
+        if target is None:
+            return
+        try:
+            messages, metadata = read_session_jsonl(target.path)
+        except Exception as exc:  # noqa: BLE001
+            self.message_column.controls.append(
+                widgets.error_panel(f"failed to load session: {exc}")
+            )
+            self.message_column.update()
+            return
+        self.session.messages = messages
+        self.session.read_files.clear()
+        self.session.always_allow.clear()
+        self.session.total_input_tokens = 0
+        self.session.total_output_tokens = 0
+        self.session.session_id = metadata.get("session_id") or session_id
+        self.session.title = target.title or ""
+        self._current_title = target.title or ""
+        # Point JSONL writer at the resumed session (append new turns)
+        self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
+        # Re-render
+        self.message_column.controls.clear()
+        self._welcome_widget = None
+        self._stream_message_widget = None
+        if messages:
+            for msg in messages:
+                self._replay_message(msg)
+        else:
+            self._show_welcome()
+        self.message_column.update()
+        self._refresh_top_bar()
+        self._refresh_status_bar()
+        self._refresh_input()
+        self._refresh_sidebar()
+
+    def _delete_session_by_id(self, session_id: str) -> None:
+        if self._busy:
+            return
+        target = next((m for m in self._session_metas if m.session_id == session_id), None)
+        if target is None:
+            return
+        try:
+            target.path.unlink()
+        except OSError:
+            pass
+        self._session_metas = [m for m in self._session_metas if m.session_id != session_id]
+        if self.session.session_id == session_id:
+            self._new_chat()
+        else:
+            self._refresh_sidebar()
+
+    def _toggle_star(self, session_id: str) -> None:
+        target = next((m for m in self._session_metas if m.session_id == session_id), None)
+        if target is None:
+            return
+        new_val = not target.starred
+        target.starred = new_val
+        set_session_flag(session_id, starred=new_val)
+        self._refresh_sidebar()
+
+    def _toggle_hide(self, session_id: str) -> None:
+        target = next((m for m in self._session_metas if m.session_id == session_id), None)
+        if target is None:
+            return
+        new_val = not target.hidden
+        target.hidden = new_val
+        set_session_flag(session_id, hidden=new_val)
+        self._refresh_sidebar()
+
+    def _autosave(self) -> None:
+        """Append the last turn (user + assistant) to the JSONL session file."""
+        if not self.session.messages:
+            return
+        try:
+            # Append whichever messages haven't been written yet.
+            n_written = getattr(self, "_jsonl_written_count", 0)
+            for msg in self.session.messages[n_written:]:
+                if msg.role == "user":
+                    self._jsonl_writer.append_user(msg)
+                else:
+                    self._jsonl_writer.append_assistant(msg)
+            self._jsonl_written_count = len(self.session.messages)
+            self._session_metas = apply_flags(list_all_recent_sessions())
+            self._refresh_sidebar()
+        except Exception:
+            pass
+
+    def _remove_attachment(self, idx: int) -> None:
+        pending = getattr(self, "_pending_media", None) or []
+        if 0 <= idx < len(pending):
+            pending.pop(idx)
+            self._pending_media = pending
+        self._refresh_input()
+
+    def _on_attach(self) -> None:
+        self.page.run_task(self._on_attach_async)
+
+    async def _on_attach_async(self) -> None:
+        files = await self._file_picker.pick_files(allow_multiple=True)
+        if not files:
+            return
+        self._process_picked_files(files)
+
+    def _process_picked_files(self, files: list) -> None:
+        import base64
+        from pathlib import Path
+        from ..messages import DocumentBlock, ImageBlock
+
+        text_blocks: list[str] = []
+        pending_media: list = []  # (ImageBlock|DocumentBlock, filename)
+
+        for f in files:
+            try:
+                p = Path(f.path) if f.path else None
+                if p is None or not p.exists():
+                    continue
+                ext = p.suffix.lower().lstrip(".")
+                size = p.stat().st_size
+
+                # Image?
+                image_exts = {"png", "jpg", "jpeg", "gif", "webp"}
+                if ext in image_exts:
+                    if size > 10 * 1024 * 1024:
+                        text_blocks.append(f"[{p.name} skipped: >10MB image]")
+                        continue
+                    raw = p.read_bytes()
+                    media_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
+                    pending_media.append(
+                        (ImageBlock(data_base64=base64.b64encode(raw).decode(), media_type=media_type), p.name)
+                    )
+                    continue
+
+                # PDF?
+                if ext == "pdf":
+                    if size > 20 * 1024 * 1024:
+                        text_blocks.append(f"[{p.name} skipped: >20MB pdf]")
+                        continue
+                    raw = p.read_bytes()
+                    pending_media.append(
+                        (DocumentBlock(data_base64=base64.b64encode(raw).decode()), p.name)
+                    )
+                    continue
+
+                # Text fallback
+                if size > 500_000:
+                    text_blocks.append(f"[{p.name} skipped: >500KB]")
+                    continue
+                content = p.read_text(encoding="utf-8", errors="replace")
+                if len(content) > 50_000:
+                    content = content[:50_000] + "\n…(truncated)"
+                text_blocks.append(f"### {p}\n\n```\n{content}\n```")
+                self.session.read_files.add(str(p.resolve()))
+            except Exception as exc:  # noqa: BLE001
+                text_blocks.append(f"[error attaching {f.name}: {exc}]")
+
+        # Queue media for the NEXT submit (stored until _on_submit)
+        if pending_media:
+            if not hasattr(self, "_pending_media"):
+                self._pending_media = []  # type: ignore[attr-defined]
+            for block, name in pending_media:
+                self._pending_media.append(block)  # type: ignore[attr-defined]
+
+        if text_blocks:
+            current = self.input_field.value or ""
+            # Only add non-attachment text (file contents)
+            file_texts = [t for t in text_blocks if not t.startswith("[attached:")]
+            if file_texts:
+                header = "\n\n".join(file_texts)
+                self.input_field.value = f"{header}\n\n{current}"
+                self.input_field.update()
+        self._refresh_input()
+        self._focus_input()
+
+
+_STARTER_CLAUDE_MD = """# Project memory
+
+This file is automatically loaded by openh when it starts a session in this
+directory or any subdirectory. Add project-specific guidance for the assistant
+here — build commands, code style rules, architectural conventions, known
+caveats, etc.
+
+## Build & test commands
+- How to run tests:
+- How to run the linter/typechecker:
+- How to start the dev server:
+
+## Code style
+- (note any unusual conventions here)
+
+## Architecture
+- (high-level map of important modules)
+
+## Known issues / gotchas
+- (things the assistant should watch out for)
+"""
+
+
+def main() -> None:
+    def target(page: ft.Page) -> None:
+        OpenHApp(page)
+
+    ft.app(target=target)
+
+
+if __name__ == "__main__":
+    main()

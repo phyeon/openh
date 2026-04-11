@@ -1,0 +1,69 @@
+"""Glob tool — find files by pattern."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, ClassVar
+
+from .base import PermissionDecision, Tool, ToolContext
+
+MAX_RESULTS = 100
+
+
+class GlobTool(Tool):
+    name: ClassVar[str] = "Glob"
+    description: ClassVar[str] = (
+        "Find files matching a glob pattern (e.g. `**/*.py`, `src/**/*.tsx`). "
+        "Returns up to 100 paths sorted by modification time, newest first. "
+        "If `path` is omitted, searches the current working directory."
+    )
+    input_schema: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "Glob pattern."},
+            "path": {
+                "type": "string",
+                "description": "Directory to search in. Optional, defaults to cwd.",
+            },
+        },
+        "required": ["pattern"],
+    }
+    is_read_only: ClassVar[bool] = True
+
+    async def check_permissions(
+        self, input: dict[str, Any], ctx: ToolContext
+    ) -> PermissionDecision:
+        return PermissionDecision(behavior="allow")
+
+    async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
+        pattern = input.get("pattern")
+        if not pattern:
+            return "error: pattern is required"
+        base = Path(input.get("path") or ctx.session.cwd)
+        if not base.exists():
+            return f"error: path does not exist: {base}"
+        if not base.is_dir():
+            return f"error: path is not a directory: {base}"
+
+        try:
+            matches = list(base.glob(pattern))
+        except (ValueError, OSError) as exc:
+            return f"error: glob failed: {exc}"
+
+        # Filter to files only and sort by mtime desc
+        files = [p for p in matches if p.is_file()]
+        try:
+            files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            pass
+
+        truncated = files[:MAX_RESULTS]
+        if not truncated:
+            return f"no files matched {pattern} under {base}"
+
+        out = "\n".join(str(p) for p in truncated)
+        suffix = (
+            f"\n\n(showing {len(truncated)} of {len(files)} matches)"
+            if len(files) > MAX_RESULTS
+            else ""
+        )
+        return out + suffix

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openh"
+version = "0.1.0"
+description = "Terminal chat GUI for Claude and Gemini, with Claude Code-style tools"
+requires-python = ">=3.12"
+dependencies = [
+    "textual>=0.80",
+    "flet>=0.84",
+    "anthropic>=0.40",
+    "google-genai>=0.3",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+]
+
+[project.scripts]
+openh = "openh.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["openh*"]
