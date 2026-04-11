@@ -9,10 +9,19 @@ from .base import Provider, ToolSchema
 
 __all__ = ["Provider", "ToolSchema", "get_provider", "PROVIDER_NAMES"]
 
-PROVIDER_NAMES = ("anthropic", "gemini")
+PROVIDER_NAMES = ("openai", "anthropic", "gemini")
 
 
 def get_provider(name: str, config: Config) -> Provider:
+    if name == "openai":
+        try:
+            from .openai import OpenAIProvider
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("OpenAI SDK not installed. Reinstall dependencies first.") from exc
+
+        if not config.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY not set")
+        return OpenAIProvider(api_key=config.openai_api_key, model=config.openai_model)
     if name == "anthropic":
         if not config.anthropic_api_key:
             raise RuntimeError("ANTHROPIC_API_KEY not set")

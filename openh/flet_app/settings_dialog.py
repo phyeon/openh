@@ -1,7 +1,7 @@
 """Settings dialog — runtime configuration UI.
 
 Sections:
-  1. Models (dropdowns for Anthropic + Gemini)
+  1. Models (dropdowns for OpenAI + Anthropic + Gemini)
   2. API keys (masked fields; writes to /Users/hyeon/Projects/.env)
   3. Tokens (max_output_tokens, auto_compact_threshold)
   4. Agents (subagent_parallel)
@@ -15,7 +15,7 @@ from typing import Callable
 import flet as ft
 
 from .. import prompts, settings as settings_mod
-from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, Settings
+from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
 from . import theme
 
 
@@ -191,11 +191,22 @@ class SettingsDialog:
             value=self.settings.active_provider,
             content=ft.Row(
                 [
+                    ft.Radio(value="openai", label="OpenAI"),
                     ft.Radio(value="anthropic", label="Anthropic"),
                     ft.Radio(value="gemini", label="Gemini"),
                 ],
                 spacing=16,
             ),
+        )
+
+        self._openai_dropdown = ft.Dropdown(
+            value=self.settings.openai_model,
+            options=[ft.dropdown.Option(m) for m in OPENAI_MODELS],
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            label="OpenAI model",
+            expand=True,
         )
 
         self._anth_dropdown = ft.Dropdown(
@@ -223,6 +234,8 @@ class SettingsDialog:
                 _label("Active provider"),
                 self._provider_radio,
                 ft.Container(height=12),
+                self._openai_dropdown,
+                ft.Container(height=12),
                 self._anth_dropdown,
                 ft.Container(height=12),
                 self._gem_dropdown,
@@ -239,9 +252,22 @@ class SettingsDialog:
     def _tab_keys(self) -> ft.Control:
         import os
 
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
         anth_key = os.environ.get("ANTHROPIC_API_KEY", "")
         gem_key = os.environ.get("GEMINI_API_KEY", "")
 
+        self._openai_key_field = ft.TextField(
+            value=openai_key,
+            password=True,
+            can_reveal_password=True,
+            label="OPENAI_API_KEY",
+            hint_text="sk-proj-…",
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12, font_family=theme.FONT_MONO),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
+        )
         self._anth_key_field = ft.TextField(
             value=anth_key,
             password=True,
@@ -267,6 +293,8 @@ class SettingsDialog:
             hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
         )
 
+        status_openai = ("●  OPENAI_API_KEY is currently set" if openai_key
+                         else "○  OPENAI_API_KEY is NOT set")
         status_anth = ("●  ANTHROPIC_API_KEY is currently set" if anth_key
                        else "○  ANTHROPIC_API_KEY is NOT set")
         status_gem = ("●  GEMINI_API_KEY is currently set" if gem_key
@@ -275,8 +303,11 @@ class SettingsDialog:
         return _padded_column(
             [
                 _label("API keys"),
+                ft.Text(status_openai, color=theme.SUCCESS if openai_key else theme.WARN, size=11),
                 ft.Text(status_anth, color=theme.SUCCESS if anth_key else theme.WARN, size=11),
                 ft.Text(status_gem, color=theme.SUCCESS if gem_key else theme.WARN, size=11),
+                ft.Container(height=10),
+                self._openai_key_field,
                 ft.Container(height=10),
                 self._anth_key_field,
                 ft.Container(height=10),
@@ -409,6 +440,20 @@ class SettingsDialog:
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             on_select=self._on_font_preset_change,
         )
+        self._font_size_label = ft.Text(
+            f"{self.settings.font_size}px",
+            color=theme.TEXT_SECONDARY, size=12, width=36,
+        )
+        font_size_slider = ft.Slider(
+            min=12, max=24, divisions=12,
+            value=self.settings.font_size,
+            label="{value}px",
+            active_color=theme.ACCENT,
+            inactive_color=theme.BORDER_SUBTLE,
+            on_change=self._on_font_size_change,
+            width=200,
+        )
+
         self._appearance_preview = ft.Container()
         self._refresh_appearance_preview()
 
@@ -424,6 +469,18 @@ class SettingsDialog:
                 ft.Container(height=16),
                 _label("Font"),
                 font_dropdown,
+                ft.Container(height=12),
+                _label("Font size"),
+                ft.Row(
+                    [
+                        ft.Text("12", color=theme.TEXT_TERTIARY, size=11),
+                        font_size_slider,
+                        ft.Text("24", color=theme.TEXT_TERTIARY, size=11),
+                        self._font_size_label,
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Container(height=16),
                 _label("Preview"),
                 self._appearance_preview,
@@ -462,6 +519,15 @@ class SettingsDialog:
         self.settings.font_preset = e.control.value or self.settings.font_preset
         self._refresh_appearance_preview()
 
+    def _on_font_size_change(self, e) -> None:
+        self.settings.font_size = int(e.control.value)
+        self._font_size_label.value = f"{self.settings.font_size}px"
+        try:
+            self._font_size_label.update()
+        except Exception:
+            pass
+        self._refresh_appearance_preview()
+
     def _refresh_appearance_preview(self) -> None:
         from . import theme as theme_mod
 
@@ -492,105 +558,114 @@ class SettingsDialog:
     def _appearance_preview_card(self, title: str, tokens) -> ft.Container:
         from . import theme as theme_mod
 
-        sans_font, mono_font = theme_mod.FONT_PRESETS.get(
+        preset = theme_mod.FONT_PRESETS.get(
             self.settings.font_preset,
             theme_mod.FONT_PRESETS["System (Sans)"],
+        )
+        sans_font = preset["sans"]
+        sans_fb = list(preset.get("sans_fallback", []))
+        mono_font = preset["mono"]
+        mono_fb = list(preset.get("mono_fallback", []))
+        sz = self.settings.font_size
+
+        # --- user bubble (right-aligned) ---
+        user_bubble = ft.Container(
+            content=ft.Text(
+                "이건 내가 보낸 메시지야",
+                color=tokens.TEXT_PRIMARY,
+                size=sz,
+                font_family=sans_font,
+                font_family_fallback=sans_fb,
+            ),
+            bgcolor=tokens.BG_ELEVATED,
+            padding=ft.padding.symmetric(horizontal=16, vertical=12),
+            border_radius=theme.RADIUS_LG,
+        )
+
+        # --- assistant response ---
+        assistant_text = ft.Text(
+            "그렇구나. 뭐든 편하게 얘기해, 여기서 같이 정리하자.",
+            color=tokens.TEXT_PRIMARY,
+            size=sz,
+            font_family=sans_font,
+            font_family_fallback=sans_fb,
+            height=1.55,
+        )
+
+        # --- tool call panel ---
+        tool_panel = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "> bash  rg -n \"preview\" settings_dialog.py",
+                        color=tokens.ACCENT,
+                        size=sz - 3,
+                        font_family=mono_font,
+                        font_family_fallback=mono_fb,
+                        weight=ft.FontWeight.W_600,
+                    ),
+                    ft.Text(
+                        "exit_code: 0",
+                        color=tokens.SUCCESS,
+                        size=sz - 4,
+                        font_family=mono_font,
+                        font_family_fallback=mono_fb,
+                    ),
+                ],
+                spacing=3,
+                tight=True,
+            ),
+            border=ft.border.only(left=ft.BorderSide(1, tokens.BORDER_FAINT)),
+            padding=ft.padding.only(left=12, top=2, bottom=2),
+        )
+
+        # --- code block ---
+        code_block = ft.Container(
+            content=ft.Text(
+                "print(\"hello, world\")",
+                color=tokens.TEXT_SECONDARY,
+                size=sz - 3,
+                font_family=mono_font,
+                font_family_fallback=mono_fb,
+            ),
+            bgcolor=tokens.BG_DEEPEST,
+            border=ft.border.all(1, tokens.BORDER_SUBTLE),
+            border_radius=theme.RADIUS_MD,
+            padding=ft.padding.symmetric(horizontal=10, vertical=8),
+        )
+
+        # --- mode badge ---
+        badge = ft.Container(
+            content=ft.Text(
+                title,
+                color=tokens.TEXT_TERTIARY,
+                size=9,
+                font_family=mono_font,
+                weight=ft.FontWeight.W_700,
+            ),
+            bgcolor=tokens.BG_ELEVATED,
+            border_radius=theme.RADIUS_SM,
+            padding=ft.padding.symmetric(horizontal=6, vertical=2),
         )
 
         return ft.Container(
             content=ft.Column(
                 [
                     ft.Row(
-                        [
-                            ft.Text(
-                                title,
-                                color=tokens.TEXT_TERTIARY,
-                                size=10,
-                                font_family=mono_font,
-                                weight=ft.FontWeight.W_700,
-                            ),
-                            ft.Container(expand=True),
-                            ft.Container(width=10, height=10, border_radius=5, bgcolor=tokens.ACCENT),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        [ft.Container(expand=True), badge],
                     ),
-                    ft.Container(height=8),
-                    ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Text(
-                                    "openh",
-                                    color=tokens.TEXT_PRIMARY,
-                                    size=13,
-                                    font_family=sans_font,
-                                    weight=ft.FontWeight.W_700,
-                                ),
-                                ft.Container(expand=True),
-                                ft.Text(
-                                    "thinking...",
-                                    color=tokens.ACCENT,
-                                    size=12,
-                                    font_family=mono_font,
-                                    italic=True,
-                                ),
-                            ],
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        bgcolor=tokens.BG_ELEVATED,
-                        border=ft.border.all(1, tokens.BORDER_FAINT),
-                        border_radius=theme.RADIUS_MD,
-                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    ft.Container(height=6),
+                    # user bubble right-aligned
+                    ft.Row(
+                        [ft.Container(expand=True), user_bubble],
                     ),
                     ft.Container(height=10),
-                    ft.Container(
-                        content=ft.Text(
-                            "방금 보낸 메시지. font / color / contrast를 여기서 바로 본다.",
-                            color=tokens.TEXT_PRIMARY,
-                            size=14,
-                            font_family=sans_font,
-                            weight=ft.FontWeight.W_600,
-                        ),
-                        bgcolor=tokens.BG_ELEVATED,
-                        border_radius=theme.RADIUS_LG,
-                        padding=ft.padding.symmetric(horizontal=12, vertical=10),
-                    ),
+                    # assistant response left-aligned
+                    assistant_text,
                     ft.Container(height=8),
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Text(
-                                    "> 0 bash rg -n \"preview\" settings_dialog.py",
-                                    color=tokens.ACCENT,
-                                    size=12,
-                                    font_family=mono_font,
-                                    weight=ft.FontWeight.W_700,
-                                ),
-                                ft.Text(
-                                    "exit_code: 0",
-                                    color=tokens.SUCCESS,
-                                    size=11,
-                                    font_family=mono_font,
-                                ),
-                            ],
-                            spacing=3,
-                            tight=True,
-                        ),
-                        border=ft.border.only(left=ft.BorderSide(1, tokens.BORDER_FAINT)),
-                        padding=ft.padding.only(left=12, top=2, bottom=2),
-                    ),
+                    tool_panel,
                     ft.Container(height=8),
-                    ft.Container(
-                        content=ft.Text(
-                            "```txt\n코드 블록도 너무 밝지 않게.\n```",
-                            color=tokens.TEXT_SECONDARY,
-                            size=12,
-                            font_family=mono_font,
-                        ),
-                        bgcolor=tokens.BG_DEEPEST,
-                        border=ft.border.all(1, tokens.BORDER_SUBTLE),
-                        border_radius=theme.RADIUS_MD,
-                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
-                    ),
+                    code_block,
                 ],
                 spacing=0,
                 tight=True,
@@ -598,7 +673,7 @@ class SettingsDialog:
             bgcolor=tokens.BG_PAGE,
             border=ft.border.all(1, tokens.BORDER_FAINT),
             border_radius=theme.RADIUS_MD,
-            padding=ft.padding.all(12),
+            padding=ft.padding.all(14),
         )
 
     def _tab_workspace(self) -> ft.Control:
@@ -624,6 +699,7 @@ class SettingsDialog:
                 os.chdir(result)
                 if self._session:
                     self._session.cwd = result
+                self.settings.last_session_cwd = result
                 self._cwd_label.value = result
                 self._cwd_label.update()
 
@@ -995,6 +1071,7 @@ class SettingsDialog:
 
     def _commit_general_fields(self) -> None:
         self.settings.active_provider = self._provider_radio.value or "anthropic"
+        self.settings.openai_model = self._openai_dropdown.value or self.settings.openai_model
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
         self.settings.active_prompt = self._default_preset_name or prompts.BUILTIN_NAME
@@ -1016,33 +1093,42 @@ class SettingsDialog:
         # Persist API keys to .env
         try:
             self._persist_keys(
+                self._openai_key_field.value or "",
                 self._anth_key_field.value or "",
                 self._gem_key_field.value or "",
             )
         except Exception:
             pass
 
-    def _persist_keys(self, anth: str, gem: str) -> None:
-        """Upsert ANTHROPIC_API_KEY / GEMINI_API_KEY into the .env file.
+    def _persist_keys(self, openai: str, anth: str, gem: str) -> None:
+        """Upsert provider API keys into the .env file.
 
         SAFETY: empty values are NEVER written. If the user leaves a field blank,
         the existing value in .env is preserved. This prevents accidental
         destruction of secrets when the dialog is saved without touching them.
         """
+        openai = (openai or "").strip()
         anth = (anth or "").strip()
         gem = (gem or "").strip()
-        if not anth and not gem:
+        if not openai and not anth and not gem:
             return  # nothing to do
         if not self._env_path.exists():
             self._env_path.parent.mkdir(parents=True, exist_ok=True)
             self._env_path.touch()
         lines = self._env_path.read_text(encoding="utf-8").splitlines()
         out: list[str] = []
+        seen_openai = False
         seen_anth = False
         seen_gem = False
         for line in lines:
             stripped = line.strip()
-            if stripped.startswith("ANTHROPIC_API_KEY="):
+            if stripped.startswith("OPENAI_API_KEY="):
+                if openai:
+                    out.append(f"OPENAI_API_KEY={openai}")
+                else:
+                    out.append(line)
+                seen_openai = True
+            elif stripped.startswith("ANTHROPIC_API_KEY="):
                 if anth:
                     out.append(f"ANTHROPIC_API_KEY={anth}")
                 else:
@@ -1056,6 +1142,8 @@ class SettingsDialog:
                 seen_gem = True
             else:
                 out.append(line)
+        if not seen_openai and openai:
+            out.append(f"OPENAI_API_KEY={openai}")
         if not seen_anth and anth:
             out.append(f"ANTHROPIC_API_KEY={anth}")
         if not seen_gem and gem:

@@ -16,6 +16,7 @@ Layout:
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -55,6 +56,7 @@ from ..providers import get_provider
 from ..pricing import estimate_cost_usd
 from ..session import AgentSession
 from ..tools import default_tools
+from ..profiles import get_profile, list_profiles
 from . import theme, widgets
 from .permission_dialog import PermissionDialog
 
@@ -64,32 +66,70 @@ class OpenHApp:
         self.page = page
         self.config = load_config()
         self.settings: Settings = load_settings()
+        preferred_cwd = (self.settings.last_session_cwd or "").strip()
+        if preferred_cwd and Path(preferred_cwd).is_dir():
+            import os
+
+            try:
+                os.chdir(preferred_cwd)
+            except OSError:
+                pass
+            self.config = type(self.config)(
+                openai_api_key=self.config.openai_api_key,
+                anthropic_api_key=self.config.anthropic_api_key,
+                gemini_api_key=self.config.gemini_api_key,
+                openai_model=self.config.openai_model,
+                anthropic_model=self.config.anthropic_model,
+                gemini_model=self.config.gemini_model,
+                cwd=preferred_cwd,
+            )
 
         # Apply persisted model choice onto the config (before constructing provider)
         if self.settings.anthropic_model:
             self.config = type(self.config)(
+                openai_api_key=self.config.openai_api_key,
                 anthropic_api_key=self.config.anthropic_api_key,
                 gemini_api_key=self.config.gemini_api_key,
+                openai_model=self.settings.openai_model,
                 anthropic_model=self.settings.anthropic_model,
                 gemini_model=self.settings.gemini_model,
                 cwd=self.config.cwd,
             )
 
-        if not self.config.anthropic_api_key and not self.config.gemini_api_key:
+        if (
+            not self.config.openai_api_key
+            and not self.config.anthropic_api_key
+            and not self.config.gemini_api_key
+        ):
             page.add(
                 widgets.error_panel(
                     "No API keys found in /Users/hyeon/Projects/.env. "
-                    "Set ANTHROPIC_API_KEY and/or GEMINI_API_KEY."
+                    "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or GEMINI_API_KEY."
                 )
             )
             return
 
         # Prefer the persisted provider if its key is available
         initial = self.settings.active_provider
-        if initial == "anthropic" and not self.config.anthropic_api_key:
-            initial = "gemini"
-        elif initial == "gemini" and not self.config.gemini_api_key:
-            initial = "anthropic"
+        import importlib.util as _importlib_util
+        availability = {
+            "openai": bool(self.config.openai_api_key) and _importlib_util.find_spec("openai") is not None,
+            "anthropic": bool(self.config.anthropic_api_key) and _importlib_util.find_spec("anthropic") is not None,
+            "gemini": bool(self.config.gemini_api_key) and _importlib_util.find_spec("google.genai") is not None,
+        }
+        if not any(availability.values()):
+            page.add(
+                widgets.error_panel(
+                    "API key는 있는데 provider SDK가 없네. "
+                    "의존성 다시 설치하고 올려줘."
+                )
+            )
+            return
+        if not availability.get(initial, False):
+            for candidate in ("openai", "anthropic", "gemini"):
+                if availability.get(candidate):
+                    initial = candidate
+                    break
         try:
             provider = get_provider(initial, self.config)
         except Exception as exc:  # noqa: BLE001
@@ -122,6 +162,7 @@ class OpenHApp:
         import openh.flet_app.theme as theme_mod
         theme_mod.set_color_preset(self.settings.color_preset)
         theme_mod.set_font(self.settings.font_preset)
+        theme_mod.set_font_size(self.settings.font_size)
         theme_mod.set_mode(self.settings.theme_mode if self.settings.theme_mode in ("dark", "light") else "dark")
 
         # Sidebar state
@@ -155,10 +196,13 @@ class OpenHApp:
         self._busy_indicator_letters: list[ft.Text] = []
         self._busy_indicator_task_running = False
         self._busy_indicator_token = 0
+        self._welcome_wordmark_host: ft.Container | None = None
+        self._welcome_wordmark_letters: list[ft.Text] = []
+        self._welcome_wordmark_task_running = False
+        self._welcome_wordmark_should_run = False
 
         self._build_ui()
-        if not self._restore_last_session():
-            self._remember_current_session()
+        self._remember_current_session()
 
     # ---------------- UI scaffolding ----------------
 
@@ -166,6 +210,10 @@ class OpenHApp:
         self.page.title = "openh"
         self.page.bgcolor = theme.BG_PAGE
         self.page.padding = 0
+        self.page.fonts = {
+            "Pretendard": "fonts/Pretendard-Regular.otf",
+            "Noto Serif KR": "fonts/NotoSerifCJKkr-Regular.otf",
+        }
         self.page.theme_mode = ft.ThemeMode.DARK if theme.is_dark() else ft.ThemeMode.LIGHT
         _ts = ft.TextStyle(color=theme.TEXT_PRIMARY)
         self.page.theme = ft.Theme(
@@ -375,6 +423,8 @@ class OpenHApp:
                 ]
                 if entries:
                     groups_by_name[gname] = entries
+            # Collect registered profiles for sidebar buttons
+            profiles = list_profiles()
             bar = widgets.sidebar(
                 groups=groups_by_name,
                 active_session_id=self.session.session_id,
@@ -385,6 +435,8 @@ class OpenHApp:
                 on_hide=self._toggle_hide,
                 show_hidden=getattr(self, "_show_hidden", False),
                 width=int(self._sidebar_width),
+                profiles=profiles,
+                on_new_profile=self._new_profile_chat,
             )
         else:
             bar = ft.Container(width=0)
@@ -532,6 +584,35 @@ class OpenHApp:
         )
         return self._busy_indicator_host
 
+    def _build_welcome_wordmark(self) -> ft.Container:
+        letters: list[ft.Text] = []
+        for ch in "OpenH":
+            letters.append(
+                ft.Text(
+                    ch,
+                    color=theme.ACCENT,
+                    size=32,
+                    weight=ft.FontWeight.W_300,
+                    font_family=theme.FONT_SANS,
+                    opacity=0.84,
+                    offset=ft.Offset(0, 0),
+                    animate_offset=240,
+                    animate_opacity=240,
+                )
+            )
+        self._welcome_wordmark_letters = letters
+        self._welcome_wordmark_host = ft.Container(
+            content=ft.Row(
+                letters,
+                spacing=2,
+                tight=True,
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            animate_opacity=240,
+        )
+        return self._welcome_wordmark_host
+
     def _start_busy_indicator_animation(self) -> None:
         if self._busy_indicator_task_running:
             return
@@ -580,19 +661,71 @@ class OpenHApp:
         finally:
             self._busy_indicator_task_running = False
 
+    def _start_welcome_wordmark_animation(self) -> None:
+        self._welcome_wordmark_should_run = True
+        if self._welcome_wordmark_task_running:
+            return
+        try:
+            self.page.run_task(self._animate_welcome_wordmark)
+        except Exception:
+            pass
+
+    def _stop_welcome_wordmark_animation(self) -> None:
+        self._welcome_wordmark_should_run = False
+        for letter in self._welcome_wordmark_letters:
+            letter.offset = ft.Offset(0, 0)
+            letter.opacity = 0.84
+        if self._welcome_wordmark_host is not None:
+            try:
+                self._welcome_wordmark_host.update()
+            except Exception:
+                pass
+
+    async def _animate_welcome_wordmark(self) -> None:
+        import asyncio
+
+        self._welcome_wordmark_task_running = True
+        try:
+            while self._welcome_wordmark_should_run and self._welcome_widget is not None:
+                letters = self._welcome_wordmark_letters
+                for idx, letter in enumerate(letters):
+                    if not self._welcome_wordmark_should_run or self._welcome_widget is None:
+                        break
+                    for j, other in enumerate(letters):
+                        other.offset = ft.Offset(0, -0.14 if j == idx else 0)
+                        other.opacity = 1.0 if j == idx else 0.72
+                    if self._welcome_wordmark_host is not None:
+                        self._welcome_wordmark_host.update()
+                    await asyncio.sleep(0.11)
+                for letter in letters:
+                    letter.offset = ft.Offset(0, 0)
+                    letter.opacity = 0.84
+                if self._welcome_wordmark_host is not None:
+                    self._welcome_wordmark_host.update()
+                await asyncio.sleep(0.6)
+        except Exception:
+            pass
+        finally:
+            self._welcome_wordmark_task_running = False
+            if self._welcome_wordmark_should_run and self._welcome_widget is not None:
+                self._start_welcome_wordmark_animation()
+
     def _refresh_status_bar(self) -> None:
         model = getattr(self.session.provider, "model", "")
         # Last turn's input_tokens approximates current context size
         context_tokens = self.session.last_input_tokens if hasattr(self.session, "last_input_tokens") else 0
         # Context limit per model
         ctx_limits = {
+            "gpt-5.4": 1_050_000,
+            "gpt-5.4-mini": 400_000,
+            "gpt-5.4-nano": 400_000,
             "claude-opus-4-6": 1_000_000, "claude-opus-4": 200_000,
             "claude-sonnet-4-6": 1_000_000, "claude-sonnet-4-5": 200_000,
             "claude-sonnet-4": 200_000, "claude-haiku-4-5": 200_000,
             "claude-haiku-4": 200_000,
-            "gemini-3.1-pro-preview": 1_000_000, "gemini-2.5-pro": 1_000_000,
-            "gemini-2.5-flash": 1_000_000, "gemini-2.0-flash": 1_000_000,
-            "gemini-2.0-flash-exp": 1_000_000,
+            "gemini-3.1-pro-preview": 1_000_000,
+            "gemini-3-flash-preview": 1_000_000,
+            "gemini-2.5-flash": 1_000_000,
         }
         context_limit = ctx_limits.get(model, 200_000)
         bar = widgets.bottom_status_bar(
@@ -685,6 +818,35 @@ class OpenHApp:
         except Exception:
             pass
 
+    def _set_runtime_cwd(self, cwd: str, *, save: bool = True) -> None:
+        target = str(Path(cwd).expanduser())
+        if not target or not Path(target).is_dir():
+            return
+        import os
+
+        try:
+            os.chdir(target)
+        except OSError:
+            pass
+        self.session.cwd = target
+        self.config = type(self.config)(
+            openai_api_key=self.config.openai_api_key,
+            anthropic_api_key=self.config.anthropic_api_key,
+            gemini_api_key=self.config.gemini_api_key,
+            openai_model=self.settings.openai_model,
+            anthropic_model=self.settings.anthropic_model,
+            gemini_model=self.settings.gemini_model,
+            cwd=target,
+        )
+        self.session.config = self.config
+        ensure_project_dirs(target)
+        self.settings.last_session_cwd = target
+        if save:
+            try:
+                save_settings(self.settings)
+            except Exception:
+                pass
+
     def _restore_last_session(self) -> bool:
         last_session_id = (getattr(self.settings, "last_session_id", "") or "").strip()
         if not last_session_id:
@@ -700,15 +862,19 @@ class OpenHApp:
             return
         # Update settings
         self.settings.active_provider = provider_name
-        if provider_name == "anthropic":
+        if provider_name == "openai":
+            self.settings.openai_model = model
+        elif provider_name == "anthropic":
             self.settings.anthropic_model = model
         else:
             self.settings.gemini_model = model
 
         # Rebuild config + provider
         new_config = type(self.config)(
+            openai_api_key=self.config.openai_api_key,
             anthropic_api_key=self.config.anthropic_api_key,
             gemini_api_key=self.config.gemini_api_key,
+            openai_model=self.settings.openai_model,
             anthropic_model=self.settings.anthropic_model,
             gemini_model=self.settings.gemini_model,
             cwd=self.config.cwd,
@@ -743,6 +909,7 @@ class OpenHApp:
     def _apply_settings(self, new_settings: Settings) -> None:
         """Called when the user clicks Save in the SettingsDialog."""
         old_provider = self.settings.active_provider
+        old_openai = self.settings.openai_model
         old_anth = self.settings.anthropic_model
         old_gem = self.settings.gemini_model
 
@@ -751,8 +918,10 @@ class OpenHApp:
 
         # Update Config + reload provider if model changed
         new_config = type(self.config)(
+            openai_api_key=self.config.openai_api_key,
             anthropic_api_key=self.config.anthropic_api_key,
             gemini_api_key=self.config.gemini_api_key,
+            openai_model=new_settings.openai_model,
             anthropic_model=new_settings.anthropic_model,
             gemini_model=new_settings.gemini_model,
             cwd=self.config.cwd,
@@ -762,6 +931,7 @@ class OpenHApp:
 
         provider_needs_reload = (
             new_settings.active_provider != old_provider
+            or (new_settings.active_provider == "openai" and new_settings.openai_model != old_openai)
             or (new_settings.active_provider == "anthropic" and new_settings.anthropic_model != old_anth)
             or (new_settings.active_provider == "gemini" and new_settings.gemini_model != old_gem)
         )
@@ -781,6 +951,7 @@ class OpenHApp:
         # Apply appearance presets and full rebuild
         theme.set_color_preset(new_settings.color_preset)
         theme.set_font(new_settings.font_preset)
+        theme.set_font_size(new_settings.font_size)
         theme.set_mode(theme.current_mode())
 
         save_settings(self.settings)
@@ -833,7 +1004,10 @@ class OpenHApp:
     def _rebuild_ui_after_theme_change(self) -> None:
         """Full page rebuild after toggling the theme."""
         self.page.controls.clear()
+        self._stop_welcome_wordmark_animation()
         self._welcome_widget = None
+        self._welcome_wordmark_host = None
+        self._welcome_wordmark_letters = []
         self._stream_message_widget = None
         self._build_ui()
         if self.session.messages:
@@ -1198,38 +1372,50 @@ class OpenHApp:
         self._refresh_sidebar()
 
     def _show_welcome(self) -> None:
+        # If session has a non-default profile, show profile welcome instead
+        if self.session.profile_id != "default":
+            spec = get_profile(self.session.profile_id)
+            if spec is not None:
+                self._show_profile_welcome(spec)
+                return
         if self._welcome_widget is None:
             self._welcome_widget = widgets.welcome_screen(
                 cwd=self.session.cwd,
                 on_change_cwd=self._change_workspace,
+                wordmark=self._build_welcome_wordmark(),
             )
             self._append_to_messages(self._welcome_widget)
+            self._start_welcome_wordmark_animation()
 
     def _change_workspace(self) -> None:
         self.page.run_task(self._change_workspace_async)
 
     async def _change_workspace_async(self) -> None:
-        import os
         result = await self._file_picker.get_directory_path(
             dialog_title="Select workspace",
         )
         if result:
-            os.chdir(result)
-            self.session.cwd = result
+            self._set_runtime_cwd(result)
             self._remember_current_session()
             # Rebuild welcome to show new cwd
+            self._stop_welcome_wordmark_animation()
             self._welcome_widget = None
+            self._welcome_wordmark_host = None
+            self._welcome_wordmark_letters = []
             self.message_column.controls.clear()
             self._show_welcome()
             self._refresh_status_bar()
 
     def _hide_welcome(self) -> None:
+        self._stop_welcome_wordmark_animation()
         if self._welcome_widget is not None:
             try:
                 self.message_column.controls.remove(self._welcome_widget)
             except ValueError:
                 pass
             self._welcome_widget = None
+        self._welcome_wordmark_host = None
+        self._welcome_wordmark_letters = []
 
     # ---------------- handlers ----------------
 
@@ -1377,7 +1563,14 @@ class OpenHApp:
             if ctx.strip():
                 self.session.append_message("user", [TextBlock(text=ctx)])
                 self.session.append_message("assistant", [TextBlock(text="Acknowledged. Ready to help.")])
-        self._append_to_messages(widgets.user_bubble(text, content_width=self._content_width))
+        # msg_index = where this user message will land after agent appends it
+        upcoming_index = len(self.session.messages)
+        self._append_to_messages(widgets.user_bubble(
+            text,
+            on_edit=self._on_edit_message,
+            msg_index=upcoming_index,
+            content_width=self._content_width,
+        ))
         self._stick_to_bottom = True
         self._busy = True
         self._refresh_top_bar(note="thinking…")
@@ -1674,8 +1867,10 @@ class OpenHApp:
         metadata = {
             "session_id": self.session.session_id,
             "title": self.session.title or self._current_title,
+            "cwd": self.session.cwd,
             "session_cwd": self.session.cwd,
             "prompt_override": self.session.prompt_override,
+            "profile_id": self.session.profile_id,
             "total_input_tokens": self.session.total_input_tokens,
             "total_output_tokens": self.session.total_output_tokens,
             "last_input_tokens": self.session.last_input_tokens,
@@ -1735,7 +1930,23 @@ class OpenHApp:
         if self._busy:
             return
         current = self.session.provider.name
-        target = "gemini" if current == "anthropic" else "anthropic"
+        import importlib.util as _importlib_util
+        available = [
+            name
+            for name, ok in (
+                ("openai", bool(self.config.openai_api_key) and _importlib_util.find_spec("openai") is not None),
+                ("anthropic", bool(self.config.anthropic_api_key) and _importlib_util.find_spec("anthropic") is not None),
+                ("gemini", bool(self.config.gemini_api_key) and _importlib_util.find_spec("google.genai") is not None),
+            )
+            if ok
+        ]
+        if not available:
+            return
+        try:
+            idx = available.index(current)
+        except ValueError:
+            idx = -1
+        target = available[(idx + 1) % len(available)]
         try:
             new_provider = get_provider(target, self.config)
         except Exception as exc:  # noqa: BLE001
@@ -1743,6 +1954,8 @@ class OpenHApp:
                 widgets.error_panel(f"can't switch to {target}: {exc}")
             )
             return
+        self.settings.active_provider = target
+        save_settings(self.settings)
         self.session.switch_provider(new_provider)
         self._refresh_top_bar()
         self._refresh_input()
@@ -1766,15 +1979,20 @@ class OpenHApp:
         self.session.session_id = new_session_uuid()
         self.session.created_at = time.time()
         self.session.title = ""
+        self.session.profile_id = "default"
+        self.session.tools = default_tools()
         self._current_title = ""
         self._queued_turns = []
         self._reset_live_tool_stack()
         # New JSONL writer for the new session
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         self._jsonl_written_count = 0
+        self._stop_welcome_wordmark_animation()
         self.message_column.controls.clear()
         self._stream_message_widget = None
         self._welcome_widget = None
+        self._welcome_wordmark_host = None
+        self._welcome_wordmark_letters = []
         self._show_welcome()
         self._refresh_top_bar()
         self._refresh_status_bar()
@@ -1783,6 +2001,92 @@ class OpenHApp:
         self._full_update()
         self._stick_to_bottom = True
         self._remember_current_session()
+
+    def _new_profile_chat(self, profile_id: str) -> None:
+        """Create a new session configured for a specific profile."""
+        spec = get_profile(profile_id)
+        if spec is None:
+            return
+        # Start with a clean session
+        self._new_chat()
+        self.session.profile_id = profile_id
+        # Set CWD from profile
+        if spec.default_cwd:
+            target = str(Path(spec.default_cwd).expanduser())
+            if Path(target).is_dir():
+                self._set_runtime_cwd(target)
+        # Set system prompt from profile
+        if spec.system_prompt_fn:
+            try:
+                self.session.prompt_override = spec.system_prompt_fn()
+            except Exception:
+                pass
+        # Add extra tools from profile
+        if spec.extra_tools_fn:
+            try:
+                extra = spec.extra_tools_fn()
+                if extra:
+                    self.session.tools.extend(extra)
+            except Exception:
+                pass
+        # Replace welcome screen with profile-specific one
+        self._stop_welcome_wordmark_animation()
+        self._welcome_widget = None
+        self._welcome_wordmark_host = None
+        self._welcome_wordmark_letters = []
+        self.message_column.controls.clear()
+        self._show_profile_welcome(spec)
+        self._refresh_top_bar()
+        self._refresh_status_bar()
+        self._refresh_input()
+        self._refresh_sidebar()
+        self._full_update()
+        self._remember_current_session()
+
+    def _show_profile_welcome(self, spec) -> None:
+        """Show a profile-specific welcome screen."""
+        if self._welcome_widget is None:
+            wordmark = self._build_profile_wordmark(spec)
+            self._welcome_widget = widgets.welcome_screen(
+                cwd=self.session.cwd,
+                on_change_cwd=self._change_workspace,
+                wordmark=wordmark,
+                subtitle=spec.subtitle,
+                accent_color=spec.accent_color,
+            )
+            self._append_to_messages(self._welcome_widget)
+            self._start_welcome_wordmark_animation()
+
+    def _build_profile_wordmark(self, spec) -> ft.Container:
+        """Build an animated wordmark for a profile welcome screen."""
+        color = spec.accent_color or theme.ACCENT
+        letters: list[ft.Text] = []
+        for ch in spec.wordmark:
+            letters.append(
+                ft.Text(
+                    ch,
+                    color=color,
+                    size=32,
+                    weight=ft.FontWeight.W_300,
+                    font_family=theme.FONT_SANS,
+                    opacity=0.84,
+                    offset=ft.Offset(0, 0),
+                    animate_offset=240,
+                    animate_opacity=240,
+                )
+            )
+        self._welcome_wordmark_letters = letters
+        self._welcome_wordmark_host = ft.Container(
+            content=ft.Row(
+                letters,
+                spacing=2,
+                tight=True,
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            animate_opacity=240,
+        )
+        return self._welcome_wordmark_host
 
     def _select_session(self, session_id: str) -> None:
         if self._busy:
@@ -1817,11 +2121,29 @@ class OpenHApp:
                 ),
             ) or 0.0
         )
-        if metadata.get("session_cwd"):
-            self.session.cwd = metadata["session_cwd"]
-        elif metadata.get("cwd"):
-            self.session.cwd = metadata["cwd"]
+        target_cwd = metadata.get("session_cwd") or metadata.get("cwd")
+        if target_cwd:
+            self._set_runtime_cwd(target_cwd, save=False)
         self.session.prompt_override = metadata.get("prompt_override", "")
+        self.session.profile_id = metadata.get("profile_id", "default")
+        # Restore profile state: regenerate system prompt + extra tools
+        restored_profile = get_profile(self.session.profile_id)
+        if restored_profile is not None and self.session.profile_id != "default":
+            if restored_profile.system_prompt_fn:
+                try:
+                    self.session.prompt_override = restored_profile.system_prompt_fn()
+                except Exception:
+                    pass
+            if restored_profile.extra_tools_fn:
+                try:
+                    extra = restored_profile.extra_tools_fn()
+                    if extra:
+                        existing_names = {t.name for t in self.session.tools}
+                        for t in extra:
+                            if t.name not in existing_names:
+                                self.session.tools.append(t)
+                except Exception:
+                    pass
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = metadata.get("title") or target.title or ""
         self._current_title = self.session.title or target.title or ""
@@ -1831,8 +2153,11 @@ class OpenHApp:
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         self._jsonl_written_count = len(self.session.messages)
         # Re-render
+        self._stop_welcome_wordmark_animation()
         self.message_column.controls.clear()
         self._welcome_widget = None
+        self._welcome_wordmark_host = None
+        self._welcome_wordmark_letters = []
         self._stream_message_widget = None
         if messages:
             self._replay_messages_all()
@@ -1917,6 +2242,7 @@ class OpenHApp:
             total_estimated_cost_usd=self.session.total_estimated_cost_usd,
             session_cwd=self.session.cwd,
             prompt_override=self.session.prompt_override or None,
+            profile_id=self.session.profile_id if self.session.profile_id != "default" else None,
         )
         self._cache_current_session()
         self._remember_current_session()
@@ -2087,7 +2413,8 @@ def main() -> None:
     def target(page: ft.Page) -> None:
         OpenHApp(page)
 
-    ft.app(target=target)
+    assets_dir = str(Path(__file__).with_name("assets"))
+    ft.app(target=target, assets_dir=assets_dir)
 
 
 if __name__ == "__main__":

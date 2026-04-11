@@ -21,6 +21,7 @@ from .tool_search import ToolSearchTool
 from .webfetch import WebFetchTool
 from .websearch import WebSearchTool
 from .worktree import EnterWorktreeTool, ExitWorktreeTool
+from .serial_tool import SerialTool
 from .write import WriteTool
 
 __all__ = [
@@ -56,7 +57,14 @@ __all__ = [
     "TaskStopTool",
     "SendMessageTool",
     "ToolSearchTool",
+    "SerialTool",
+    "fnd_extra_tools",
 ]
+
+
+def fnd_extra_tools() -> list[Tool]:
+    """Extra tools for FnD (Fruits & Dessert) profile sessions only."""
+    return [SerialTool()]
 
 
 def default_tools() -> list[Tool]:

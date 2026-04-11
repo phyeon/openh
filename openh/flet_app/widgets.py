@@ -45,6 +45,8 @@ def sidebar(
     show_hidden: bool = False,
     user_label: str = "openh",
     width: int = theme.SIDEBAR_WIDTH,
+    profiles: list | None = None,
+    on_new_profile: Callable[[str], None] | None = None,
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
@@ -191,12 +193,48 @@ def sidebar(
                     continue
                 body_children.append(session_item(sid, title, project, starred, hidden))
 
+    # Build profile buttons
+    profile_buttons: list[ft.Control] = []
+    if profiles and on_new_profile:
+        for prof in profiles:
+            profile_buttons.append(
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Text(prof.icon, size=14),
+                            ft.Text(
+                                prof.display_name,
+                                color=theme.TEXT_SECONDARY,
+                                size=12,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                max_lines=1,
+                                expand=True,
+                            ),
+                        ],
+                        spacing=6,
+                        tight=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.padding.only(left=14, right=8, top=6, bottom=6),
+                    border_radius=theme.RADIUS_SM,
+                    on_click=lambda e, pid=prof.id: on_new_profile(pid),
+                    ink=True,
+                    margin=ft.margin.symmetric(horizontal=8, vertical=1),
+                )
+            )
+
+    top_section = [
+        ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
+    ]
+    if profile_buttons:
+        top_section.extend(profile_buttons)
+
     return ft.Container(
         width=width,
         bgcolor=theme.BG_SIDEBAR,
         content=ft.Column(
             [
-                ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
+                *top_section,
                 ft.Container(
                     content=ft.Column(
                         body_children,
@@ -517,10 +555,18 @@ def _parse_streaming_antml(markdown_text: str) -> tuple[list[str], str, str, boo
 
 
 def _message_markdown(value: str, *, subdued: bool = False) -> ft.Markdown:
-    chat_font = "Apple SD Gothic Neo"
-    chat_fallback = [theme.FONT_SANS]
+    chat_font = theme.FONT_SANS
+    chat_fallback = list(getattr(theme, "FONT_SANS_FALLBACK", []))
+    if chat_font not in chat_fallback:
+        chat_fallback.insert(0, chat_font)
+    em_font = getattr(theme, "FONT_EM", chat_font)
+    em_fallback = list(getattr(theme, "FONT_EM_FALLBACK", chat_fallback))
+    if em_font not in em_fallback:
+        em_fallback.insert(0, em_font)
     primary = theme.TEXT_SECONDARY if subdued else theme.TEXT_PRIMARY
     secondary = theme.TEXT_TERTIARY
+    sz = theme.FONT_SIZE
+    sz_sub = sz - 2  # subdued / code size
     return ft.Markdown(
         value or " ",
         extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
@@ -530,39 +576,49 @@ def _message_markdown(value: str, *, subdued: bool = False) -> ft.Markdown:
             if theme.is_dark()
             else ft.MarkdownCodeTheme.GRUVBOX_LIGHT
         ),
-        code_style_sheet=ft.MarkdownStyleSheet(
-            code_text_style=ft.TextStyle(
-                font_family=theme.FONT_MONO,
-                size=13 if subdued else 14,
-                color=theme.TEXT_SECONDARY if not subdued else theme.TEXT_TERTIARY,
-            ),
+        md_style_sheet=ft.MarkdownStyleSheet(
             p_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=14 if subdued else 16,
+                size=sz_sub if subdued else sz,
                 color=primary,
                 height=1.5 if subdued else 1.55,
             ),
             em_text_style=ft.TextStyle(
-                font_family="Georgia",
-                font_family_fallback=["Times New Roman", chat_font, theme.FONT_SANS],
-                size=14 if subdued else 16,
+                font_family=em_font,
+                font_family_fallback=em_fallback,
+                size=(sz_sub + 1) if subdued else sz + 1,
                 color=secondary,
-                italic=True,
+                weight=ft.FontWeight.W_400,
+                italic=False,
+                letter_spacing=0.1,
                 height=1.5 if subdued else 1.55,
             ),
             strong_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=14 if subdued else 16,
+                size=sz_sub if subdued else sz,
                 color=theme.TEXT_PRIMARY,
                 weight=ft.FontWeight.W_700,
+                height=1.5 if subdued else 1.55,
+            ),
+            a_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=sz_sub if subdued else sz,
+                color=theme.ACCENT,
+            ),
+            list_bullet_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=sz_sub if subdued else sz,
+                color=primary,
                 height=1.5 if subdued else 1.55,
             ),
             blockquote_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=14 if subdued else 15,
+                size=sz_sub if subdued else sz - 1,
                 color=theme.TEXT_SECONDARY,
                 height=1.5,
             ),
@@ -571,32 +627,40 @@ def _message_markdown(value: str, *, subdued: bool = False) -> ft.Markdown:
                 border=ft.border.only(left=ft.BorderSide(3, theme.ACCENT_FAINT)),
                 border_radius=theme.RADIUS_MD,
             ),
-            codeblock_padding=ft.padding.symmetric(horizontal=12, vertical=10),
-            codeblock_decoration=ft.BoxDecoration(
-                bgcolor=theme.BG_ELEVATED,
-                border=ft.border.all(1, theme.BORDER_SUBTLE),
-                border_radius=theme.RADIUS_MD,
-            ),
             h1_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=22,
+                size=sz + 6,
                 color=theme.TEXT_PRIMARY,
                 weight=ft.FontWeight.W_700,
             ),
             h2_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=18,
+                size=sz + 2,
                 color=theme.TEXT_PRIMARY,
                 weight=ft.FontWeight.W_700,
             ),
             h3_text_style=ft.TextStyle(
                 font_family=chat_font,
                 font_family_fallback=chat_fallback,
-                size=16,
+                size=sz,
                 color=theme.TEXT_PRIMARY,
                 weight=ft.FontWeight.W_600,
+            ),
+        ),
+        code_style_sheet=ft.MarkdownStyleSheet(
+            code_text_style=ft.TextStyle(
+                font_family=theme.FONT_MONO,
+                font_family_fallback=getattr(theme, "FONT_MONO_FALLBACK", None),
+                size=sz_sub if subdued else sz - 1,
+                color=theme.TEXT_SECONDARY if not subdued else theme.TEXT_TERTIARY,
+            ),
+            codeblock_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+            codeblock_decoration=ft.BoxDecoration(
+                bgcolor=theme.BG_ELEVATED,
+                border=ft.border.all(1, theme.BORDER_SUBTLE),
+                border_radius=theme.RADIUS_MD,
             ),
         ),
     )
@@ -633,12 +697,12 @@ def user_bubble(
         content=ft.Text(
             text,
             color=theme.TEXT_PRIMARY,
-            size=16,
+            size=theme.FONT_SIZE,
             selectable=True,
             no_wrap=False,
             overflow=ft.TextOverflow.VISIBLE,
-            font_family="Apple SD Gothic Neo",
-            font_family_fallback=[theme.FONT_SANS],
+            font_family=theme.FONT_SANS,
+            font_family_fallback=getattr(theme, "FONT_SANS_FALLBACK", None),
         ),
         bgcolor=theme.BG_ELEVATED,
         padding=ft.padding.symmetric(horizontal=16, vertical=12),
@@ -992,7 +1056,7 @@ def _tool_log_entry(
     if len(result_body) > 2500:
         result_body = result_body[:2500] + f"\n…(+{len(result_body) - 2500} chars)"
 
-    prefix = f"> {index} {name.lower()}" if index is not None else f"> {name.lower()}"
+    prefix = f"{index} {name.lower()}" if index is not None else name.lower()
     summary = _tool_call_summary(name, input_dict)
     status_text = (
         "running…"
@@ -1157,6 +1221,9 @@ def error_panel(text: str) -> ft.Container:
 def welcome_screen(
     cwd: str = "",
     on_change_cwd: Callable | None = None,
+    wordmark: ft.Control | None = None,
+    subtitle: str = "",
+    accent_color: str = "",
 ) -> ft.Container:
     """Empty-state — OpenH wordmark + workspace selector."""
     from pathlib import Path
@@ -1180,7 +1247,7 @@ def welcome_screen(
                 ft.TextButton(
                     "Change",
                     style=ft.ButtonStyle(
-                        color=theme.ACCENT,
+                        color=accent_color or theme.ACCENT,
                         padding=ft.padding.symmetric(horizontal=8, vertical=0),
                     ),
                     on_click=lambda e: on_change_cwd() if on_change_cwd else None,
@@ -1194,25 +1261,29 @@ def welcome_screen(
         padding=ft.padding.only(top=16),
     ) if cwd else ft.Container()
 
+    sub_text = subtitle or "What can I help you with?"
+
+    children: list[ft.Control] = [
+        wordmark or ft.Text(
+            "O p e n H",
+            color=accent_color or theme.ACCENT,
+            size=32,
+            weight=ft.FontWeight.W_300,
+            text_align=ft.TextAlign.CENTER,
+            font_family=theme.FONT_SANS,
+        ),
+        ft.Text(
+            sub_text,
+            color=theme.TEXT_TERTIARY,
+            size=14,
+            text_align=ft.TextAlign.CENTER,
+        ),
+        cwd_row,
+    ]
+
     return ft.Container(
         content=ft.Column(
-            [
-                ft.Text(
-                    "O p e n H",
-                    color=theme.ACCENT,
-                    size=32,
-                    weight=ft.FontWeight.W_300,
-                    text_align=ft.TextAlign.CENTER,
-                    font_family=theme.FONT_SANS,
-                ),
-                ft.Text(
-                    "What can I help you with?",
-                    color=theme.TEXT_TERTIARY,
-                    size=14,
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                cwd_row,
-            ],
+            children,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
             tight=True,
@@ -1266,7 +1337,7 @@ def model_dropdown(
     on_pick: Callable[[str, str], None],  # (provider, model) -> None
 ) -> ft.PopupMenuButton:
     """Real dropdown with grouped model options. Click → menu → pick one."""
-    from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS
+    from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS
 
     def header(label: str) -> ft.PopupMenuItem:
         return ft.PopupMenuItem(
@@ -1306,6 +1377,10 @@ def model_dropdown(
         )
 
     items: list[ft.PopupMenuItem] = []
+    items.append(header("OPENAI"))
+    for m in OPENAI_MODELS:
+        items.append(choice("openai", m, provider_name == "openai" and m == model))
+    items.append(ft.PopupMenuItem())  # divider
     items.append(header("ANTHROPIC"))
     for m in ANTHROPIC_MODELS:
         items.append(choice("anthropic", m, provider_name == "anthropic" and m == model))
@@ -1339,6 +1414,9 @@ def model_dropdown(
             border_radius=theme.RADIUS_PILL,
         ),
         bgcolor=theme.BG_ELEVATED,
+        menu_position=ft.PopupMenuPosition.OVER,
+        size_constraints=ft.BoxConstraints(max_width=380),
+        menu_padding=0,
         items=items,
         tooltip="Switch model",
     )
@@ -1402,35 +1480,35 @@ def input_area(
     right_buttons: list[ft.Control] = [model_btn, ft.Container(width=10)]
 
     send_btn = ft.Container(
-        content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=20),
-        width=46,
-        height=46,
+        content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=18),
+        width=36,
+        height=36,
         alignment=ft.Alignment(0, 0),
         bgcolor=theme.ACCENT,
-        border_radius=16,
+        border_radius=12,
         ink=True,
         on_click=lambda e: on_send(),
         tooltip="Send / queue steering (Enter)",
     )
 
+    has_text = bool((input_field.value or "").strip())
+    stop_btn = ft.Container(
+        content=ft.Icon(ft.Icons.STOP_ROUNDED, color=theme.TEXT_SECONDARY, size=14),
+        width=36,
+        height=36,
+        alignment=ft.Alignment(0, 0),
+        border=ft.border.all(1, theme.BORDER_SUBTLE),
+        border_radius=12,
+        ink=True,
+        on_click=lambda e: on_stop(),
+        tooltip="Stop generation (Esc)",
+    )
+
     if busy and on_stop:
-        right_buttons.extend(
-            [
-                send_btn,
-                ft.Container(width=8),
-                ft.Container(
-                    content=ft.Icon(ft.Icons.STOP_ROUNDED, color=theme.TEXT_SECONDARY, size=16),
-                    width=46,
-                    height=46,
-                    alignment=ft.Alignment(0, 0),
-                    border=ft.border.all(1, theme.BORDER_SUBTLE),
-                    border_radius=16,
-                    ink=True,
-                    on_click=lambda e: on_stop(),
-                    tooltip="Stop generation (Esc)",
-                ),
-            ]
-        )
+        if has_text:
+            right_buttons.extend([send_btn, ft.Container(width=6), stop_btn])
+        else:
+            right_buttons.append(stop_btn)
     else:
         right_buttons.append(send_btn)
 
@@ -1576,7 +1654,7 @@ def input_area(
         )
         box_children.append(ft.Container(height=6))
 
-    box_children.extend([input_field, ft.Container(height=8), bottom_row])
+    box_children.extend([input_field, ft.Container(height=4), bottom_row])
 
     box = ft.Container(
         content=ft.Column(
@@ -1587,7 +1665,7 @@ def input_area(
         bgcolor=theme.BG_DEEPEST,
         border=ft.border.all(1, theme.BORDER_SUBTLE),
         border_radius=theme.RADIUS_LG,
-        padding=ft.padding.only(left=14, right=14, top=12, bottom=14),
+        padding=ft.padding.only(left=14, right=10, top=10, bottom=10),
     )
 
     return ft.Container(

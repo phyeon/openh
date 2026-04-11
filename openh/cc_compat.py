@@ -472,8 +472,12 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not cwd and isinstance(obj.get("cwd"), str):
-                    cwd = obj["cwd"]
+                if not cwd:
+                    for key in ("session_cwd", "cwd"):
+                        val = obj.get(key)
+                        if isinstance(val, str) and val:
+                            cwd = val
+                            break
                 if obj.get("type") == "__meta__" and obj.get("title"):
                     explicit_title = obj["title"][:70]
                     continue
@@ -567,6 +571,7 @@ def save_session_meta(
     total_estimated_cost_usd: float | None = None,
     session_cwd: str | None = None,
     prompt_override: str | None = None,
+    profile_id: str | None = None,
 ) -> None:
     """Append a __meta__ line with session metadata to the JSONL file."""
     meta: dict[str, Any] = {"type": "__meta__"}
@@ -584,6 +589,8 @@ def save_session_meta(
         meta["session_cwd"] = session_cwd
     if prompt_override is not None:
         meta["prompt_override"] = prompt_override
+    if profile_id is not None and profile_id != "default":
+        meta["profile_id"] = profile_id
     line = json.dumps(meta, ensure_ascii=False)
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")

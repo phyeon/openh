@@ -166,20 +166,73 @@ def _sync_module_vars() -> None:
 # ============================================================================
 
 FONT_PRESETS = {
-    "System (Sans)": ("-apple-system", "SFMono-Regular"),
-    "Inter": ("Inter", "JetBrains Mono"),
-    "Serif (Georgia)": ("Georgia", "Courier New"),
+    "System (Sans)": {
+        "sans": "Pretendard",
+        "sans_fallback": ["Apple SD Gothic Neo", "-apple-system", "Arial Unicode MS"],
+        "mono": "Menlo",
+        "mono_fallback": ["SFMono-Regular", "Monaco"],
+        "em": "Noto Serif KR",
+        "em_fallback": ["New York", "Times New Roman", "Apple SD Gothic Neo"],
+    },
+    "Avenir Next": {
+        "sans": "Avenir Next",
+        "sans_fallback": ["Pretendard", "Apple SD Gothic Neo", "-apple-system"],
+        "mono": "Menlo",
+        "mono_fallback": ["SFMono-Regular", "Monaco"],
+        "em": "Noto Serif KR",
+        "em_fallback": ["New York", "Times New Roman", "Apple SD Gothic Neo"],
+    },
+    "Inter": {
+        "sans": "Pretendard",
+        "sans_fallback": ["Avenir Next", "Apple SD Gothic Neo", "-apple-system"],
+        "mono": "Menlo",
+        "mono_fallback": ["SFMono-Regular", "Monaco"],
+        "em": "Noto Serif KR",
+        "em_fallback": ["New York", "Times New Roman", "Apple SD Gothic Neo"],
+    },
+    "Serif (Reading)": {
+        "sans": "Noto Serif KR",
+        "sans_fallback": ["Pretendard", "Apple SD Gothic Neo", "Times New Roman"],
+        "mono": "Menlo",
+        "mono_fallback": ["SFMono-Regular", "Monaco"],
+        "em": "Noto Serif KR",
+        "em_fallback": ["New York", "Times New Roman", "Apple SD Gothic Neo"],
+    },
+    "Serif (Georgia)": {
+        "sans": "Noto Serif KR",
+        "sans_fallback": ["Pretendard", "Apple SD Gothic Neo", "Times New Roman"],
+        "mono": "Menlo",
+        "mono_fallback": ["SFMono-Regular", "Monaco"],
+        "em": "Noto Serif KR",
+        "em_fallback": ["New York", "Times New Roman", "Apple SD Gothic Neo"],
+    },
 }
 
 # Active fonts — defaults
-FONT_SANS = "-apple-system"
-FONT_MONO = "SFMono-Regular"
+FONT_SANS = "Pretendard"
+FONT_SANS_FALLBACK = ["Apple SD Gothic Neo", "-apple-system", "Arial Unicode MS"]
+FONT_MONO = "Menlo"
+FONT_MONO_FALLBACK = ["SFMono-Regular", "Monaco"]
+FONT_EM = "Noto Serif KR"
+FONT_EM_FALLBACK = ["New York", "Times New Roman", "Apple SD Gothic Neo"]
+FONT_SIZE = 16  # base chat font size
+
+
+def set_font_size(size: int) -> None:
+    global FONT_SIZE
+    FONT_SIZE = max(12, min(24, size))
 
 
 def set_font(preset_name: str) -> None:
-    global FONT_SANS, FONT_MONO
+    global FONT_SANS, FONT_SANS_FALLBACK, FONT_MONO, FONT_MONO_FALLBACK, FONT_EM, FONT_EM_FALLBACK
     if preset_name in FONT_PRESETS:
-        FONT_SANS, FONT_MONO = FONT_PRESETS[preset_name]
+        preset = FONT_PRESETS[preset_name]
+        FONT_SANS = preset["sans"]
+        FONT_SANS_FALLBACK = list(preset["sans_fallback"])
+        FONT_MONO = preset["mono"]
+        FONT_MONO_FALLBACK = list(preset["mono_fallback"])
+        FONT_EM = preset["em"]
+        FONT_EM_FALLBACK = list(preset["em_fallback"])
 
 
 # ============================================================================

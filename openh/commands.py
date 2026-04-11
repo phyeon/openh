@@ -219,6 +219,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
     import os
     from pathlib import Path
     from .config import (
+        OPENAI_DEFAULT_MODEL,
         ANTHROPIC_DEFAULT_MODEL,
         AUTO_COMPACT_THRESHOLD,
         OPENH_DIR,
@@ -230,6 +231,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
     from .persistence import SESSIONS_DIR
 
     s = ctx.session
+    has_openai = bool(s.config.openai_api_key)
     has_anth = bool(s.config.anthropic_api_key)
     has_gem = bool(s.config.gemini_api_key)
     mcp_path = Path(OPENH_DIR) / "mcp.json"
@@ -239,11 +241,13 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         "# Effective configuration",
         "",
         "## Models (change via env vars)",
+        f"  OpenAI:   {s.config.openai_model}   [OPENH_OPENAI_MODEL, default {OPENAI_DEFAULT_MODEL}]",
         f"  Anthropic: {s.config.anthropic_model}   [OPENH_ANTHROPIC_MODEL, default {ANTHROPIC_DEFAULT_MODEL}]",
         f"  Gemini:    {s.config.gemini_model}   [OPENH_GEMINI_MODEL, default {GEMINI_DEFAULT_MODEL}]",
         f"  Active:    {s.provider.name}:{s.provider.model}",
         "",
         "## API keys",
+        f"  OPENAI_API_KEY:    {'set' if has_openai else 'not set'}",
         f"  ANTHROPIC_API_KEY: {'set' if has_anth else 'not set'}",
         f"  GEMINI_API_KEY:    {'set' if has_gem else 'not set'}",
         f"  .env file:         {DOTENV_PATH}  {'(exists)' if Path(DOTENV_PATH).exists() else '(missing)'}",

@@ -11,28 +11,29 @@ from pathlib import Path
 
 SETTINGS_PATH = Path.home() / ".openh" / "settings.json"
 
+OPENAI_MODELS = [
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+]
+
 ANTHROPIC_MODELS = [
     "claude-opus-4-6",
     "claude-sonnet-4-6",
-    "claude-sonnet-4-5",
     "claude-haiku-4-5",
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-haiku-4",
 ]
 
 GEMINI_MODELS = [
     "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
 ]
 
 
 @dataclass
 class Settings:
     active_provider: str = "anthropic"
+    openai_model: str = "gpt-5.4-mini"
     anthropic_model: str = "claude-sonnet-4-6"
     gemini_model: str = "gemini-2.5-flash"
     max_output_tokens: int = 8192
@@ -42,6 +43,7 @@ class Settings:
     theme_mode: str = "dark"             # "dark" | "light"
     color_preset: str = "Charcoal"
     font_preset: str = "System (Sans)"
+    font_size: int = 16
     sidebar_width: int = 280
     window_width: int = 1080
     window_height: int = 820
