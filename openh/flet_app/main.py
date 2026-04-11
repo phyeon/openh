@@ -607,6 +607,8 @@ class OpenHApp:
             except Exception:
                 pass
         self._refresh_sidebar()
+        # Restore scroll position after layout change
+        self._scroll_to_end()
 
     def _toggle_permissions(self) -> None:
         self._skip_permissions = not self._skip_permissions
@@ -634,6 +636,7 @@ class OpenHApp:
                 self._update_messages()
             except Exception:
                 pass
+        self._scroll_to_end()
         try:
             self.page.update()
         except Exception:
@@ -1461,6 +1464,7 @@ class OpenHApp:
         self._refresh_status_bar()
         self._refresh_input()
         self._refresh_sidebar()
+        self._scroll_to_end()
 
     def _delete_session_by_id(self, session_id: str) -> None:
         if self._busy:
