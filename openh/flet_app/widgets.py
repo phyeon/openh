@@ -846,6 +846,32 @@ def tool_combined_panel(
     )
 
 
+def thinking_indicator() -> ft.Container:
+    """Animated thinking indicator shown during streaming."""
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Text(
+                    "+",
+                    color=theme.ACCENT,
+                    size=14,
+                    weight=ft.FontWeight.W_700,
+                ),
+                ft.Text(
+                    "Thinking…",
+                    color=theme.ACCENT,
+                    size=13,
+                    italic=True,
+                ),
+            ],
+            spacing=6,
+            tight=True,
+        ),
+        padding=ft.padding.only(left=8, top=8, bottom=8),
+        animate_opacity=200,
+    )
+
+
 def system_note(text: str) -> ft.Container:
     return ft.Container(
         content=ft.Text(

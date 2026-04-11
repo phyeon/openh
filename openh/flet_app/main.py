@@ -137,6 +137,7 @@ class OpenHApp:
         # Streaming state
         self._stream_text_buf: list[str] = []
         self._stream_message_widget: ft.Container | None = None
+        self._thinking_widget: ft.Container | None = None
         self._welcome_widget: ft.Container | None = None
 
         self._build_ui()
@@ -1246,6 +1247,20 @@ class OpenHApp:
         except ValueError:
             controls.append(widget)
 
+    def _show_thinking(self) -> None:
+        if self._thinking_widget is None:
+            self._thinking_widget = widgets.thinking_indicator()
+            self._append_to_messages(self._thinking_widget)
+            self._update_messages()
+
+    def _hide_thinking(self) -> None:
+        if self._thinking_widget is not None:
+            try:
+                self.message_column.controls.remove(self._thinking_widget)
+            except ValueError:
+                pass
+            self._thinking_widget = None
+
     def _update_messages(self) -> None:
         """Update via page.update() to preserve scroll position.
 
@@ -1289,6 +1304,7 @@ class OpenHApp:
         self._busy = True
         self._refresh_input()
         self._refresh_top_bar(note="thinking…")
+        self._show_thinking()
 
         agent = Agent(
             session=self.session,
@@ -1332,7 +1348,7 @@ class OpenHApp:
         elif isinstance(event, ToolUseStart):
             self._finalize_streaming_message()
         elif isinstance(event, ToolUseEnd):
-            # Show pending tool_call; will be replaced with combined panel on result
+            self._hide_thinking()
             self._last_tool_call = (event.name, event.input)
             self._append_to_messages(
                 widgets.tool_call_panel(event.name, event.input)
@@ -1371,6 +1387,7 @@ class OpenHApp:
 
     def _append_streaming_text(self, delta: str) -> None:
         if self._stream_message_widget is None:
+            self._hide_thinking()
             self._stream_text_buf = []
             # Create a bare Markdown for streaming (no retry wrapper)
             self._stream_md = ft.Markdown(
@@ -1402,6 +1419,7 @@ class OpenHApp:
             self._scroll_to_end()
 
     def _finalize_streaming_message(self) -> None:
+        self._hide_thinking()
         if self._stream_message_widget is not None:
             text = "".join(getattr(self, "_stream_text_buf", [])).strip()
             try:
