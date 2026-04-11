@@ -405,19 +405,19 @@ class OpenHApp:
                     return ".../" + "/".join(parts[-2:])
                 return str(p)
 
+            def _session_title(m):
+                t = m.title or "Untitled"
+                pid = getattr(m, "profile_id", "default")
+                if pid != "default":
+                    p = get_profile(pid)
+                    if p:
+                        t = f"{p.icon} {t}"
+                return t
+
             # Collect pinned sessions into a separate group at the top
             pinned = [m for m in self._session_metas if m.starred]
             if pinned:
                 pinned.sort(key=lambda m: -m.mtime)
-                def _session_title(m):
-                    t = m.title or "Untitled"
-                    pid = getattr(m, "profile_id", "default")
-                    if pid != "default":
-                        p = get_profile(pid)
-                        if p:
-                            t = f"{p.icon} {t}"
-                    return t
-
                 groups_by_name["Pinned"] = [
                     (m.session_id, _session_title(m), project_display(m.cwd), m.starred, m.hidden)
                     for m in pinned
