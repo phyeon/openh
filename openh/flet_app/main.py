@@ -1480,6 +1480,7 @@ class OpenHApp:
         self._refresh_status_bar()
         self._refresh_input()
         self._refresh_sidebar()
+        self._full_update()
 
     def _select_session(self, session_id: str) -> None:
         if self._busy:
