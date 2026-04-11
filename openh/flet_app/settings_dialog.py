@@ -369,13 +369,38 @@ class SettingsDialog:
         color_names = list(theme_mod.COLOR_PRESETS.keys())
         font_names = list(theme_mod.FONT_PRESETS.keys())
 
-        color_dropdown = ft.Dropdown(
-            value=self.settings.color_preset,
-            options=[ft.dropdown.Option(n) for n in color_names],
-            width=250,
-            border_color=theme.BORDER_SUBTLE,
-            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
-            on_select=lambda e: setattr(self.settings, "color_preset", e.control.value),
+        # Build color swatch tiles
+        self._color_tiles: list[ft.Container] = []
+        for name in color_names:
+            dark_tok, light_tok = theme_mod.COLOR_PRESETS[name]
+            selected = name == self.settings.color_preset
+
+            def make_tile(n=name):
+                dk, lt = theme_mod.COLOR_PRESETS[n]
+                sel = n == self.settings.color_preset
+                return ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Container(width=14, height=14, border_radius=7, bgcolor=dk.BG_PAGE),
+                            ft.Container(width=14, height=14, border_radius=7, bgcolor=dk.ACCENT),
+                            ft.Container(width=14, height=14, border_radius=7, bgcolor=lt.BG_PAGE),
+                            ft.Container(width=14, height=14, border_radius=7, bgcolor=lt.ACCENT),
+                        ], spacing=3, tight=True),
+                        ft.Text(n, color=theme.TEXT_PRIMARY if sel else theme.TEXT_SECONDARY, size=11,
+                                weight=ft.FontWeight.W_600 if sel else ft.FontWeight.W_400),
+                    ], spacing=4, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=ft.padding.all(8),
+                    border_radius=theme.RADIUS_SM,
+                    border=ft.border.all(2, theme.ACCENT if sel else theme.BORDER_FAINT),
+                    bgcolor=theme.BG_HOVER if sel else None,
+                    on_click=lambda e, nm=n: self._select_color_preset(nm),
+                    ink=True,
+                    width=110,
+                )
+            self._color_tiles.append(make_tile())
+
+        color_grid = ft.Row(
+            self._color_tiles, wrap=True, spacing=8, run_spacing=8,
         )
 
         font_dropdown = ft.Dropdown(
@@ -391,21 +416,43 @@ class SettingsDialog:
             [
                 _label("Color theme"),
                 ft.Text(
-                    "Changes apply after saving and restarting the theme (toggle light/dark).",
+                    "Select a palette. Applied on save.",
                     color=theme.TEXT_TERTIARY, size=11, italic=True,
                 ),
-                ft.Container(height=4),
-                color_dropdown,
+                ft.Container(height=8),
+                color_grid,
                 ft.Container(height=16),
                 _label("Font"),
                 font_dropdown,
-                ft.Container(height=16),
+                ft.Container(height=8),
                 ft.Text(
-                    "Presets: " + ", ".join(color_names),
+                    "Tip: toggle light/dark (top bar icon) to see both variants.",
                     color=theme.TEXT_TERTIARY, size=10,
                 ),
             ]
         )
+
+    def _select_color_preset(self, name: str) -> None:
+        self.settings.color_preset = name
+        # Rebuild the tiles to update selection highlight
+        from . import theme as theme_mod
+        for i, tile_name in enumerate(theme_mod.COLOR_PRESETS.keys()):
+            sel = tile_name == name
+            tile = self._color_tiles[i]
+            tile.border = ft.border.all(2, theme.ACCENT if sel else theme.BORDER_FAINT)
+            tile.bgcolor = theme.BG_HOVER if sel else None
+            # Update the label weight
+            col = tile.content
+            if isinstance(col, ft.Column) and len(col.controls) > 1:
+                label = col.controls[1]
+                if isinstance(label, ft.Text):
+                    label.color = theme.TEXT_PRIMARY if sel else theme.TEXT_SECONDARY
+                    label.weight = ft.FontWeight.W_600 if sel else ft.FontWeight.W_400
+        try:
+            for t in self._color_tiles:
+                t.update()
+        except Exception:
+            pass
 
     def _tab_workspace(self) -> ft.Control:
         import os

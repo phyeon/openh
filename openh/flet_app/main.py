@@ -593,18 +593,15 @@ class OpenHApp:
         cfg_mod.AUTO_COMPACT_THRESHOLD = int(new_settings.auto_compact_threshold)
         cfg_mod.MAX_OUTPUT_TOKENS = int(new_settings.max_output_tokens)
 
-        # Apply appearance presets
+        # Apply appearance presets and full rebuild
         theme.set_color_preset(new_settings.color_preset)
         theme.set_font(new_settings.font_preset)
-        theme.set_mode(theme.current_mode())  # re-apply with new colors
+        theme.set_mode(theme.current_mode())
 
         save_settings(self.settings)
-        self._refresh_top_bar()
-        self._refresh_input()
-        self._refresh_status_bar()
-        self.message_column.controls.append(
-            widgets.system_note("settings saved — toggle theme or restart for full effect")
-        )
+
+        # Full UI rebuild to apply new colors everywhere
+        self._rebuild_ui_after_theme_change()
         self._update_messages()
 
     def _toggle_sidebar(self) -> None:
