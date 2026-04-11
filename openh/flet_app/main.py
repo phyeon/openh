@@ -149,6 +149,7 @@ class OpenHApp:
         self.page.bgcolor = theme.BG_PAGE
         self.page.padding = 0
         self.page.theme_mode = ft.ThemeMode.DARK if theme.is_dark() else ft.ThemeMode.LIGHT
+        _ts = ft.TextStyle(color=theme.TEXT_PRIMARY)
         self.page.theme = ft.Theme(
             color_scheme_seed=theme.ACCENT,
             color_scheme=ft.ColorScheme(
@@ -157,6 +158,13 @@ class OpenHApp:
                 surface=theme.BG_PAGE,
             ),
             font_family=theme.FONT_SANS,
+            text_theme=ft.TextTheme(
+                body_large=_ts, body_medium=_ts, body_small=_ts,
+                title_large=_ts, title_medium=_ts, title_small=_ts,
+                label_large=_ts, label_medium=_ts, label_small=_ts,
+                headline_large=_ts, headline_medium=_ts, headline_small=_ts,
+                display_large=_ts, display_medium=_ts, display_small=_ts,
+            ),
         )
         # Set window size ONLY on the very first build. Rebuilds (e.g. theme
         # toggle) must not touch user-controlled window geometry.
