@@ -46,26 +46,16 @@ def sidebar(
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
-    new_chat_btn = ft.Container(
-        content=ft.Row(
-            [
-                ft.Icon(ft.Icons.EDIT_SQUARE, color=theme.TEXT_PRIMARY, size=16),
-                ft.Text(
-                    "New chat",
-                    color=theme.TEXT_PRIMARY,
-                    size=13,
-                    weight=ft.FontWeight.W_500,
-                ),
-            ],
-            spacing=10,
-            tight=True,
-        ),
-        padding=ft.padding.symmetric(horizontal=12, vertical=9),
-        bgcolor=theme.BG_PAGE,
-        border=ft.border.all(1, theme.BORDER_SUBTLE),
-        border_radius=theme.RADIUS_MD,
+    new_chat_btn = ft.IconButton(
+        icon=ft.Icons.EDIT_SQUARE,
+        icon_color=theme.TEXT_PRIMARY,
+        icon_size=18,
+        tooltip="New chat",
         on_click=lambda e: on_new_chat(),
-        ink=True,
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(8),
+        ),
     )
 
     def group_label(text: str) -> ft.Container:
@@ -205,7 +195,7 @@ def sidebar(
         border=ft.border.only(right=ft.BorderSide(1, theme.BORDER_FAINT)),
         content=ft.Column(
             [
-                ft.Container(content=new_chat_btn, padding=ft.padding.all(12)),
+                ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
                 ft.Container(
                     content=ft.Column(
                         body_children,
