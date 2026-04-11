@@ -1967,6 +1967,14 @@ class OpenHApp:
     def _new_chat(self) -> None:
         if self._busy:
             return
+        # 웰컴 화면 상태(메시지 0)에서 또 누르면 → 첫 번째 프로필로 전환
+        if (not self.session.messages
+                and self.session.profile_id == "default"
+                and self._welcome_widget is not None):
+            _profiles = list_profiles()
+            if _profiles:
+                self._new_profile_chat(_profiles[0].id)
+                return
         import time
         self.session.messages.clear()
         self.session.model_messages.clear()
@@ -1981,6 +1989,11 @@ class OpenHApp:
         self.session.title = ""
         self.session.profile_id = "default"
         self.session.tools = default_tools()
+        # Restore default color theme if was in a profile
+        from ..settings import get_settings
+        _s = get_settings()
+        _cp = getattr(_s, "color_preset", "Claude")
+        theme.set_color_preset(_cp)
         self._current_title = ""
         self._queued_turns = []
         self._reset_live_tool_stack()
@@ -2029,6 +2042,9 @@ class OpenHApp:
                     self.session.tools.extend(extra)
             except Exception:
                 pass
+        # Apply profile color theme
+        if spec.color_preset:
+            theme.set_color_preset(spec.color_preset)
         # Replace welcome screen with profile-specific one
         self._stop_welcome_wordmark_animation()
         self._welcome_widget = None

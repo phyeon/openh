@@ -16,6 +16,7 @@ class ProfileSpec:
     system_prompt_fn: Callable[[], str] | None = None
     extra_tools_fn: Callable[[], list] | None = None
     accent_color: str | None = None
+    color_preset: str | None = None  # theme.COLOR_PRESETS key to apply on session
     placeholder: str = ""            # input placeholder override
     subtitle: str = ""               # welcome screen subtitle
 

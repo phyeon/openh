@@ -50,16 +50,22 @@ def sidebar(
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
-    new_chat_btn = ft.IconButton(
-        icon=ft.Icons.EDIT_SQUARE,
-        icon_color=theme.TEXT_PRIMARY,
-        icon_size=18,
-        tooltip="New chat",
-        on_click=lambda e: on_new_chat(),
-        style=ft.ButtonStyle(
-            shape=ft.CircleBorder(),
-            padding=ft.padding.all(8),
+    # New Chat button — clicking on welcome screen cycles profiles
+    new_chat_btn = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.EDIT_SQUARE, color=theme.TEXT_PRIMARY, size=16),
+                ft.Text("New chat", color=theme.TEXT_PRIMARY, size=13,
+                        weight=ft.FontWeight.W_500),
+            ],
+            spacing=6, tight=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
+        padding=ft.padding.only(left=14, right=14, top=8, bottom=8),
+        border_radius=theme.RADIUS_SM,
+        on_click=lambda e: on_new_chat(),
+        ink=True,
+        margin=ft.margin.symmetric(horizontal=8, vertical=1),
     )
 
     def group_label(text: str) -> ft.Container:
@@ -193,41 +199,45 @@ def sidebar(
                     continue
                 body_children.append(session_item(sid, title, project, starred, hidden))
 
-    # Build profile buttons
+    # Profile buttons — each gets a distinct styled button
     profile_buttons: list[ft.Control] = []
     if profiles and on_new_profile:
         for prof in profiles:
+            _ac = prof.accent_color or theme.ACCENT
             profile_buttons.append(
                 ft.Container(
                     content=ft.Row(
                         [
-                            ft.Text(prof.icon, size=14),
+                            ft.Text(prof.icon, size=16),
                             ft.Text(
                                 prof.display_name,
-                                color=theme.TEXT_SECONDARY,
+                                color=_ac,
                                 size=12,
+                                weight=ft.FontWeight.W_600,
                                 overflow=ft.TextOverflow.ELLIPSIS,
                                 max_lines=1,
                                 expand=True,
                             ),
                         ],
-                        spacing=6,
+                        spacing=8,
                         tight=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    padding=ft.padding.only(left=14, right=8, top=6, bottom=6),
+                    padding=ft.padding.only(left=14, right=14, top=7, bottom=7),
                     border_radius=theme.RADIUS_SM,
+                    border=ft.border.all(1, _ac + "40"),
                     on_click=lambda e, pid=prof.id: on_new_profile(pid),
                     ink=True,
-                    margin=ft.margin.symmetric(horizontal=8, vertical=1),
+                    margin=ft.margin.symmetric(horizontal=8, vertical=2),
                 )
             )
 
     top_section = [
-        ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
+        ft.Container(content=new_chat_btn, padding=ft.padding.only(top=4, bottom=2)),
     ]
     if profile_buttons:
         top_section.extend(profile_buttons)
+    top_section.append(ft.Divider(height=1, color=theme.BORDER_FAINT))
 
     return ft.Container(
         width=width,

@@ -158,12 +158,13 @@ Tailscale IPs:
 register(ProfileSpec(
     id="fnd",
     display_name="Fruits & Dessert",
-    wordmark="\U0001f353 Fruits & Dessert",  # 🍓
+    wordmark="Fruits & Dessert",
     icon="\U0001f353",
     default_cwd=str(WIFI_REPO),
     system_prompt_fn=_build_fnd_system_prompt,
     extra_tools_fn=lambda: __import__("openh.tools", fromlist=["fnd_extra_tools"]).fnd_extra_tools(),
-    accent_color="#E8A87C",
-    placeholder="\uc5b4\ub5a4 \uc7a5\ube44\ub97c \uad00\ucc30\ud560\uae4c\uc694?",  # 어떤 장비를 관찰할까요?
+    accent_color="#d4a857",
+    color_preset="Fruits & Dessert",
+    placeholder="\uc5b4\ub5a4 \uc7a5\ube44\ub97c \uad00\ucc30\ud560\uae4c\uc694?",
     subtitle="ESP32 \u00b7 nRF52840 \u00b7 Pi5 \u00b7 RTL8812BU",
 ))

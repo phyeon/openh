@@ -369,6 +369,44 @@ _register_preset("Slate",
            bg="#f8fafc", surface="#f1f5f9", accent_faint="#e2e8f0"),
 )
 
+# 11. Fruits & Dessert
+# Light: 상큼 과즙 — 딸기 핑크 + 민트 + 피치 화이트. 밝고 발랄.
+# Dark: 금박 엘레강스 — 딥 다크 초콜릿에 골드 액센트. 고급 디저트 부티크.
+_register_preset("Fruits & Dessert",
+    _dark(
+        accent="#d4a857",       # antique gold
+        accent_dk="#b8923e",    # deep gold
+        accent_hv="#e4c47a",    # champagne gold hover
+        accent_pr="#9a7a2c",    # burnished gold press
+        bg="#0e0c08",           # almost black with warmth
+        surface="#1a1610",      # dark chocolate
+        elevated="#262014",     # rich dark truffle
+        hover="#302a1e",        # cocoa hover
+        sidebar="#e01a1610",    # deep dark sidebar
+        text1="#f4e8d0",        # warm champagne
+        text2="#b8a888",        # muted gold
+        text3="#7a6e58",        # aged bronze
+        text_dis="#4a4030",     # dark khaki
+        accent_faint="#1e1a0e", # dark gold tint
+    ),
+    _light(
+        accent="#e05880",       # strawberry pink
+        accent_dk="#c84468",    # deeper berry
+        accent_hv="#f07098",    # light strawberry hover
+        accent_pr="#a83858",    # pressed berry
+        bg="#fffaf8",           # peach cream white
+        surface="#fff0ee",      # very light strawberry milk
+        elevated="#ffffff",     # pure white
+        hover="#ffe4e0",        # light blush hover
+        sidebar="#e8fff0ee",    # blush sidebar
+        text1="#3a1820",        # deep berry text
+        text2="#7a4858",        # muted berry
+        text3="#b08898",        # light mauve
+        text_dis="#d0b8c0",     # faded rose
+        accent_faint="#ffe0e8", # very light pink tint
+    ),
+)
+
 
 def set_color_preset(name: str) -> None:
     """Apply a named color preset. Respects current light/dark mode."""
