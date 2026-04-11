@@ -1145,10 +1145,13 @@ class OpenHApp:
         if not text:
             return
         if self._busy:
-            # Queue the message for after the current turn finishes
+            # Queue the message — show bubble now, send after current turn
             self._queued_input = text
             self.input_field.value = ""
             self.input_field.update()
+            self.message_column.controls.append(widgets.user_bubble(text))
+            self._update_messages()
+            self._scroll_to_end()
             return
         self.input_field.value = ""
         self.input_field.update()
