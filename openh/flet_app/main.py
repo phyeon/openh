@@ -614,8 +614,8 @@ class OpenHApp:
         self._build_ui()
         if self.session.messages:
             self._hide_welcome()
-            for msg in self.session.messages:
-                self._replay_message(msg)
+            for i, msg in enumerate(self.session.messages):
+                self._replay_message(msg, msg_index=i)
             try:
                 self._update_messages()
             except Exception:
@@ -625,13 +625,12 @@ class OpenHApp:
         except Exception:
             pass
 
-    def _replay_message(self, msg) -> None:
+    def _replay_message(self, msg, msg_index: int = -1) -> None:
         from ..messages import TextBlock, ToolResultBlock, ToolUseBlock
         if msg.role == "user":
             text_parts = []
             for b in msg.content:
                 if isinstance(b, TextBlock):
-                    # Skip system context injections
                     if b.text.strip().startswith("<environment>"):
                         continue
                     text_parts.append(b.text)
@@ -640,12 +639,17 @@ class OpenHApp:
                         widgets.tool_result_panel(b.content, is_error=b.is_error)
                     )
             if text_parts:
-                self.message_column.controls.append(widgets.user_bubble("\n".join(text_parts)))
+                self.message_column.controls.append(
+                    widgets.user_bubble(
+                        "\n".join(text_parts),
+                        on_edit=self._on_edit_message,
+                        msg_index=msg_index,
+                    )
+                )
         else:
             text_parts = []
             for b in msg.content:
                 if isinstance(b, TextBlock):
-                    # Skip the synthetic ack for system context
                     if b.text.strip() == "Acknowledged. Ready to help.":
                         continue
                     text_parts.append(b.text)
@@ -660,8 +664,141 @@ class OpenHApp:
                     )
             if text_parts:
                 self.message_column.controls.append(
-                    widgets.assistant_message("".join(text_parts))
+                    widgets.assistant_message(
+                        "".join(text_parts),
+                        on_retry=self._on_retry_message,
+                        msg_index=msg_index,
+                    )
                 )
+
+    # ---- Edit / Retry ----
+
+    def _on_edit_message(self, msg_index: int, original_text: str) -> None:
+        """User clicked edit on a user bubble — show confirm modal with editable text."""
+        if self._busy:
+            return
+        field = ft.TextField(
+            value=original_text,
+            multiline=True,
+            min_lines=2,
+            max_lines=10,
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=14),
+        )
+        n_after = len(self.session.messages) - msg_index - 1
+        warning = f"{n_after} message(s) after this will be removed." if n_after > 0 else ""
+
+        def do_edit(e):
+            self.page.pop_dialog()
+            new_text = (field.value or "").strip()
+            if not new_text:
+                return
+            # Truncate history from this point
+            self.session.messages = self.session.messages[:msg_index]
+            self._jsonl_written_count = min(
+                getattr(self, "_jsonl_written_count", 0), msg_index
+            )
+            # Re-render
+            self.message_column.controls.clear()
+            self._welcome_widget = None
+            self._stream_message_widget = None
+            for i, msg in enumerate(self.session.messages):
+                self._replay_message(msg, msg_index=i)
+            self._update_messages()
+            # Submit as new turn
+            self.input_field.value = new_text
+            self.input_field.update()
+            self._on_submit(None)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            bgcolor=theme.BG_ELEVATED,
+            title=ft.Text("Edit message", color=theme.TEXT_PRIMARY, size=16),
+            content=ft.Column(
+                [
+                    ft.Container(content=field, width=480),
+                    ft.Text(warning, color=theme.WARN, size=12) if warning else ft.Container(),
+                ],
+                tight=True,
+                spacing=8,
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                ft.ElevatedButton(
+                    "Resend",
+                    on_click=do_edit,
+                    style=ft.ButtonStyle(bgcolor=theme.ACCENT, color=theme.TEXT_ON_ACCENT),
+                ),
+            ],
+        )
+        self.page.show_dialog(dialog)
+
+    def _on_retry_message(self, msg_index: int) -> None:
+        """User clicked retry on an assistant message — confirm and regenerate."""
+        if self._busy:
+            return
+        n_after = len(self.session.messages) - msg_index
+        warning = f"This will remove {n_after} message(s) and regenerate the response."
+
+        def do_retry(e):
+            self.page.pop_dialog()
+            # Keep everything before this assistant message
+            self.session.messages = self.session.messages[:msg_index]
+            self._jsonl_written_count = min(
+                getattr(self, "_jsonl_written_count", 0), msg_index
+            )
+            # Re-render
+            self.message_column.controls.clear()
+            self._welcome_widget = None
+            self._stream_message_widget = None
+            for i, msg in enumerate(self.session.messages):
+                self._replay_message(msg, msg_index=i)
+            self._update_messages()
+            # Re-run the agent from current state
+            self.page.run_task(self._retry_turn_async)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            bgcolor=theme.BG_ELEVATED,
+            title=ft.Text("Retry", color=theme.TEXT_PRIMARY, size=16),
+            content=ft.Text(warning, color=theme.TEXT_SECONDARY, size=14),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                ft.ElevatedButton(
+                    "Retry",
+                    on_click=do_retry,
+                    style=ft.ButtonStyle(bgcolor=theme.ACCENT, color=theme.TEXT_ON_ACCENT),
+                ),
+            ],
+        )
+        self.page.show_dialog(dialog)
+
+    async def _retry_turn_async(self) -> None:
+        """Re-run the model from current message state (no new user message)."""
+        self._busy = True
+        self._refresh_input()
+        try:
+            from ..agent import Agent
+            agent = Agent(
+                session=self.session,
+                system_prompt=self._get_system_prompt(),
+                event_sink=self._handle_stream_event,
+            )
+            await agent._drive_loop()
+        except Exception as exc:
+            self.message_column.controls.append(
+                widgets.error_panel(str(exc))
+            )
+        finally:
+            self._busy = False
+            self._finalize_streaming_message()
+            self._refresh_input()
+            self._refresh_top_bar()
+            self._refresh_status_bar()
+            self._autosave()
+            self._focus_input()
+            self._scroll_to_end()
 
     def _open_rename_dialog(self) -> None:
         field = ft.TextField(
@@ -823,8 +960,8 @@ class OpenHApp:
             self.message_column.controls.clear()
             self._welcome_widget = None
             self._stream_message_widget = None
-            for msg in self.session.messages:
-                self._replay_message(msg)
+            for i, msg in enumerate(self.session.messages):
+                self._replay_message(msg, msg_index=i)
             self._update_messages()
         except Exception as exc:  # noqa: BLE001
             self.message_column.controls.append(
@@ -1163,8 +1300,8 @@ class OpenHApp:
         self._welcome_widget = None
         self._stream_message_widget = None
         if messages:
-            for msg in messages:
-                self._replay_message(msg)
+            for i, msg in enumerate(messages):
+                self._replay_message(msg, msg_index=i)
         else:
             self._show_welcome()
         self._update_messages()

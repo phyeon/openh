@@ -9,9 +9,10 @@ from .base import PermissionDecision, Tool, ToolContext
 class EnterPlanModeTool(Tool):
     name: ClassVar[str] = "EnterPlanMode"
     description: ClassVar[str] = (
-        "Enter read-only plan mode. Use this when you need to design an implementation approach "
-        "before writing code, so the user can review and approve your plan before you act. "
-        "While in plan mode, do not modify files or run destructive commands."
+        "Use this tool proactively when you're about to start a non-trivial implementation task. "
+        "Getting user sign-off on your approach before writing code prevents wasted effort. "
+        "In plan mode, explore the codebase and design an implementation approach for user approval. "
+        "Use for: new features, multiple valid approaches, code modifications, multi-file changes."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

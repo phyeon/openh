@@ -16,9 +16,11 @@ DEFAULT_HEAD_LIMIT = 250
 class GrepTool(Tool):
     name: ClassVar[str] = "Grep"
     description: ClassVar[str] = (
-        "Search for a regex pattern across file contents. Backed by ripgrep when available, "
-        "with a Python fallback. Returns matching lines (default), or just file paths "
-        "(`output_mode='files_with_matches'`), or counts (`output_mode='count'`)."
+        "A powerful search tool built on ripgrep. Supports full regex syntax. "
+        "Filter files with the glob parameter (e.g. '*.js', '**/*.tsx'). "
+        "Output modes: 'content' shows matching lines (default), "
+        "'files_with_matches' shows only file paths, 'count' shows match counts. "
+        "ALWAYS use Grep for content search. NEVER invoke grep or rg via Bash."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

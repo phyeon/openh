@@ -453,31 +453,77 @@ def bottom_status_bar(
 #  Messages
 # ============================================================================
 
-def user_bubble(text: str) -> ft.Container:
-    """User message: right-aligned, rounded warm box."""
-    return ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(expand=True),
-                ft.Container(
-                    content=ft.Text(
-                        text,
-                        color=theme.TEXT_PRIMARY,
-                        size=15,
-                        selectable=True,
-                    ),
-                    bgcolor=theme.BG_ELEVATED,
-                    padding=ft.padding.symmetric(horizontal=16, vertical=12),
-                    border_radius=theme.RADIUS_LG,
-                ),
-            ],
+def user_bubble(
+    text: str,
+    on_edit: Callable | None = None,
+    msg_index: int = -1,
+) -> ft.Container:
+    """User message: right-aligned, rounded warm box. Edit icon on hover."""
+    edit_btn = ft.IconButton(
+        icon=ft.Icons.EDIT_OUTLINED,
+        icon_color=theme.TEXT_TERTIARY,
+        icon_size=13,
+        tooltip="Edit & resend",
+        on_click=lambda e: on_edit(msg_index, text) if on_edit else None,
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(2),
         ),
-        margin=ft.margin.only(top=16, bottom=6, left=80),
+        opacity=0,
+    )
+
+    def _show(e):
+        edit_btn.opacity = 0.7
+        edit_btn.update()
+
+    def _hide(e):
+        edit_btn.opacity = 0
+        edit_btn.update()
+
+    bubble = ft.Container(
+        content=ft.Text(
+            text,
+            color=theme.TEXT_PRIMARY,
+            size=15,
+            selectable=True,
+        ),
+        bgcolor=theme.BG_ELEVATED,
+        padding=ft.padding.symmetric(horizontal=16, vertical=12),
+        border_radius=theme.RADIUS_LG,
+    )
+
+    col = ft.Column(
+        [
+            ft.Row(
+                [ft.Container(expand=True), bubble],
+                spacing=0,
+            ),
+            ft.Row(
+                [ft.Container(expand=True), edit_btn],
+                spacing=0,
+            ) if on_edit else ft.Container(height=0),
+        ],
+        spacing=2,
+        tight=True,
+    )
+
+    if on_edit:
+        wrapper = ft.GestureDetector(content=col, on_enter=_show, on_exit=_hide)
+    else:
+        wrapper = col
+
+    return ft.Container(
+        content=wrapper,
+        margin=ft.margin.only(top=16, bottom=8, left=80),
     )
 
 
-def assistant_message(markdown_text: str) -> ft.Container:
-    """Assistant: full-width markdown, no bubble, slight left gutter."""
+def assistant_message(
+    markdown_text: str,
+    on_retry: Callable | None = None,
+    msg_index: int = -1,
+) -> ft.Container:
+    """Assistant: full-width markdown with hover retry button."""
     md = ft.Markdown(
         markdown_text or " ",
         extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
@@ -515,9 +561,43 @@ def assistant_message(markdown_text: str) -> ft.Container:
             ),
         ),
     )
+    retry_btn = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        icon_color=theme.TEXT_TERTIARY,
+        icon_size=13,
+        tooltip="Retry from here",
+        on_click=lambda e: on_retry(msg_index) if on_retry else None,
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(2),
+        ),
+        opacity=0,
+    )
+
+    def _show(e):
+        retry_btn.opacity = 0.7
+        retry_btn.update()
+
+    def _hide(e):
+        retry_btn.opacity = 0
+        retry_btn.update()
+
+    col = ft.Column(
+        [
+            md,
+            retry_btn if on_retry else ft.Container(height=0),
+        ],
+        spacing=2,
+    )
+
+    if on_retry:
+        wrapper = ft.GestureDetector(content=col, on_enter=_show, on_exit=_hide)
+    else:
+        wrapper = col
+
     return ft.Container(
-        content=md,
-        margin=ft.margin.only(top=12, bottom=12, right=40),
+        content=wrapper,
+        margin=ft.margin.only(top=12, bottom=8, right=40),
         padding=ft.padding.only(left=4),
     )
 

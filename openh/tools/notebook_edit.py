@@ -12,9 +12,10 @@ from .base import PermissionDecision, Tool, ToolContext
 class NotebookEditTool(Tool):
     name: ClassVar[str] = "NotebookEdit"
     description: ClassVar[str] = (
-        "Edit a Jupyter notebook (.ipynb) cell. Supports replace (overwrite cell "
-        "source), insert (add new cell), and delete (remove cell). Cells are "
-        "0-indexed. The notebook path must be absolute. Requires user permission."
+        "Completely replaces the contents of a specific cell in a Jupyter notebook (.ipynb file). "
+        "The notebook_path must be absolute. The cell_number is 0-indexed. "
+        "Use edit_mode=insert to add a new cell at the index. "
+        "Use edit_mode=delete to delete the cell at the index."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

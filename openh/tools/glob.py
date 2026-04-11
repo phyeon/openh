@@ -12,9 +12,10 @@ MAX_RESULTS = 100
 class GlobTool(Tool):
     name: ClassVar[str] = "Glob"
     description: ClassVar[str] = (
-        "Find files matching a glob pattern (e.g. `**/*.py`, `src/**/*.tsx`). "
-        "Returns up to 100 paths sorted by modification time, newest first. "
-        "If `path` is omitted, searches the current working directory."
+        "Fast file pattern matching tool that works with any codebase size. "
+        "Supports glob patterns like '**/*.js' or 'src/**/*.ts'. "
+        "Returns matching file paths sorted by modification time. "
+        "Use this tool when you need to find files by name patterns."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

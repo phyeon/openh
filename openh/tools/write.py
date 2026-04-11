@@ -10,9 +10,10 @@ from .base import PermissionDecision, Tool, ToolContext
 class WriteTool(Tool):
     name: ClassVar[str] = "Write"
     description: ClassVar[str] = (
-        "Create a new file or fully overwrite an existing one. "
-        "If the target file already exists, it must have been Read in this session first; "
-        "otherwise the call will fail. Always requires the user's permission."
+        "Writes a file to the local filesystem. This tool will overwrite the existing "
+        "file if there is one at the provided path. If this is an existing file, you MUST "
+        "use the Read tool first. Prefer the Edit tool for modifying existing files — "
+        "it only sends the diff. Only use Write to create new files or for complete rewrites."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

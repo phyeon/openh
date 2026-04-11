@@ -10,10 +10,12 @@ from .base import PermissionDecision, Tool, ToolContext
 class EditTool(Tool):
     name: ClassVar[str] = "Edit"
     description: ClassVar[str] = (
-        "Replace one exact substring in an existing file. "
-        "The target file must have been Read in this session first. "
-        "By default, `old_string` must appear exactly once; set `replace_all=True` "
-        "to replace every occurrence. Always requires the user's permission."
+        "Performs exact string replacements in files. "
+        "You must use your Read tool at least once on a file before editing it. "
+        "The edit will FAIL if old_string is not unique in the file — provide more "
+        "surrounding context to make it unique, or use replace_all to change every "
+        "instance. ALWAYS prefer editing existing files over creating new ones. "
+        "Never include line number prefixes in old_string or new_string."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

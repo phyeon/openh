@@ -12,9 +12,10 @@ MAX_RESULTS = 10
 class WebSearchTool(Tool):
     name: ClassVar[str] = "WebSearch"
     description: ClassVar[str] = (
-        "Search the web and return a list of results (title, URL, snippet). "
-        "Uses DuckDuckGo. Up to 10 results per query. Use WebFetch to then "
-        "retrieve the full content of any interesting result."
+        "Allows searching the web and using the results to inform responses. "
+        "Provides up-to-date information for current events and recent data. "
+        "Use this tool for accessing information beyond the knowledge cutoff. "
+        "Use WebFetch to then retrieve the full content of any interesting result."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

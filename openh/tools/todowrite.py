@@ -9,10 +9,11 @@ from .base import PermissionDecision, Tool, ToolContext
 class TodoWriteTool(Tool):
     name: ClassVar[str] = "TodoWrite"
     description: ClassVar[str] = (
-        "Create and manage a structured task list for the current session. "
-        "Each todo has: content (imperative), activeForm (present continuous), "
-        "and status (pending / in_progress / completed). Exactly one task should "
-        "be in_progress at any time. Pass the full replacement list on every call."
+        "Use this tool to create and manage a structured task list for your current session. "
+        "This helps you track progress and organize complex tasks. Use proactively when a task "
+        "requires 3 or more distinct steps. Task states: pending, in_progress, completed. "
+        "Mark each task completed as soon as you finish it — do not batch completions. "
+        "Only have ONE task as in_progress at a time."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

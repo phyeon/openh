@@ -14,9 +14,10 @@ MAX_RESPONSE_CHARS = 60_000
 class WebFetchTool(Tool):
     name: ClassVar[str] = "WebFetch"
     description: ClassVar[str] = (
-        "Fetch the contents of a URL and return the text. HTML is converted to "
-        "plain text (tags stripped). Use for retrieving documentation, API specs, "
-        "or web pages referenced by the user. Max ~60K chars returned."
+        "Fetches content from a specified URL. The URL must be fully-formed and valid. "
+        "Fetches the URL content, converts HTML to markdown. "
+        "Results may be summarized if the content is very large. "
+        "Use this tool when you need to retrieve and analyze web content."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

@@ -14,10 +14,11 @@ DEFAULT_LIMIT = 2000
 class ReadTool(Tool):
     name: ClassVar[str] = "Read"
     description: ClassVar[str] = (
-        "Read a text file from the local filesystem. "
-        "Returns the contents with `cat -n` style line numbers (1-indexed). "
-        "By default reads up to 2000 lines from the start. "
-        "Use offset/limit for slicing larger files. The path must be absolute."
+        "Reads a file from the local filesystem. The file_path must be absolute. "
+        "By default, it reads up to 2000 lines starting from the beginning of the file. "
+        "When you already know which part of the file you need, only read that part — "
+        "this can be important for larger files. Results are returned with line numbers "
+        "starting at 1. Always read a file before editing it."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

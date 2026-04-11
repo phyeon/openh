@@ -32,11 +32,12 @@ class BackgroundShell:
 class BashTool(Tool):
     name: ClassVar[str] = "Bash"
     description: ClassVar[str] = (
-        "Execute a shell command via /bin/sh. Returns stdout, stderr, and exit code. "
-        "Default timeout 2 minutes. Set `run_in_background=true` to start the "
-        "command in the background — the call returns immediately with a "
-        "`shell_id` you can poll using BashOutput or terminate using KillShell. "
-        "Requires user permission for each invocation."
+        "Executes a given bash command and returns its output. "
+        "IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, grep, or find "
+        "— use the dedicated Read, Edit, Glob, and Grep tools instead. "
+        "The working directory persists between commands, but shell state does not. "
+        "Default timeout 2 minutes. Set run_in_background=true to start the command "
+        "in the background. Always quote file paths that contain spaces."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

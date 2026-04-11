@@ -13,11 +13,12 @@ from .base import PermissionDecision, Tool, ToolContext
 class AgentTool(Tool):
     name: ClassVar[str] = "Agent"
     description: ClassVar[str] = (
-        "Spawn a sub-agent to handle a focused multi-step task autonomously. "
-        "The sub-agent has access to the same tools (Read/Write/Edit/Bash/Glob/Grep/...) "
-        "and will run until it reaches a natural stopping point, then return its final text. "
-        "Use for parallelizable research, exploration, or scoped implementation tasks. "
-        "The parent conversation is not affected."
+        "Launch a new agent to handle complex, multi-step tasks autonomously. "
+        "Each agent runs in its own session with access to the same tools. "
+        "Launch multiple agents concurrently whenever possible, to maximize performance. "
+        "Always include a short description (3-5 words) summarizing what the agent will do. "
+        "The agent's outputs should generally be trusted. "
+        "Clearly tell the agent whether you expect it to write code or just to do research."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
