@@ -629,8 +629,7 @@ class OpenHApp:
         self._build_ui()
         if self.session.messages:
             self._hide_welcome()
-            for i, msg in enumerate(self.session.messages):
-                self._replay_message(msg, msg_index=i)
+            self._replay_messages_all()
             try:
                 self._update_messages()
             except Exception:
@@ -640,46 +639,63 @@ class OpenHApp:
         except Exception:
             pass
 
-    def _replay_message(self, msg, msg_index: int = -1) -> None:
+    def _replay_messages_all(self) -> None:
+        """Replay all session messages, pairing tool_call + tool_result into combined panels."""
         from ..messages import TextBlock, ToolResultBlock, ToolUseBlock
-        if msg.role == "user":
-            text_parts = []
-            for b in msg.content:
-                if isinstance(b, TextBlock):
-                    if b.text.strip().startswith("<environment>"):
-                        continue
-                    text_parts.append(b.text)
-                elif isinstance(b, ToolResultBlock):
+
+        # Build a map of tool_use_id → ToolResultBlock for matching
+        result_map: dict[str, ToolResultBlock] = {}
+        for msg in self.session.messages:
+            if msg.role == "user":
+                for b in msg.content:
+                    if isinstance(b, ToolResultBlock):
+                        result_map[b.tool_use_id] = b
+
+        for msg_index, msg in enumerate(self.session.messages):
+            if msg.role == "user":
+                text_parts = []
+                for b in msg.content:
+                    if isinstance(b, TextBlock):
+                        if b.text.strip().startswith("<environment>"):
+                            continue
+                        text_parts.append(b.text)
+                    # ToolResultBlocks are rendered with their matching tool_call above
+                if text_parts:
                     self.message_column.controls.append(
-                        widgets.tool_result_panel(b.content, is_error=b.is_error)
-                    )
-            if text_parts:
-                self.message_column.controls.append(
-                    widgets.user_bubble(
-                        "\n".join(text_parts),
-                        on_edit=self._on_edit_message,
-                        msg_index=msg_index,
-                    )
-                )
-        else:
-            text_parts = []
-            for b in msg.content:
-                if isinstance(b, TextBlock):
-                    if b.text.strip() == "Acknowledged. Ready to help.":
-                        continue
-                    text_parts.append(b.text)
-                elif isinstance(b, ToolUseBlock):
-                    if text_parts:
-                        self.message_column.controls.append(
-                            widgets.assistant_message("".join(text_parts))
+                        widgets.user_bubble(
+                            "\n".join(text_parts),
+                            on_edit=self._on_edit_message,
+                            msg_index=msg_index,
                         )
-                        text_parts = []
-                    self.message_column.controls.append(
-                        widgets.tool_call_panel(b.name, b.input)
                     )
-            if text_parts:
-                self.message_column.controls.append(
-                    widgets.assistant_message(
+            else:
+                text_parts = []
+                for b in msg.content:
+                    if isinstance(b, TextBlock):
+                        if b.text.strip() == "Acknowledged. Ready to help.":
+                            continue
+                        text_parts.append(b.text)
+                    elif isinstance(b, ToolUseBlock):
+                        if text_parts:
+                            self.message_column.controls.append(
+                                widgets.assistant_message("".join(text_parts))
+                            )
+                            text_parts = []
+                        # Find matching result
+                        result = result_map.get(b.id)
+                        if result:
+                            self.message_column.controls.append(
+                                widgets.tool_combined_panel(
+                                    b.name, b.input, result.content, is_error=result.is_error,
+                                )
+                            )
+                        else:
+                            self.message_column.controls.append(
+                                widgets.tool_call_panel(b.name, b.input)
+                            )
+                if text_parts:
+                    self.message_column.controls.append(
+                        widgets.assistant_message(
                         "".join(text_parts),
                         on_retry=self._on_retry_message,
                         msg_index=msg_index,
@@ -718,8 +734,7 @@ class OpenHApp:
             self.message_column.controls.clear()
             self._welcome_widget = None
             self._stream_message_widget = None
-            for i, msg in enumerate(self.session.messages):
-                self._replay_message(msg, msg_index=i)
+            self._replay_messages_all()
             self._update_messages()
             # Submit as new turn
             self.input_field.value = new_text
@@ -767,8 +782,7 @@ class OpenHApp:
             self.message_column.controls.clear()
             self._welcome_widget = None
             self._stream_message_widget = None
-            for i, msg in enumerate(self.session.messages):
-                self._replay_message(msg, msg_index=i)
+            self._replay_messages_all()
             self._update_messages()
             # Re-run the agent from current state
             self.page.run_task(self._retry_turn_async)
@@ -1059,8 +1073,7 @@ class OpenHApp:
             self.message_column.controls.clear()
             self._welcome_widget = None
             self._stream_message_widget = None
-            for i, msg in enumerate(self.session.messages):
-                self._replay_message(msg, msg_index=i)
+            self._replay_messages_all()
             self._update_messages()
         except Exception as exc:  # noqa: BLE001
             self.message_column.controls.append(
@@ -1440,8 +1453,7 @@ class OpenHApp:
         self._welcome_widget = None
         self._stream_message_widget = None
         if messages:
-            for i, msg in enumerate(messages):
-                self._replay_message(msg, msg_index=i)
+            self._replay_messages_all()
         else:
             self._show_welcome()
         self._update_messages()
