@@ -42,6 +42,7 @@ class PermissionDialog:
         self._dialog = ft.AlertDialog(
             modal=True,
             bgcolor=theme.BG_ELEVATED,
+            content_padding=ft.padding.symmetric(horizontal=24, vertical=20),
             title=ft.Row(
                 [
                     ft.Icon(ft.Icons.SHIELD_OUTLINED, color=theme.ACCENT, size=20),
@@ -55,32 +56,31 @@ class PermissionDialog:
                 spacing=8,
                 tight=True,
             ),
-            content=ft.Container(
-                width=560,
-                content=ft.Column(
-                    [
-                        ft.Text(
-                            description,
-                            color=theme.TEXT_SECONDARY,
+            content=ft.Column(
+                [
+                    ft.Text(
+                        description,
+                        color=theme.TEXT_SECONDARY,
+                        size=12,
+                    ),
+                    ft.Container(
+                        content=ft.Text(
+                            body,
+                            font_family=theme.FONT_MONO,
                             size=12,
+                            color=theme.TEXT_PRIMARY,
+                            selectable=True,
                         ),
-                        ft.Container(
-                            content=ft.Text(
-                                body,
-                                font_family=theme.FONT_MONO,
-                                size=11,
-                                color=theme.TEXT_PRIMARY,
-                                selectable=True,
-                            ),
-                            bgcolor=theme.BG_DEEPEST,
-                            border=ft.border.all(1, theme.BORDER_SUBTLE),
-                            border_radius=theme.RADIUS_SM,
-                            padding=10,
-                        ),
-                    ],
-                    spacing=10,
-                    tight=True,
-                ),
+                        bgcolor=theme.BG_DEEPEST,
+                        border=ft.border.all(1, theme.BORDER_SUBTLE),
+                        border_radius=theme.RADIUS_SM,
+                        padding=14,
+                        width=520,
+                    ),
+                ],
+                spacing=10,
+                tight=True,
+                width=520,
             ),
             actions=[
                 ft.TextButton(
