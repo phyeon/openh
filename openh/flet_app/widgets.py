@@ -725,13 +725,15 @@ def tool_call_panel(name: str, input_dict: dict) -> ft.Container:
         selectable=True,
     )
 
-    return _make_collapsible_panel(
+    panel = _make_collapsible_panel(
         header, body_text,
         bg=theme.TOOL_CALL_BG,
         border_color=theme.TOOL_CALL_BORDER,
-        margin_top=6, margin_bottom=2,
+        margin_top=4, margin_bottom=2,
         initially_open=False,
     )
+    panel._is_tool_call = True  # marker for replacement by tool_combined_panel
+    return panel
 
 
 def _tool_call_summary(name: str, input_dict: dict) -> str:
@@ -761,55 +763,85 @@ def _tool_call_summary(name: str, input_dict: dict) -> str:
 
 
 def tool_result_panel(content: str, is_error: bool = False) -> ft.Container:
-    if len(content) > 4000:
-        content = content[:4000] + f"\n…(+{len(content) - 4000} chars)"
+    """Standalone result panel (fallback when no preceding tool_call found)."""
+    return tool_combined_panel("tool", {}, content, is_error)
 
-    icon = ft.Icons.ERROR_OUTLINE if is_error else ft.Icons.CHECK_CIRCLE_OUTLINE
-    header_color = theme.ERROR if is_error else theme.SUCCESS
-    label = "error" if is_error else "result"
 
-    # Show a short preview in the header
-    first_line = content.split("\n", 1)[0]
-    if len(first_line) > 80:
-        first_line = first_line[:77] + "…"
+def _result_summary(name: str, content: str, is_error: bool) -> str:
+    """One-line result summary for the collapsed header."""
+    if is_error:
+        first = content.strip().splitlines()[0] if content.strip() else "error"
+        return first[:60]
+    n = name.lower()
+    if n == "bash":
+        # Extract exit code
+        for line in content.splitlines():
+            if "exit_code" in line.lower() or "exit code" in line.lower():
+                return line.strip()[:60]
+        lines = content.strip().splitlines()
+        return f"{len(lines)} lines" if lines else "done"
+    if n == "read":
+        lines = content.strip().splitlines()
+        return f"{len(lines)} lines"
+    if n == "write":
+        return content.strip().splitlines()[0][:60] if content.strip() else "done"
+    if n in ("glob", "grep"):
+        lines = content.strip().splitlines()
+        return f"{len(lines)} results" if len(lines) > 1 else (lines[0][:60] if lines else "no results")
+    if n == "edit":
+        return "applied" if not is_error else content.splitlines()[0][:60]
+    # Generic
+    first = content.strip().splitlines()[0] if content.strip() else "done"
+    return first[:60] if len(first) <= 60 else first[:57] + "…"
+
+
+def tool_combined_panel(
+    name: str, input_dict: dict, result_content: str, is_error: bool = False,
+) -> ft.Container:
+    """Combined tool call + result in one collapsible panel (Claude Code style)."""
+    summary = _tool_call_summary(name, input_dict)
+    result_summary = _result_summary(name, result_content, is_error)
+
+    result_icon = ft.Icons.ERROR_OUTLINE if is_error else ft.Icons.CHECK_CIRCLE_OUTLINE
+    result_color = theme.ERROR if is_error else theme.SUCCESS
 
     header = ft.Row(
         [
-            ft.Icon(icon, color=header_color, size=13),
-            ft.Text(
-                label,
-                color=header_color,
-                size=11,
-                weight=ft.FontWeight.W_600,
-            ),
-            ft.Text(
-                first_line,
-                color=theme.TEXT_TERTIARY,
-                size=11,
-                font_family=theme.FONT_MONO,
-                no_wrap=True,
-                overflow=ft.TextOverflow.ELLIPSIS,
-                expand=True,
-            ),
+            ft.Container(width=6, height=6, border_radius=3, bgcolor=theme.ACCENT),
+            ft.Text(name, color=theme.ACCENT, size=12, weight=ft.FontWeight.W_700, font_family=theme.FONT_MONO),
+            ft.Text(summary, color=theme.TEXT_TERTIARY, size=11, font_family=theme.FONT_MONO,
+                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS, expand=True),
+            ft.Icon(result_icon, color=result_color, size=12),
+            ft.Text(result_summary, color=theme.TEXT_TERTIARY, size=10, font_family=theme.FONT_MONO,
+                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
         ],
-        spacing=6,
-        tight=True,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=6, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
-    body_text = ft.Text(
-        content,
-        font_family=theme.FONT_MONO,
-        size=11,
-        color=theme.ERROR if is_error else theme.TEXT_SECONDARY,
-        selectable=True,
-    )
+    # Body: input JSON + result output
+    try:
+        input_body = json.dumps(input_dict, indent=2, ensure_ascii=False)
+    except Exception:
+        input_body = str(input_dict)
+    if len(input_body) > 1500:
+        input_body = input_body[:1500] + "\n…"
+    if len(result_content) > 3000:
+        result_content = result_content[:3000] + f"\n…(+{len(result_content)-3000} chars)"
+
+    body = ft.Column([
+        ft.Text("Input:", color=theme.TEXT_TERTIARY, size=10, weight=ft.FontWeight.W_600),
+        ft.Text(input_body, font_family=theme.FONT_MONO, size=11, color=theme.TEXT_SECONDARY, selectable=True),
+        ft.Container(height=6),
+        ft.Text("Result:", color=result_color, size=10, weight=ft.FontWeight.W_600),
+        ft.Text(result_content, font_family=theme.FONT_MONO, size=11,
+                color=theme.ERROR if is_error else theme.TEXT_SECONDARY, selectable=True),
+    ], spacing=2, tight=True)
 
     return _make_collapsible_panel(
-        header, body_text,
-        bg=theme.TOOL_RESULT_BG,
-        border_color=theme.TOOL_RESULT_BORDER,
-        margin_top=2, margin_bottom=10,
+        header, body,
+        bg=theme.TOOL_CALL_BG,
+        border_color=theme.TOOL_CALL_BORDER,
+        margin_top=4, margin_bottom=4,
         initially_open=False,
     )
 

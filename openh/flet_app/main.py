@@ -1260,15 +1260,36 @@ class OpenHApp:
         elif isinstance(event, ToolUseStart):
             self._finalize_streaming_message()
         elif isinstance(event, ToolUseEnd):
+            # Show pending tool_call; will be replaced with combined panel on result
+            self._last_tool_call = (event.name, event.input)
             self.message_column.controls.append(
                 widgets.tool_call_panel(event.name, event.input)
             )
             self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, ToolResultEvent):
-            self.message_column.controls.append(
-                widgets.tool_result_panel(event.content, is_error=event.is_error)
-            )
+            # Replace the pending tool_call panel with combined call+result
+            tc = getattr(self, "_last_tool_call", None)
+            if tc:
+                # Find and replace last tool_call panel
+                for i in range(len(self.message_column.controls) - 1, -1, -1):
+                    ctrl = self.message_column.controls[i]
+                    if getattr(ctrl, "_is_tool_call", False):
+                        self.message_column.controls[i] = widgets.tool_combined_panel(
+                            tc[0], tc[1], event.content, is_error=event.is_error,
+                        )
+                        break
+                else:
+                    self.message_column.controls.append(
+                        widgets.tool_combined_panel(
+                            tc[0], tc[1], event.content, is_error=event.is_error,
+                        )
+                    )
+                self._last_tool_call = None
+            else:
+                self.message_column.controls.append(
+                    widgets.tool_result_panel(event.content, is_error=event.is_error)
+                )
             self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, Usage):
