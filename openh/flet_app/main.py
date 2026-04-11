@@ -112,6 +112,7 @@ class OpenHApp:
         self._mcp_loaded = False
         self.permission_dialog = PermissionDialog(page)
         self._busy = False
+        self._current_task: "asyncio.Task | None" = None
         self._skip_permissions = self.settings.skip_permissions
         self._file_picker = ft.FilePicker()
         self._dispatcher = CommandDispatcher()
@@ -490,6 +491,7 @@ class OpenHApp:
             model=self.session.provider.model,
             skip_permissions=self._skip_permissions,
             busy=self._busy,
+            on_stop=self._stop_generation,
             attachments=[(i, type(b).__name__, getattr(b, "data_base64", "")) for i, b in enumerate(pending)],
             on_remove_attachment=self._remove_attachment,
         )
@@ -610,6 +612,24 @@ class OpenHApp:
         # Restore scroll position after layout change
         self._scroll_to_end()
 
+    def _stop_generation(self) -> None:
+        """Cancel the current model turn."""
+        if self._current_task is not None:
+            self._current_task.cancel()
+            self._current_task = None
+        self._finalize_streaming_message()
+        # Add interruption marker
+        from ..messages import TextBlock
+        self.message_column.controls.append(
+            widgets.system_note("[Request interrupted by user]")
+        )
+        self._update_messages()
+        self._busy = False
+        self._refresh_input()
+        self._refresh_top_bar()
+        self._refresh_status_bar()
+        self._autosave()
+
     def _toggle_permissions(self) -> None:
         self._skip_permissions = not self._skip_permissions
         self._refresh_input()
@@ -659,7 +679,13 @@ class OpenHApp:
                 text_parts = []
                 for b in msg.content:
                     if isinstance(b, TextBlock):
-                        if b.text.strip().startswith("<environment>"):
+                        t = b.text.strip()
+                        if t.startswith("<environment>"):
+                            continue
+                        if t.startswith("[Conversation compacted") or t.startswith("[Prior conversation summary"):
+                            self.message_column.controls.append(
+                                widgets.system_note(t.splitlines()[0])
+                            )
                             continue
                         text_parts.append(b.text)
                     # ToolResultBlocks are rendered with their matching tool_call above
@@ -675,7 +701,8 @@ class OpenHApp:
                 text_parts = []
                 for b in msg.content:
                     if isinstance(b, TextBlock):
-                        if b.text.strip() == "Acknowledged. Ready to help.":
+                        t = b.text.strip()
+                        if t in ("Acknowledged. Ready to help.", "Understood. Continuing from the recent context."):
                             continue
                         text_parts.append(b.text)
                     elif isinstance(b, ToolUseBlock):
@@ -1006,7 +1033,9 @@ class OpenHApp:
     # ---------------- handlers ----------------
 
     def _on_key(self, e: ft.KeyboardEvent) -> None:
-        if e.meta and e.key == "M":
+        if e.key == "Escape" and self._busy:
+            self._stop_generation()
+        elif e.meta and e.key == "M":
             self._switch_model()
         elif e.meta and e.key == "L":
             self._new_chat()
@@ -1113,7 +1142,13 @@ class OpenHApp:
 
     def _on_submit(self, e) -> None:
         text = (self.input_field.value or "").strip()
-        if not text or self._busy:
+        if not text:
+            return
+        if self._busy:
+            # Queue the message for after the current turn finishes
+            self._queued_input = text
+            self.input_field.value = ""
+            self.input_field.update()
             return
         self.input_field.value = ""
         self.input_field.update()
@@ -1152,9 +1187,9 @@ class OpenHApp:
         pending_media = getattr(self, "_pending_media", None) or []
         if pending_media:
             self._pending_media = []  # type: ignore[attr-defined]
-            self.page.run_task(self._run_turn_with_media_async, text, pending_media)
+            self._current_task = self.page.run_task(self._run_turn_with_media_async, text, pending_media)
         else:
-            self.page.run_task(self._run_turn_async, text)
+            self._current_task = self.page.run_task(self._run_turn_async, text)
 
     async def _run_turn_with_media_async(self, user_text: str, media_blocks: list) -> None:
         """Like _run_turn_async but first injects image/document blocks on the user message."""
@@ -1220,7 +1255,9 @@ class OpenHApp:
 
     async def _scroll_to_end_async(self) -> None:
         try:
-            await self.message_column.scroll_to(offset=-1, duration=300)
+            import asyncio
+            await asyncio.sleep(0.05)  # let layout settle
+            await self.message_column.scroll_to(offset=-1, duration=200)
         except Exception:
             pass
 
@@ -1263,12 +1300,20 @@ class OpenHApp:
         finally:
             self._finalize_streaming_message()
             self._busy = False
+            self._current_task = None
             self._refresh_input()
             self._refresh_top_bar()
             self._refresh_status_bar()
             self._autosave()
             self._focus_input()
             self._scroll_to_end()
+            # Process queued input if any
+            queued = getattr(self, "_queued_input", None)
+            if queued:
+                self._queued_input = None
+                self.input_field.value = queued
+                self.input_field.update()
+                self._on_submit(None)
 
     async def _handle_stream_event(self, event: StreamEvent) -> None:
         if isinstance(event, TextDelta):

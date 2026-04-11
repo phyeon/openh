@@ -1083,6 +1083,7 @@ def input_area(
     model: str,
     skip_permissions: bool,
     busy: bool = False,
+    on_stop: Callable | None = None,
     attachments: list[tuple[int, str]] | None = None,
     on_remove_attachment: Callable[[int], None] | None = None,
 ) -> ft.Container:
@@ -1124,19 +1125,32 @@ def input_area(
         on_pick=on_pick_model,
     )
 
-    send_btn = ft.IconButton(
-        icon=ft.Icons.ARROW_UPWARD,
-        icon_color=theme.TEXT_ON_ACCENT,
-        bgcolor=theme.ACCENT if not busy else theme.BG_ELEVATED,
-        icon_size=18,
-        tooltip="Send (Enter)",
-        on_click=lambda e: on_send(),
-        style=ft.ButtonStyle(
-            shape=ft.CircleBorder(),
-            padding=ft.padding.all(10),
-        ),
-        disabled=busy,
-    )
+    if busy and on_stop:
+        send_btn = ft.IconButton(
+            icon=ft.Icons.STOP,
+            icon_color=theme.TEXT_ON_ACCENT,
+            bgcolor=theme.ERROR,
+            icon_size=18,
+            tooltip="Stop generation (Esc)",
+            on_click=lambda e: on_stop(),
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                padding=ft.padding.all(10),
+            ),
+        )
+    else:
+        send_btn = ft.IconButton(
+            icon=ft.Icons.ARROW_UPWARD,
+            icon_color=theme.TEXT_ON_ACCENT,
+            bgcolor=theme.ACCENT,
+            icon_size=18,
+            tooltip="Send (Enter)",
+            on_click=lambda e: on_send(),
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                padding=ft.padding.all(10),
+            ),
+        )
 
     bottom_row = ft.Row(
         [
