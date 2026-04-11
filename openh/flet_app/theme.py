@@ -59,70 +59,72 @@ class Tokens:
 
 
 # ---------- Dark mode tokens ----------
-# Refined dark palette with Pantone-inspired muted blue accent.
-# Backgrounds are cool-neutral (no warm/yellow cast), text is soft white.
-_DARK_ACCENT = "#5B8DEF"
+# Extracted from Claude.app CSS variables (2025-10-17)
+# --bg-000: hsl(60 2.1% 18.4%) = #2f2f2d
+# --accent-brand: #d97757 (clay)
 DARK = Tokens(
-    BG_SIDEBAR="#e0161719",   # semi-transparent (alpha 0xe0)
-    BG_DEEPEST="#111214",
-    BG_PAGE="#1a1b1e",
-    BG_ELEVATED="#232529",
-    BG_HOVER="#282a2f",
-    BG_SIDEBAR_SELECTED="#1f2126",
-    BG_STATUS="#111214",
-    TEXT_PRIMARY="#E8EAED",
-    TEXT_SECONDARY="#A0A4AB",
-    TEXT_TERTIARY="#6B7079",
-    TEXT_DISABLED="#4a4e56",
-    TEXT_ON_ACCENT="#ffffff",
-    ACCENT=_DARK_ACCENT,
-    ACCENT_DARK="#4A7AD8",
-    ACCENT_HOVER="#7BA5F5",
-    ACCENT_PRESSED="#4670C8",
-    ACCENT_FAINT="#1c2436",
-    BORDER_FAINT="#232529",
-    BORDER_SUBTLE="#2e3138",
-    BORDER_STRONG="#3d4148",
-    ERROR="#EF6461",
-    WARN="#E8A555",
-    SUCCESS="#6BCB77",
-    TOOL_CALL_BG="#1c2028",
-    TOOL_CALL_BORDER="#2a3344",
-    TOOL_RESULT_BG="#1a1e24",
-    TOOL_RESULT_BORDER="#252c38",
-    ERROR_BG="#2c1a1a",
+    BG_SIDEBAR="#e0252523",   # --bg-100 with alpha
+    BG_DEEPEST="#131312",     # --bg-300
+    BG_PAGE="#2f2f2d",        # --bg-000
+    BG_ELEVATED="#3a3a37",    # elevated surface
+    BG_HOVER="#44443f",       # hover
+    BG_SIDEBAR_SELECTED="#33332f",
+    BG_STATUS="#1f1e1d",      # --bg-200
+    TEXT_PRIMARY="#faf9f5",    # --text-000
+    TEXT_SECONDARY="#c1bfb5",  # --text-200
+    TEXT_TERTIARY="#9b9991",   # --text-400
+    TEXT_DISABLED="#6c6a60",   # --text-500
+    TEXT_ON_ACCENT="#faf9f5",
+    ACCENT="#d97757",         # --claude-accent-clay
+    ACCENT_DARK="#c4633f",
+    ACCENT_HOVER="#e8926e",
+    ACCENT_PRESSED="#b85a38",
+    ACCENT_FAINT="#3a2820",
+    BORDER_FAINT="#3a3936",   # --border subtle
+    BORDER_SUBTLE="#4a4944",
+    BORDER_STRONG="#5a5952",
+    ERROR="#e85d5d",          # --danger
+    WARN="#e8a555",
+    SUCCESS="#6bcb77",        # --success
+    TOOL_CALL_BG="#2a2825",
+    TOOL_CALL_BORDER="#4a4538",
+    TOOL_RESULT_BG="#252422",
+    TOOL_RESULT_BORDER="#3a3832",
+    ERROR_BG="#3a1f1f",
 )
 
 # ---------- Light mode tokens ----------
-# Clean cool-white with soft blue accent.
+# Extracted from Claude.app CSS variables (2025-10-17)
+# --bg-000: hsl(0 0% 100%) = #ffffff
+# --bg-100: hsl(48 33.3% 97.1%) = #faf9f5
 LIGHT = Tokens(
-    BG_PAGE="#fafbfc",
-    BG_SIDEBAR="#e8f2f3f5",   # semi-transparent
-    BG_DEEPEST="#ebedf0",
+    BG_PAGE="#ffffff",         # --bg-000
+    BG_SIDEBAR="#e8faf9f5",   # --bg-100 with alpha
+    BG_DEEPEST="#f0eee6",     # --bg-300
     BG_ELEVATED="#ffffff",
-    BG_HOVER="#e8eaed",
-    BG_SIDEBAR_SELECTED="#e1e4e8",
-    BG_STATUS="#ebedf0",
-    TEXT_PRIMARY="#1a1c20",
-    TEXT_SECONDARY="#444952",
-    TEXT_TERTIARY="#6b7280",
-    TEXT_DISABLED="#a0a5ae",
+    BG_HOVER="#f4f4ec",       # --bg-200
+    BG_SIDEBAR_SELECTED="#ece9df",
+    BG_STATUS="#f0eee6",
+    TEXT_PRIMARY="#131312",    # --text-000
+    TEXT_SECONDARY="#3c3c39",  # --text-200
+    TEXT_TERTIARY="#72716b",   # --text-400
+    TEXT_DISABLED="#a6a39a",   # --text-500
     TEXT_ON_ACCENT="#ffffff",
-    ACCENT="#4878DB",
-    ACCENT_DARK="#3660B8",
-    ACCENT_HOVER="#5E8CE6",
-    ACCENT_PRESSED="#3358A8",
-    ACCENT_FAINT="#dfe8f8",
-    BORDER_FAINT="#e2e5ea",
-    BORDER_SUBTLE="#d0d4db",
-    BORDER_STRONG="#a0a6b0",
-    ERROR="#d03838",
+    ACCENT="#d97757",         # --claude-accent-clay
+    ACCENT_DARK="#c4633f",
+    ACCENT_HOVER="#e8926e",
+    ACCENT_PRESSED="#b85a38",
+    ACCENT_FAINT="#fae8df",
+    BORDER_FAINT="#e5e3da",
+    BORDER_SUBTLE="#d5d3c8",
+    BORDER_STRONG="#a6a39a",
+    ERROR="#d03838",          # --danger
     WARN="#c07a1c",
     SUCCESS="#3aa169",
-    TOOL_CALL_BG="#edf1fa",
-    TOOL_CALL_BORDER="#c4d0e8",
-    TOOL_RESULT_BG="#eef2f7",
-    TOOL_RESULT_BORDER="#c8d1de",
+    TOOL_CALL_BG="#f8f5ec",
+    TOOL_CALL_BORDER="#e0d8c4",
+    TOOL_RESULT_BG="#f4f4f0",
+    TOOL_RESULT_BORDER="#d8d6cc",
     ERROR_BG="#fde8e8",
 )
 
@@ -233,8 +235,8 @@ def _light(accent: str, accent_dk: str, accent_hv: str, accent_pr: str,
 
 # --- Register 10 production-grade palettes ---
 
-# 1. Default (Tailwind Blue)
-_register_preset("Blue", DARK, LIGHT)
+# 1. Claude (official Claude.app colors)
+_register_preset("Claude", DARK, LIGHT)
 
 # 2. Charcoal (VS Code-inspired neutral)
 _register_preset("Charcoal",

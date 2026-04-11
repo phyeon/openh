@@ -1247,9 +1247,13 @@ class OpenHApp:
             controls.append(widget)
 
     def _update_messages(self) -> None:
-        """Update message_column. Spacer stays at end from initial setup."""
+        """Update via page.update() to preserve scroll position.
+
+        Column.update() re-renders the entire scroll container and resets
+        scroll. page.update() applies diffs incrementally.
+        """
         try:
-            self.message_column.update()
+            self.page.update()
         except Exception:
             pass
 
