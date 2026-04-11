@@ -98,7 +98,33 @@ class OpenAIProvider:
             if user_parts:
                 converted.append({"role": "user", "content": user_parts})
             converted.extend(tool_messages)
-        return converted
+
+        # Patch orphan tool_calls: if an assistant message has tool_calls but
+        # the following messages don't include matching tool results, the API
+        # rejects the request. Insert synthetic tool results for any orphans.
+        patched: list[dict[str, Any]] = []
+        for i, m in enumerate(converted):
+            patched.append(m)
+            tc_ids = [tc["id"] for tc in m.get("tool_calls", [])]
+            if not tc_ids:
+                continue
+            # Collect tool result IDs that follow before the next assistant msg
+            result_ids: set[str] = set()
+            for j in range(i + 1, len(converted)):
+                if converted[j].get("role") == "assistant":
+                    break
+                if converted[j].get("role") == "tool":
+                    tid = converted[j].get("tool_call_id")
+                    if tid:
+                        result_ids.add(tid)
+            for tc_id in tc_ids:
+                if tc_id not in result_ids:
+                    patched.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": "[interrupted]",
+                    })
+        return patched
 
     @staticmethod
     def _to_openai_tools(tools: list[ToolSchema]) -> list[dict[str, Any]] | None:
