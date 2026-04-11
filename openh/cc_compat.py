@@ -40,11 +40,11 @@ from .messages import (
     ToolUseBlock,
 )
 
-CLAUDE_DIR = Path.home() / ".claude"
-PROJECTS_DIR = CLAUDE_DIR / "projects"
-PLANS_DIR = CLAUDE_DIR / "plans"
-SKILLS_DIR = CLAUDE_DIR / "skills"
-TODOS_DIR = CLAUDE_DIR / "todos"
+OPENH_DIR = Path.home() / ".openh"
+PROJECTS_DIR = OPENH_DIR / "sessions"
+PLANS_DIR = OPENH_DIR / "plans"
+SKILLS_DIR = OPENH_DIR / "skills"
+TODOS_DIR = OPENH_DIR / "todos"
 
 OPENH_VERSION = "0.1.0"   # shows up in JSONL `version` field
 OPENH_ENTRYPOINT = "openh"

@@ -18,9 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from .cc_compat import CLAUDE_DIR
+from .cc_compat import OPENH_DIR
 
-SETTINGS_PATH = CLAUDE_DIR / "settings.json"
+SETTINGS_PATH = OPENH_DIR / "settings.json"
 
 Decision = Literal["allow", "ask", "deny", "none"]
 
