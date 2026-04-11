@@ -14,8 +14,9 @@ SYSTEM_PROMPT_FILE = OPENH_DIR / "system_prompt.md"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
 GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
 
-MAX_OUTPUT_TOKENS = 8192
+MAX_OUTPUT_TOKENS = 16384
 AUTO_COMPACT_THRESHOLD = 80_000
+MAX_CONVERSATION_MESSAGES = 200  # Claude Code: cap at 200 messages
 
 SYSTEM_PROMPT = """You are OpenH, an interactive agent that helps users with software engineering tasks. Use the tools available to you to assist the user.
 

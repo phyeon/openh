@@ -22,9 +22,11 @@ def estimate_tokens(messages: list[Message]) -> int:
 
 
 def should_compact(messages: list[Message], threshold_tokens: int | None = None) -> bool:
+    from .config import AUTO_COMPACT_THRESHOLD, MAX_CONVERSATION_MESSAGES
     if threshold_tokens is None:
-        from .config import AUTO_COMPACT_THRESHOLD
         threshold_tokens = AUTO_COMPACT_THRESHOLD
+    if len(messages) > MAX_CONVERSATION_MESSAGES:
+        return True
     return estimate_tokens(messages) > threshold_tokens
 
 

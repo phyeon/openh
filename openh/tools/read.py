@@ -9,6 +9,7 @@ from .base import PermissionDecision, Tool, ToolContext
 
 MAX_BYTES = 1024 * 1024  # 1 MiB cap for safety
 DEFAULT_LIMIT = 2000
+MAX_RESULT_CHARS = 40_000  # ~10K tokens, matches Claude Code harness truncation
 
 
 class ReadTool(Tool):
@@ -86,4 +87,7 @@ class ReadTool(Tool):
             out.append(f"{i:6d}\t{line.rstrip(chr(10))}")
 
         header = f"# {path} ({total} lines, showing {offset}-{end})\n" if total > limit else ""
-        return header + "\n".join(out)
+        result = header + "\n".join(out)
+        if len(result) > MAX_RESULT_CHARS:
+            result = result[:MAX_RESULT_CHARS] + f"\n\n…(truncated at {MAX_RESULT_CHARS} chars. Use offset/limit to read specific sections.)"
+        return result
