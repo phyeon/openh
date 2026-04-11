@@ -156,6 +156,11 @@ class OpenHApp:
                 on_surface=theme.TEXT_PRIMARY,
                 on_surface_variant=theme.TEXT_SECONDARY,
                 surface=theme.BG_PAGE,
+                surface_container=theme.BG_ELEVATED,
+                surface_container_high=theme.BG_ELEVATED,
+                surface_container_highest=theme.BG_ELEVATED,
+                surface_container_low=theme.BG_PAGE,
+                surface_tint="#00000000",  # no tint overlay
             ),
             font_family=theme.FONT_SANS,
             text_theme=ft.TextTheme(
@@ -188,9 +193,9 @@ class OpenHApp:
         # A trailing spacer is appended so the last message sits well above
         # the input box when scrolled to the bottom.
         self._bottom_spacer = ft.Container(height=48)
-        self.message_column = ft.Column(
+        self.message_column = ft.ListView(
             spacing=0,
-            scroll=ft.ScrollMode.AUTO,
+            auto_scroll=True,
             expand=True,
             controls=[self._bottom_spacer],
         )
@@ -1261,9 +1266,6 @@ class OpenHApp:
 
     async def _scroll_to_end_async(self) -> None:
         try:
-            self.page.update()  # flush pending control changes
-            import asyncio
-            await asyncio.sleep(0.05)
             await self.message_column.scroll_to(offset=999999, duration=0)
         except Exception:
             pass

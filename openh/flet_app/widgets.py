@@ -1155,12 +1155,12 @@ def input_area(
         icon=ft.Icons.STOP,
         icon_color=theme.TEXT_ON_ACCENT,
         bgcolor=theme.ERROR,
-        icon_size=16,
+        icon_size=12,
         tooltip="Stop generation (Esc)",
         on_click=lambda e: on_stop() if on_stop else None,
         style=ft.ButtonStyle(
             shape=ft.CircleBorder(),
-            padding=ft.padding.all(8),
+            padding=ft.padding.all(6),
         ),
     ) if busy and on_stop else None
 
