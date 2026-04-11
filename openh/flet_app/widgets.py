@@ -1125,32 +1125,39 @@ def input_area(
         on_pick=on_pick_model,
     )
 
-    if busy and on_stop:
-        send_btn = ft.IconButton(
-            icon=ft.Icons.STOP,
-            icon_color=theme.TEXT_ON_ACCENT,
-            bgcolor=theme.ERROR,
-            icon_size=18,
-            tooltip="Stop generation (Esc)",
-            on_click=lambda e: on_stop(),
-            style=ft.ButtonStyle(
-                shape=ft.CircleBorder(),
-                padding=ft.padding.all(10),
-            ),
-        )
-    else:
-        send_btn = ft.IconButton(
-            icon=ft.Icons.ARROW_UPWARD,
-            icon_color=theme.TEXT_ON_ACCENT,
-            bgcolor=theme.ACCENT,
-            icon_size=18,
-            tooltip="Send (Enter)",
-            on_click=lambda e: on_send(),
-            style=ft.ButtonStyle(
-                shape=ft.CircleBorder(),
-                padding=ft.padding.all(10),
-            ),
-        )
+    stop_btn = ft.IconButton(
+        icon=ft.Icons.STOP,
+        icon_color=theme.TEXT_ON_ACCENT,
+        bgcolor=theme.ERROR,
+        icon_size=16,
+        tooltip="Stop generation (Esc)",
+        on_click=lambda e: on_stop() if on_stop else None,
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(8),
+        ),
+    ) if busy and on_stop else None
+
+    send_btn = ft.IconButton(
+        icon=ft.Icons.ARROW_UPWARD,
+        icon_color=theme.TEXT_ON_ACCENT,
+        bgcolor=theme.ACCENT,
+        icon_size=18,
+        tooltip="Send (Enter)",
+        on_click=lambda e: on_send(),
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(10),
+        ),
+    )
+
+    right_buttons: list[ft.Control] = []
+    right_buttons.append(model_btn)
+    right_buttons.append(ft.Container(width=6))
+    if stop_btn:
+        right_buttons.append(stop_btn)
+        right_buttons.append(ft.Container(width=4))
+    right_buttons.append(send_btn)
 
     bottom_row = ft.Row(
         [
@@ -1158,9 +1165,7 @@ def input_area(
             ft.Container(width=4),
             perms_btn,
             ft.Container(expand=True),
-            model_btn,
-            ft.Container(width=6),
-            send_btn,
+            *right_buttons,
         ],
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )

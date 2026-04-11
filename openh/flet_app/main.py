@@ -1256,8 +1256,8 @@ class OpenHApp:
     async def _scroll_to_end_async(self) -> None:
         try:
             import asyncio
-            await asyncio.sleep(0.05)  # let layout settle
-            await self.message_column.scroll_to(offset=-1, duration=200)
+            await asyncio.sleep(0.05)
+            await self.message_column.scroll_to(offset=999999, duration=150)
         except Exception:
             pass
 
