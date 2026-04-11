@@ -192,6 +192,11 @@ class OpenHApp:
         self._pending_scroll_animated = False
         self._jsonl_written_count = 0
         self._busy_note_active = False
+        # FnD ambient effects
+        self._fnd_particles: list[ft.Container] = []
+        self._fnd_ambient_running = False
+        self._fnd_ambient_should_run = False
+        self._fnd_gradient_layers: list[ft.Container] = []
         self._busy_indicator_host: ft.Container | None = None
         self._busy_indicator_letters: list[ft.Text] = []
         self._busy_indicator_task_running = False
@@ -311,19 +316,25 @@ class OpenHApp:
         # --- assemble main column (top bar + messages + input) ---
         # Use a Column: messages expand, input stays at natural height at bottom.
         # Messages have bottom padding so content scrolls behind input area.
-        main_col = ft.Container(
-            content=ft.Column(
-                [
-                    self.top_bar_holder,
-                    message_area,
-                    self.input_holder,
-                ],
-                spacing=0,
-                expand=True,
-            ),
+        # --- main column (with FnD ambient effects when active) ---
+        _main_inner = ft.Column(
+            [
+                self.top_bar_holder,
+                message_area,
+                self.input_holder,
+            ],
+            spacing=0,
             expand=True,
-            bgcolor=theme.BG_PAGE,
         )
+        if theme.is_fnd() and theme.is_dark():
+            main_col = self._build_fnd_ambient_layout(_main_inner)
+        else:
+            self._fnd_ambient_should_run = False
+            main_col = ft.Container(
+                content=_main_inner,
+                expand=True,
+                bgcolor=theme.BG_PAGE,
+            )
 
         # --- resize handle for the sidebar ---
         # Thin vertical bar wrapped in a GestureDetector listening for
@@ -683,9 +694,9 @@ class OpenHApp:
 
     def _stop_welcome_wordmark_animation(self) -> None:
         self._welcome_wordmark_should_run = False
-        for letter in self._welcome_wordmark_letters:
-            letter.offset = ft.Offset(0, 0)
-            letter.opacity = 0.84
+        for el in self._welcome_wordmark_letters:
+            el.offset = ft.Offset(0, 0)
+            el.opacity = 0.9
         if self._welcome_wordmark_host is not None:
             try:
                 self._welcome_wordmark_host.update()
@@ -697,29 +708,226 @@ class OpenHApp:
 
         self._welcome_wordmark_task_running = True
         try:
-            while self._welcome_wordmark_should_run and self._welcome_widget is not None:
-                letters = self._welcome_wordmark_letters
-                for idx, letter in enumerate(letters):
-                    if not self._welcome_wordmark_should_run or self._welcome_widget is None:
-                        break
-                    for j, other in enumerate(letters):
-                        other.offset = ft.Offset(0, -0.14 if j == idx else 0)
-                        other.opacity = 1.0 if j == idx else 0.72
-                    if self._welcome_wordmark_host is not None:
-                        self._welcome_wordmark_host.update()
-                    await asyncio.sleep(0.11)
-                for letter in letters:
-                    letter.offset = ft.Offset(0, 0)
-                    letter.opacity = 0.84
+            elements = self._welcome_wordmark_letters
+            if not elements:
+                return
+            # Phase 1: staggered fade-in
+            for el in elements:
+                if not self._welcome_wordmark_should_run or self._welcome_widget is None:
+                    break
+                el.offset = ft.Offset(0, 0)
+                el.opacity = 1.0
                 if self._welcome_wordmark_host is not None:
                     self._welcome_wordmark_host.update()
-                await asyncio.sleep(0.6)
+                await asyncio.sleep(0.12)
+            await asyncio.sleep(0.3)
+            # Phase 2: settle to resting state
+            for el in elements:
+                el.opacity = 0.9
+            if self._welcome_wordmark_host is not None:
+                self._welcome_wordmark_host.update()
+            # Phase 3: gentle idle pulse (only in dark FnD mode)
+            if theme.is_fnd() and theme.is_dark():
+                while self._welcome_wordmark_should_run and self._welcome_widget is not None:
+                    for el in elements:
+                        el.opacity = 0.7
+                    if self._welcome_wordmark_host is not None:
+                        self._welcome_wordmark_host.update()
+                    await asyncio.sleep(1.8)
+                    if not self._welcome_wordmark_should_run:
+                        break
+                    for el in elements:
+                        el.opacity = 0.95
+                    if self._welcome_wordmark_host is not None:
+                        self._welcome_wordmark_host.update()
+                    await asyncio.sleep(1.8)
         except Exception:
             pass
         finally:
             self._welcome_wordmark_task_running = False
             if self._welcome_wordmark_should_run and self._welcome_widget is not None:
                 self._start_welcome_wordmark_animation()
+
+    # ---- FnD ambient effects (particles + breathing gradient) ----
+
+    def _build_fnd_ambient_layout(self, content: ft.Control) -> ft.Control:
+        """Wrap content in a Stack with gradient layers + particles for FnD dark mode."""
+        import random
+
+        # Gradient layers that breathe (opacity animated)
+        self._fnd_gradient_layers = [
+            # Primary — top-left hot pink neon spill
+            ft.Container(
+                expand=True,
+                gradient=ft.RadialGradient(
+                    center=ft.Alignment(-0.4, -0.7),
+                    radius=1.0,
+                    colors=["#25ff1493", "#10ff2a8f", "#00000000"],
+                    stops=[0.0, 0.4, 1.0],
+                ),
+                opacity=0.6,
+                animate_opacity=ft.Animation(3500, ft.AnimationCurve.EASE_IN_OUT),
+            ),
+            # Secondary — bottom-right deep purple
+            ft.Container(
+                expand=True,
+                gradient=ft.RadialGradient(
+                    center=ft.Alignment(0.5, 0.6),
+                    radius=0.9,
+                    colors=["#1cc850f0", "#08b46bff", "#00000000"],
+                    stops=[0.0, 0.35, 1.0],
+                ),
+                opacity=0.5,
+                animate_opacity=ft.Animation(4500, ft.AnimationCurve.EASE_IN_OUT),
+            ),
+            # Tertiary — right edge electric cyan
+            ft.Container(
+                expand=True,
+                gradient=ft.RadialGradient(
+                    center=ft.Alignment(0.9, -0.3),
+                    radius=0.7,
+                    colors=["#1400d4ff", "#0800f0ff", "#00000000"],
+                    stops=[0.0, 0.3, 1.0],
+                ),
+                opacity=0.45,
+                animate_opacity=ft.Animation(5500, ft.AnimationCurve.EASE_IN_OUT),
+            ),
+            # Quaternary — bottom-left warm magenta
+            ft.Container(
+                expand=True,
+                gradient=ft.RadialGradient(
+                    center=ft.Alignment(-0.7, 0.4),
+                    radius=0.6,
+                    colors=["#10ff006e", "#00000000"],
+                ),
+                opacity=0.35,
+                animate_opacity=ft.Animation(6000, ft.AnimationCurve.EASE_IN_OUT),
+            ),
+        ]
+
+        # Particles — small neon dots
+        particle_colors = [
+            "#ff2a8f", "#ff6ab5", "#b46bff", "#8b5cf6",
+            "#00f0ff", "#22ff88", "#ffe066",
+        ]
+        self._fnd_particles = []
+        random.seed(42)
+        for _ in range(18):
+            sz = random.uniform(2, 5)
+            color = random.choice(particle_colors)
+            x = random.uniform(-0.9, 0.9)
+            y = random.uniform(-0.9, 0.9)
+            p = ft.Container(
+                width=sz, height=sz,
+                border_radius=sz,
+                bgcolor=color,
+                opacity=random.uniform(0.15, 0.45),
+                offset=ft.Offset(x, y),
+                animate_opacity=ft.Animation(
+                    int(random.uniform(2000, 5000)),
+                    ft.AnimationCurve.EASE_IN_OUT,
+                ),
+                animate_offset=ft.Animation(
+                    int(random.uniform(6000, 12000)),
+                    ft.AnimationCurve.EASE_IN_OUT,
+                ),
+                shadow=ft.BoxShadow(
+                    color=color.replace("#", "#40"),
+                    blur_radius=sz * 3,
+                    spread_radius=1,
+                ),
+            )
+            self._fnd_particles.append(p)
+
+        # Particle layer — positioned in center, covers full area
+        particle_layer = ft.Container(
+            content=ft.Stack(self._fnd_particles),
+            expand=True,
+        )
+
+        # Grain overlay
+        grain_layer = ft.Container(
+            expand=True,
+            image=ft.DecorationImage(
+                src="grain.png",
+                repeat=ft.ImageRepeat.REPEAT,
+                opacity=0.035,
+            ),
+        )
+
+        # Content layer on top (receives all events)
+        content_layer = ft.Container(
+            content=content,
+            expand=True,
+        )
+
+        # Start ambient animation
+        self._fnd_ambient_should_run = True
+        try:
+            self.page.run_task(self._animate_fnd_ambient)
+        except Exception:
+            pass
+
+        return ft.Stack(
+            [
+                # Bottom: solid dark bg
+                ft.Container(expand=True, bgcolor="#070a13"),
+                # Gradient glow layers
+                *self._fnd_gradient_layers,
+                # Particles
+                particle_layer,
+                # Grain
+                grain_layer,
+                # Top: actual UI content
+                content_layer,
+            ],
+            expand=True,
+        )
+
+    async def _animate_fnd_ambient(self) -> None:
+        """Breathing gradient + drifting particles."""
+        import asyncio
+        import random
+
+        self._fnd_ambient_running = True
+        rng = random.Random(0)
+        tick = 0
+        try:
+            while self._fnd_ambient_should_run:
+                # Breathe gradient layers
+                for i, layer in enumerate(self._fnd_gradient_layers):
+                    phase = (tick + i * 40) % 100
+                    if phase < 50:
+                        layer.opacity = 0.3 + (phase / 50) * 0.5
+                    else:
+                        layer.opacity = 0.8 - ((phase - 50) / 50) * 0.5
+                    try:
+                        layer.update()
+                    except Exception:
+                        pass
+
+                # Drift particles
+                if tick % 3 == 0:
+                    for p in self._fnd_particles:
+                        p.offset = ft.Offset(
+                            rng.uniform(-0.9, 0.9),
+                            rng.uniform(-0.9, 0.9),
+                        )
+                        p.opacity = rng.uniform(0.1, 0.5)
+                        try:
+                            p.update()
+                        except Exception:
+                            pass
+
+                tick += 1
+                await asyncio.sleep(1.5)
+        except Exception:
+            pass
+        finally:
+            self._fnd_ambient_running = False
+
+    def _stop_fnd_ambient(self) -> None:
+        self._fnd_ambient_should_run = False
 
     def _refresh_status_bar(self) -> None:
         model = getattr(self.session.provider, "model", "")
@@ -1014,6 +1222,7 @@ class OpenHApp:
 
     def _rebuild_ui_after_theme_change(self) -> None:
         """Full page rebuild after toggling the theme."""
+        self._stop_fnd_ambient()
         self.page.controls.clear()
         self._stop_welcome_wordmark_animation()
         self._welcome_widget = None
@@ -2093,52 +2302,118 @@ class OpenHApp:
     def _build_profile_wordmark(self, spec) -> ft.Container:
         """Build an animated wordmark for a profile welcome screen."""
         color = spec.accent_color or theme.ACCENT
+        _is_dark = theme.is_dark()
+
         # Fruit emoji cluster
-        emoji_row = ft.Row(
-            [
-                ft.Text("🍓", size=28, opacity=0.9, offset=ft.Offset(0, 0),
-                         animate_offset=300, animate_opacity=300),
-                ft.Text("🍰", size=24, opacity=0.8, offset=ft.Offset(0, 0),
-                         animate_offset=300, animate_opacity=300),
-                ft.Text("🫐", size=28, opacity=0.9, offset=ft.Offset(0, 0),
-                         animate_offset=300, animate_opacity=300),
-            ],
-            spacing=8, tight=True,
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-        # Wordmark letters (serif style)
-        letters: list[ft.Text] = []
-        for ch in spec.wordmark:
-            letters.append(
-                ft.Text(
-                    ch,
-                    color=color,
-                    size=34,
-                    weight=ft.FontWeight.W_300,
-                    font_family=theme.FONT_EM,
-                    italic=True,
-                    opacity=0.0,
-                    offset=ft.Offset(0, 0.15),
-                    animate_offset=280,
-                    animate_opacity=280,
+        _emoji_items = []
+        for emoji, sz in [("🍓", 32), ("🍰", 26), ("🫐", 32)]:
+            _emoji_items.append(
+                ft.Container(
+                    content=ft.Text(emoji, size=sz),
+                    opacity=0.9,
+                    offset=ft.Offset(0, 0),
+                    animate_offset=ft.Animation(400, ft.AnimationCurve.EASE_OUT),
+                    animate_opacity=ft.Animation(400, ft.AnimationCurve.EASE_OUT),
                 )
             )
-        self._welcome_wordmark_letters = letters
-        wordmark_row = ft.Row(
-            letters,
-            spacing=1,
-            tight=True,
+        emoji_row = ft.Row(
+            _emoji_items,
+            spacing=12, tight=True,
             alignment=ft.MainAxisAlignment.CENTER,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
+
+        # Wordmark text — built as a single Text inside ShaderMask for gradient
+        wordmark_text = ft.Text(
+            spec.wordmark,
+            size=38,
+            weight=ft.FontWeight.W_300,
+            font_family=theme.FONT_EM,
+            italic=True,
+            color="#ffffff" if _is_dark else color,
+            text_align=ft.TextAlign.CENTER,
+        )
+        if _is_dark:
+            # Neon gradient: hot pink → electric purple → cyan
+            wordmark_display = ft.ShaderMask(
+                content=wordmark_text,
+                shader=ft.LinearGradient(
+                    begin=ft.Alignment(-1, 0),
+                    end=ft.Alignment(1, 0),
+                    colors=["#ff1493", "#ff2a8f", "#c850f0", "#7b68ee", "#00d4ff"],
+                    stops=[0.0, 0.25, 0.5, 0.75, 1.0],
+                ),
+                blend_mode=ft.BlendMode.SRC_IN,
+            )
+        else:
+            wordmark_display = wordmark_text
+
+        # Wrap wordmark with neon backlight (dark) or plain (light)
+        if _is_dark:
+            # Neon backlight glow — radial gradient behind the text
+            wordmark_host = ft.Container(
+                content=ft.Stack(
+                    [
+                        # Backlight glow layer
+                        ft.Container(
+                            width=320, height=80,
+                            gradient=ft.RadialGradient(
+                                center=ft.Alignment(0, 0),
+                                radius=0.8,
+                                colors=["#20ff2a8f", "#08c850f0", "#00000000"],
+                                stops=[0.0, 0.5, 1.0],
+                            ),
+                            opacity=0.8,
+                            animate_opacity=ft.Animation(3000, ft.AnimationCurve.EASE_IN_OUT),
+                        ),
+                        # Text on top
+                        ft.Container(
+                            content=wordmark_display,
+                            alignment=ft.Alignment(0, 0),
+                        ),
+                    ],
+                    width=320, height=80,
+                ),
+                opacity=0.95,
+                offset=ft.Offset(0, 0),
+                animate_offset=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+            )
+        else:
+            wordmark_host = ft.Container(
+                content=wordmark_display,
+                opacity=0.9,
+                offset=ft.Offset(0, 0),
+                animate_offset=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+            )
+
+        # We animate emoji + wordmark together via a simple list
+        self._welcome_wordmark_letters = _emoji_items + [wordmark_host]
+
+        # Subtitle glow line (dark mode only)
+        _sub_extras: list[ft.Control] = []
+        if _is_dark:
+            _sub_extras.append(
+                ft.Container(
+                    width=120, height=1,
+                    gradient=ft.LinearGradient(
+                        colors=["#00ff2a8f", "#60ff2a8f", "#00ff2a8f"],
+                    ),
+                    opacity=0.6,
+                    animate_opacity=ft.Animation(600, ft.AnimationCurve.EASE_OUT),
+                )
+            )
+            self._welcome_wordmark_letters.append(_sub_extras[0])
+
         self._welcome_wordmark_host = ft.Container(
             content=ft.Column(
                 [
                     emoji_row,
-                    ft.Container(height=6),
-                    wordmark_row,
+                    ft.Container(height=10),
+                    wordmark_host,
+                    *_sub_extras,
                 ],
-                spacing=0,
+                spacing=6,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             animate_opacity=240,

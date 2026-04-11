@@ -434,16 +434,28 @@ _FND_LIGHT = Tokens(
 )
 _register_preset("Fruits & Dessert", _FND_DARK, _FND_LIGHT)
 
+# -- FnD visual helpers (gradient / glow / grain) --
+_active_preset_name: str = "Claude"
+
+
+def active_preset() -> str:
+    return _active_preset_name
+
+
+def is_fnd() -> bool:
+    return _active_preset_name == "Fruits & Dessert"
+
 
 def set_color_preset(name: str) -> None:
     """Apply a named color preset. Respects current light/dark mode."""
-    global _current, DARK, LIGHT
+    global _current, DARK, LIGHT, _active_preset_name
     if name not in COLOR_PRESETS:
         return
     dark, light = COLOR_PRESETS[name]
     DARK = dark
     LIGHT = light
     _current = DARK if _current_mode == "dark" else LIGHT
+    _active_preset_name = name
     _sync_module_vars()
 
 
