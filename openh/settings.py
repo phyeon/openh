@@ -40,6 +40,8 @@ class Settings:
     subagent_parallel: int = 1
     active_prompt: str = "default"       # preset name
     theme_mode: str = "dark"             # "dark" | "light"
+    color_preset: str = "Blue (Default)"
+    font_preset: str = "System (Sans)"
     sidebar_width: int = 280
     window_width: int = 1080
     window_height: int = 820

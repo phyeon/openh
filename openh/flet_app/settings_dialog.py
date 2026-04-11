@@ -112,6 +112,7 @@ class SettingsDialog:
         self._categories = [
             ("Models", self._tab_models),
             ("API keys", self._tab_keys),
+            ("Appearance", self._tab_appearance),
             ("Tokens", self._tab_tokens),
             ("Agents", self._tab_agents),
             ("Prompt", self._tab_prompt),
@@ -361,6 +362,50 @@ class SettingsDialog:
         )
 
     # --------------------------------------------------------------- tab 6
+
+    def _tab_appearance(self) -> ft.Control:
+        from . import theme as theme_mod
+
+        color_names = list(theme_mod.COLOR_PRESETS.keys())
+        font_names = list(theme_mod.FONT_PRESETS.keys())
+
+        color_dropdown = ft.Dropdown(
+            value=self.settings.color_preset,
+            options=[ft.dropdown.Option(n) for n in color_names],
+            width=250,
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            on_change=lambda e: setattr(self.settings, "color_preset", e.control.value),
+        )
+
+        font_dropdown = ft.Dropdown(
+            value=self.settings.font_preset,
+            options=[ft.dropdown.Option(n) for n in font_names],
+            width=250,
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            on_change=lambda e: setattr(self.settings, "font_preset", e.control.value),
+        )
+
+        return _padded_column(
+            [
+                _label("Color theme"),
+                ft.Text(
+                    "Changes apply after saving and restarting the theme (toggle light/dark).",
+                    color=theme.TEXT_TERTIARY, size=11, italic=True,
+                ),
+                ft.Container(height=4),
+                color_dropdown,
+                ft.Container(height=16),
+                _label("Font"),
+                font_dropdown,
+                ft.Container(height=16),
+                ft.Text(
+                    "Presets: " + ", ".join(color_names),
+                    color=theme.TEXT_TERTIARY, size=10,
+                ),
+            ]
+        )
 
     def _tab_workspace(self) -> ft.Control:
         import os
