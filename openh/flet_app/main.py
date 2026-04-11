@@ -151,6 +151,11 @@ class OpenHApp:
         self.page.theme_mode = ft.ThemeMode.DARK if theme.is_dark() else ft.ThemeMode.LIGHT
         self.page.theme = ft.Theme(
             color_scheme_seed=theme.ACCENT,
+            color_scheme=ft.ColorScheme(
+                on_surface=theme.TEXT_PRIMARY,
+                on_surface_variant=theme.TEXT_SECONDARY,
+                surface=theme.BG_PAGE,
+            ),
             font_family=theme.FONT_SANS,
         )
         # Set window size ONLY on the very first build. Rebuilds (e.g. theme
