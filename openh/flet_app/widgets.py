@@ -1141,39 +1141,36 @@ def input_area(
         on_pick=on_pick_model,
     )
 
-    stop_btn = ft.IconButton(
-        icon=ft.Icons.STOP,
-        icon_color=theme.TEXT_ON_ACCENT,
-        bgcolor=theme.ERROR,
-        icon_size=12,
-        tooltip="Stop generation (Esc)",
-        on_click=lambda e: on_stop() if on_stop else None,
-        style=ft.ButtonStyle(
-            shape=ft.CircleBorder(),
-            padding=ft.padding.all(6),
-        ),
-    ) if busy and on_stop else None
+    right_buttons: list[ft.Control] = [model_btn, ft.Container(width=6)]
 
-    send_btn = ft.IconButton(
-        icon=ft.Icons.ARROW_UPWARD,
-        icon_color=theme.TEXT_ON_ACCENT,
-        bgcolor=theme.ACCENT,
-        icon_size=18,
-        tooltip="Send (Enter)",
-        on_click=lambda e: on_send(),
-        style=ft.ButtonStyle(
-            shape=ft.CircleBorder(),
-            padding=ft.padding.all(10),
-        ),
-    )
-
-    right_buttons: list[ft.Control] = []
-    right_buttons.append(model_btn)
-    right_buttons.append(ft.Container(width=6))
-    if stop_btn:
-        right_buttons.append(stop_btn)
-        right_buttons.append(ft.Container(width=4))
-    right_buttons.append(send_btn)
+    if busy and on_stop:
+        # Busy: show only stop button (small rounded square)
+        right_buttons.append(ft.IconButton(
+            icon=ft.Icons.STOP_ROUNDED,
+            icon_color=theme.TEXT_SECONDARY,
+            icon_size=16,
+            tooltip="Stop generation (Esc)",
+            on_click=lambda e: on_stop(),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=ft.padding.all(6),
+                side=ft.BorderSide(1, theme.BORDER_SUBTLE),
+            ),
+        ))
+    else:
+        # Not busy: show send button
+        right_buttons.append(ft.IconButton(
+            icon=ft.Icons.ARROW_UPWARD,
+            icon_color=theme.TEXT_ON_ACCENT,
+            bgcolor=theme.ACCENT,
+            icon_size=18,
+            tooltip="Send (Enter)",
+            on_click=lambda e: on_send(),
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=10),
+                padding=ft.padding.all(10),
+            ),
+        ))
 
     bottom_row = ft.Row(
         [

@@ -191,12 +191,11 @@ class OpenHApp:
         # --- message column ---
         # A trailing spacer is appended so the last message sits well above
         # the input box when scrolled to the bottom.
-        self._bottom_spacer = ft.Container(height=48)
         self.message_column = ft.ListView(
             spacing=0,
             auto_scroll=True,
             expand=True,
-            controls=[self._bottom_spacer],
+            padding=ft.padding.only(bottom=48),
         )
         self._show_welcome()
 
@@ -775,7 +774,6 @@ class OpenHApp:
             )
             # Re-render
             self.message_column.controls.clear()
-            self.message_column.controls.append(self._bottom_spacer)
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
@@ -823,7 +821,6 @@ class OpenHApp:
             )
             # Re-render
             self.message_column.controls.clear()
-            self.message_column.controls.append(self._bottom_spacer)
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
@@ -1027,7 +1024,6 @@ class OpenHApp:
             # Rebuild welcome to show new cwd
             self._welcome_widget = None
             self.message_column.controls.clear()
-            self.message_column.controls.append(self._bottom_spacer)
             self._show_welcome()
             self._refresh_status_bar()
 
@@ -1112,7 +1108,6 @@ class OpenHApp:
                 self.session.messages, self.session.provider
             )
             self.message_column.controls.clear()
-            self.message_column.controls.append(self._bottom_spacer)
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
@@ -1233,13 +1228,12 @@ class OpenHApp:
             self._scroll_to_end()
 
     def _append_to_messages(self, widget: ft.Control) -> None:
-        """Insert widget before the bottom spacer."""
-        controls = self.message_column.controls
+        """Append widget and flush. ListView auto_scroll handles position."""
+        self.message_column.controls.append(widget)
         try:
-            idx = controls.index(self._bottom_spacer)
-            controls.insert(idx, widget)
-        except ValueError:
-            controls.append(widget)
+            self.page.update()
+        except Exception:
+            pass
 
     def _show_thinking(self) -> None:
         if self._thinking_widget is None:
@@ -1472,7 +1466,6 @@ class OpenHApp:
         self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
         self._jsonl_written_count = 0
         self.message_column.controls.clear()
-        self.message_column.controls.append(self._bottom_spacer)
         self._stream_message_widget = None
         self._welcome_widget = None
         self._show_welcome()
@@ -1511,7 +1504,6 @@ class OpenHApp:
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         # Re-render
         self.message_column.controls.clear()
-        self.message_column.controls.append(self._bottom_spacer)
         self._welcome_widget = None
         self._stream_message_widget = None
         if messages:
