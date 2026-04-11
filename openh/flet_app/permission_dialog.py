@@ -41,7 +41,7 @@ class PermissionDialog:
 
         self._dialog = ft.AlertDialog(
             modal=True,
-            bgcolor=theme.BG_PANEL,
+            bgcolor=theme.BG_ELEVATED,
             title=ft.Row(
                 [
                     ft.Icon(ft.Icons.SHIELD_OUTLINED, color=theme.ACCENT, size=20),
