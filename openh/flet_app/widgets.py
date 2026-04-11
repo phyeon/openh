@@ -50,22 +50,16 @@ def sidebar(
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
-    # New Chat button — clicking on welcome screen cycles profiles
-    new_chat_btn = ft.Container(
-        content=ft.Row(
-            [
-                ft.Icon(ft.Icons.EDIT_SQUARE, color=theme.TEXT_PRIMARY, size=16),
-                ft.Text("New chat", color=theme.TEXT_PRIMARY, size=13,
-                        weight=ft.FontWeight.W_500),
-            ],
-            spacing=6, tight=True,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.padding.only(left=14, right=14, top=8, bottom=8),
-        border_radius=theme.RADIUS_SM,
+    new_chat_btn = ft.IconButton(
+        icon=ft.Icons.EDIT_SQUARE,
+        icon_color=theme.TEXT_PRIMARY,
+        icon_size=18,
+        tooltip="New chat",
         on_click=lambda e: on_new_chat(),
-        ink=True,
-        margin=ft.margin.symmetric(horizontal=8, vertical=1),
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(8),
+        ),
     )
 
     def group_label(text: str) -> ft.Container:
@@ -233,8 +227,7 @@ def sidebar(
             )
 
     top_section = [
-        ft.Container(content=new_chat_btn, padding=ft.padding.only(top=4, bottom=2)),
-        ft.Divider(height=1, color=theme.BORDER_FAINT),
+        ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
     ]
 
     return ft.Container(
