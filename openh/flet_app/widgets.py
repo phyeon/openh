@@ -1085,7 +1085,11 @@ def input_area(
     box_children.extend([input_field, ft.Container(height=4), bottom_row])
 
     box = ft.Container(
-        content=ft.Column(box_children, spacing=0),
+        content=ft.Column(
+            box_children,
+            spacing=0,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        ),
         bgcolor=theme.BG_DEEPEST,
         border=ft.border.all(1, theme.BORDER_SUBTLE),
         border_radius=theme.RADIUS_LG,

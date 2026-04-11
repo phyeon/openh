@@ -45,6 +45,8 @@ from ..cc_compat import (
     new_session_uuid,
     apply_flags,
     read_session_jsonl,
+    read_session_meta,
+    save_session_meta,
     session_jsonl_path,
     set_session_flag,
 )
@@ -166,10 +168,13 @@ class OpenHApp:
         self._refresh_top_bar()
 
         # --- message column ---
+        # A trailing spacer is appended so the last message sits well above
+        # the input box when scrolled to the bottom.
+        self._bottom_spacer = ft.Container(height=48)
         self.message_column = ft.Column(
             spacing=0,
-            tight=False,
             scroll=ft.ScrollMode.AUTO,
+            auto_scroll=True,
             expand=True,
             controls=[],
         )
@@ -181,12 +186,8 @@ class OpenHApp:
                 content=self.message_column,
                 width=theme.MESSAGE_MAX_WIDTH,
             ),
-            alignment=ft.Alignment(0, -1),  # top center
-            padding=ft.padding.only(
-                left=theme.PADDING_GUTTER,
-                right=theme.PADDING_GUTTER,
-                bottom=80,  # breathing room above input
-            ),
+            alignment=ft.Alignment(0, 0),
+            padding=ft.padding.symmetric(horizontal=theme.PADDING_GUTTER),
             expand=True,
         )
 
@@ -207,6 +208,7 @@ class OpenHApp:
             shift_enter=True,
             on_submit=self._on_submit,
             autofocus=True,
+            expand=True,
             content_padding=ft.padding.only(top=4, bottom=4),
             cursor_color=theme.ACCENT,
         )
@@ -218,6 +220,8 @@ class OpenHApp:
         self._refresh_status_bar()
 
         # --- assemble main column (top bar + messages + input) ---
+        # Use a Column: messages expand, input stays at natural height at bottom.
+        # Messages have bottom padding so content scrolls behind input area.
         main_col = ft.Container(
             content=ft.Column(
                 [
@@ -291,7 +295,7 @@ class OpenHApp:
                 self.message_column.controls.append(
                     widgets.system_note(f"loaded {len(tools)} MCP tool(s)")
                 )
-                self.message_column.update()
+                self._update_messages()
         except Exception:
             pass
 
@@ -507,7 +511,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"can't switch: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
             return
         self.session.switch_provider(new_provider)
         save_settings(self.settings)
@@ -516,7 +520,7 @@ class OpenHApp:
         self.message_column.controls.append(
             widgets.system_note(f"switched to {provider_name}:{model}")
         )
-        self.message_column.update()
+        self._update_messages()
         self._scroll_to_end()
 
     def _open_settings(self) -> None:
@@ -563,7 +567,7 @@ class OpenHApp:
                 self.message_column.controls.append(
                     widgets.error_panel(f"provider reload failed: {exc}")
                 )
-                self.message_column.update()
+                self._update_messages()
 
         # Propagate the new auto-compact threshold globally
         import openh.config as cfg_mod
@@ -577,7 +581,7 @@ class OpenHApp:
         self.message_column.controls.append(
             widgets.system_note("settings saved")
         )
-        self.message_column.update()
+        self._update_messages()
 
     def _toggle_sidebar(self) -> None:
         self._sidebar_visible = not self._sidebar_visible
@@ -613,7 +617,7 @@ class OpenHApp:
             for msg in self.session.messages:
                 self._replay_message(msg)
             try:
-                self.message_column.update()
+                self._update_messages()
             except Exception:
                 pass
         try:
@@ -731,7 +735,7 @@ class OpenHApp:
             self._welcome_widget = None
             self.message_column.controls.clear()
             self._show_welcome()
-            self.message_column.update()
+            self._update_messages()
             self._refresh_status_bar()
 
     def _hide_welcome(self) -> None:
@@ -742,7 +746,7 @@ class OpenHApp:
                 pass
             self._welcome_widget = None
             try:
-                self.message_column.update()
+                self._update_messages()
             except Exception:
                 pass
 
@@ -821,12 +825,12 @@ class OpenHApp:
             self._stream_message_widget = None
             for msg in self.session.messages:
                 self._replay_message(msg)
-            self.message_column.update()
+            self._update_messages()
         except Exception as exc:  # noqa: BLE001
             self.message_column.controls.append(
                 widgets.error_panel(f"compact failed: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
         finally:
             self._busy = False
             self._refresh_top_bar()
@@ -840,7 +844,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.system_note(f"{target} already exists")
             )
-            self.message_column.update()
+            self._update_messages()
             return
         template = _STARTER_CLAUDE_MD
         try:
@@ -853,7 +857,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"failed: {exc}")
             )
-        self.message_column.update()
+        self._update_messages()
 
     def _on_submit(self, e) -> None:
         text = (self.input_field.value or "").strip()
@@ -871,7 +875,7 @@ class OpenHApp:
                     self.message_column.controls.append(
                         widgets.system_note(result.output)
                     )
-                    self.message_column.update()
+                    self._update_messages()
                     self._scroll_to_end()
                 return
 
@@ -890,7 +894,7 @@ class OpenHApp:
                     Message(role="assistant", content=[TextBlock(text="Acknowledged. Ready to help.")])
                 )
         self.message_column.controls.append(widgets.user_bubble(text))
-        self.message_column.update()
+        self._update_messages()
         self._scroll_to_end()
 
         pending_media = getattr(self, "_pending_media", None) or []
@@ -926,7 +930,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"{type(exc).__name__}: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
         finally:
             self._finalize_streaming_message()
             self._busy = False
@@ -937,8 +941,26 @@ class OpenHApp:
             self._focus_input()
             self._scroll_to_end()
 
+    def _ensure_bottom_spacer(self) -> None:
+        """Keep the trailing spacer at the very end of message_column."""
+        controls = self.message_column.controls
+        try:
+            controls.remove(self._bottom_spacer)
+        except ValueError:
+            pass
+        controls.append(self._bottom_spacer)
+
+    def _update_messages(self) -> None:
+        """Update message_column with spacer guaranteed at end."""
+        self._ensure_bottom_spacer()
+        try:
+            self.message_column.update()
+        except Exception:
+            pass
+
     def _scroll_to_end(self) -> None:
         """Fire-and-forget scroll. `Column.scroll_to` is async in Flet 0.84."""
+        self._ensure_bottom_spacer()
         try:
             self.page.run_task(self._scroll_to_end_async)
         except Exception:
@@ -985,7 +1007,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"{type(exc).__name__}: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
         finally:
             self._finalize_streaming_message()
             self._busy = False
@@ -1005,13 +1027,13 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.tool_call_panel(event.name, event.input)
             )
-            self.message_column.update()
+            self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, ToolResultEvent):
             self.message_column.controls.append(
                 widgets.tool_result_panel(event.content, is_error=event.is_error)
             )
-            self.message_column.update()
+            self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, Usage):
             self._refresh_top_bar(note="thinking…")
@@ -1023,7 +1045,7 @@ class OpenHApp:
             self._stream_text_buf = []
             self._stream_message_widget = widgets.assistant_message("…")
             self.message_column.controls.append(self._stream_message_widget)
-            self.message_column.update()
+            self._update_messages()
         self._stream_text_buf.append(delta)
         joined = "".join(self._stream_text_buf)
         try:
@@ -1043,7 +1065,7 @@ class OpenHApp:
             if not text:
                 try:
                     self.message_column.controls.remove(self._stream_message_widget)
-                    self.message_column.update()
+                    self._update_messages()
                 except ValueError:
                     pass
             self._stream_message_widget = None
@@ -1071,7 +1093,7 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"can't switch to {target}: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
             return
         self.session.switch_provider(new_provider)
         self._refresh_top_bar()
@@ -1079,7 +1101,7 @@ class OpenHApp:
         self.message_column.controls.append(
             widgets.system_note(f"switched to {target}:{new_provider.model}")
         )
-        self.message_column.update()
+        self._update_messages()
         self._scroll_to_end()
 
     def _new_chat(self) -> None:
@@ -1102,7 +1124,7 @@ class OpenHApp:
         self._stream_message_widget = None
         self._welcome_widget = None
         self._show_welcome()
-        self.message_column.update()
+        self._update_messages()
         self._refresh_top_bar()
         self._refresh_status_bar()
         self._refresh_input()
@@ -1120,18 +1142,22 @@ class OpenHApp:
             self.message_column.controls.append(
                 widgets.error_panel(f"failed to load session: {exc}")
             )
-            self.message_column.update()
+            self._update_messages()
             return
         self.session.messages = messages
         self.session.read_files.clear()
         self.session.always_allow.clear()
-        self.session.total_input_tokens = 0
-        self.session.total_output_tokens = 0
+        # Restore persisted token counts
+        meta = read_session_meta(target.path)
+        self.session.total_input_tokens = meta.get("total_input_tokens", 0)
+        self.session.total_output_tokens = meta.get("total_output_tokens", 0)
+        if meta.get("session_cwd"):
+            self.session.cwd = meta["session_cwd"]
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = target.title or ""
         self._current_title = target.title or ""
         # Point JSONL writer at the resumed session (append new turns)
-        self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
+        self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         # Re-render
         self.message_column.controls.clear()
         self._welcome_widget = None
@@ -1141,7 +1167,7 @@ class OpenHApp:
                 self._replay_message(msg)
         else:
             self._show_welcome()
-        self.message_column.update()
+        self._update_messages()
         self._refresh_top_bar()
         self._refresh_status_bar()
         self._refresh_input()
@@ -1194,6 +1220,14 @@ class OpenHApp:
                 else:
                     self._jsonl_writer.append_assistant(msg)
             self._jsonl_written_count = len(self.session.messages)
+            # Persist token counts
+            p = session_jsonl_path(self.session.cwd, self.session.session_id)
+            save_session_meta(
+                p,
+                total_input_tokens=self.session.total_input_tokens,
+                total_output_tokens=self.session.total_output_tokens,
+                session_cwd=self.session.cwd,
+            )
             self._session_metas = apply_flags(list_all_recent_sessions())
             self._refresh_sidebar()
         except Exception:

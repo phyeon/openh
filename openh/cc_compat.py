@@ -541,9 +541,49 @@ def _peek_title(path: Path) -> str:
 
 def save_session_title(path: Path, title: str) -> None:
     """Append a __meta__ line with the explicit title to the JSONL file."""
-    meta_line = json.dumps({"type": "__meta__", "title": title}, ensure_ascii=False)
+    save_session_meta(path, title=title)
+
+
+def save_session_meta(
+    path: Path,
+    *,
+    title: str | None = None,
+    total_input_tokens: int | None = None,
+    total_output_tokens: int | None = None,
+    session_cwd: str | None = None,
+) -> None:
+    """Append a __meta__ line with session metadata to the JSONL file."""
+    meta: dict[str, Any] = {"type": "__meta__"}
+    if title is not None:
+        meta["title"] = title
+    if total_input_tokens is not None:
+        meta["total_input_tokens"] = total_input_tokens
+    if total_output_tokens is not None:
+        meta["total_output_tokens"] = total_output_tokens
+    if session_cwd is not None:
+        meta["session_cwd"] = session_cwd
+    line = json.dumps(meta, ensure_ascii=False)
     with path.open("a", encoding="utf-8") as f:
-        f.write(meta_line + "\n")
+        f.write(line + "\n")
+
+
+def read_session_meta(path: Path) -> dict[str, Any]:
+    """Read all __meta__ lines and merge them (last value wins)."""
+    merged: dict[str, Any] = {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "__meta__":
+                    for k, v in obj.items():
+                        if k != "type":
+                            merged[k] = v
+    except OSError:
+        pass
+    return merged
 
 
 def group_sessions(metas: list[CCSessionMeta]) -> dict[str, list[CCSessionMeta]]:
