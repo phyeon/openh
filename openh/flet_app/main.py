@@ -311,7 +311,6 @@ class OpenHApp:
                 self._append_to_messages(
                     widgets.system_note(f"loaded {len(tools)} MCP tool(s)")
                 )
-                self._update_messages()
         except Exception:
             pass
 
@@ -544,7 +543,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"can't switch: {exc}")
             )
-            self._update_messages()
             return
         self.session.switch_provider(new_provider)
         save_settings(self.settings)
@@ -553,7 +551,6 @@ class OpenHApp:
         self._append_to_messages(
             widgets.system_note(f"switched to {provider_name}:{model}")
         )
-        self._update_messages()
         self._scroll_to_end()
 
     def _open_settings(self) -> None:
@@ -598,8 +595,6 @@ class OpenHApp:
                 self._append_to_messages(
                     widgets.error_panel(f"provider reload failed: {exc}")
                 )
-                self._update_messages()
-
         # Propagate the new auto-compact threshold globally
         import openh.config as cfg_mod
         cfg_mod.AUTO_COMPACT_THRESHOLD = int(new_settings.auto_compact_threshold)
@@ -614,8 +609,6 @@ class OpenHApp:
 
         # Full UI rebuild to apply new colors everywhere
         self._rebuild_ui_after_theme_change()
-        self._update_messages()
-
     def _toggle_sidebar(self) -> None:
         self._sidebar_visible = not self._sidebar_visible
         if hasattr(self, "_resize_handle") and self._resize_handle is not None:
@@ -639,7 +632,6 @@ class OpenHApp:
         self._append_to_messages(
             widgets.system_note("[Request interrupted by user]")
         )
-        self._update_messages()
         self._busy = False
         self._refresh_input()
         self._refresh_top_bar()
@@ -668,10 +660,6 @@ class OpenHApp:
         if self.session.messages:
             self._hide_welcome()
             self._replay_messages_all()
-            try:
-                self._update_messages()
-            except Exception:
-                pass
         self._scroll_to_end()
         try:
             self.page.update()
@@ -782,7 +770,6 @@ class OpenHApp:
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
-            self._update_messages()
             # Submit as new turn
             self.input_field.value = new_text
             self.input_field.update()
@@ -831,7 +818,6 @@ class OpenHApp:
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
-            self._update_messages()
             # Re-run the agent from current state
             self.page.run_task(self._retry_turn_async)
 
@@ -1034,7 +1020,6 @@ class OpenHApp:
             self.message_column.controls.clear()
             self.message_column.controls.append(self._bottom_spacer)
             self._show_welcome()
-            self._update_messages()
             self._refresh_status_bar()
 
     def _hide_welcome(self) -> None:
@@ -1044,10 +1029,6 @@ class OpenHApp:
             except ValueError:
                 pass
             self._welcome_widget = None
-            try:
-                self._update_messages()
-            except Exception:
-                pass
 
     # ---------------- handlers ----------------
 
@@ -1126,12 +1107,10 @@ class OpenHApp:
             self._welcome_widget = None
             self._stream_message_widget = None
             self._replay_messages_all()
-            self._update_messages()
         except Exception as exc:  # noqa: BLE001
             self._append_to_messages(
                 widgets.error_panel(f"compact failed: {exc}")
             )
-            self._update_messages()
         finally:
             self._busy = False
             self._refresh_top_bar()
@@ -1145,7 +1124,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.system_note(f"{target} already exists")
             )
-            self._update_messages()
             return
         template = _STARTER_CLAUDE_MD
         try:
@@ -1158,8 +1136,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"failed: {exc}")
             )
-        self._update_messages()
-
     def _on_submit(self, e) -> None:
         text = (self.input_field.value or "").strip()
         if not text:
@@ -1170,7 +1146,6 @@ class OpenHApp:
             self.input_field.value = ""
             self.input_field.update()
             self._append_to_messages(widgets.user_bubble(text))
-            self._update_messages()
             self._scroll_to_end()
             return
         self.input_field.value = ""
@@ -1185,7 +1160,6 @@ class OpenHApp:
                     self._append_to_messages(
                         widgets.system_note(result.output)
                     )
-                    self._update_messages()
                     self._scroll_to_end()
                 return
 
@@ -1204,7 +1178,6 @@ class OpenHApp:
                     Message(role="assistant", content=[TextBlock(text="Acknowledged. Ready to help.")])
                 )
         self._append_to_messages(widgets.user_bubble(text))
-        self._update_messages()
         self._scroll_to_end()
 
         pending_media = getattr(self, "_pending_media", None) or []
@@ -1240,7 +1213,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"{type(exc).__name__}: {exc}")
             )
-            self._update_messages()
         finally:
             self._finalize_streaming_message()
             self._busy = False
@@ -1264,8 +1236,6 @@ class OpenHApp:
         if self._thinking_widget is None:
             self._thinking_widget = widgets.thinking_indicator()
             self._append_to_messages(self._thinking_widget)
-            self._update_messages()
-
     def _hide_thinking(self) -> None:
         if self._thinking_widget is not None:
             try:
@@ -1274,13 +1244,9 @@ class OpenHApp:
                 pass
             self._thinking_widget = None
 
-    def _update_messages(self) -> None:
-        """No-op for incremental appends. Flet picks up control changes
-        on the next page.update() or scroll_to call. Avoids scroll reset."""
-        pass
 
     def _full_update(self) -> None:
-        """Full page update — only after replay, clear, or theme change."""
+        """Full page update - only after replay, clear, or theme change."""
         try:
             self.page.update()
         except Exception:
@@ -1338,7 +1304,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"{type(exc).__name__}: {exc}")
             )
-            self._update_messages()
         finally:
             self._finalize_streaming_message()
             self._busy = False
@@ -1368,7 +1333,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.tool_call_panel(event.name, event.input)
             )
-            self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, ToolResultEvent):
             # Replace the pending tool_call panel with combined call+result
@@ -1393,7 +1357,6 @@ class OpenHApp:
                 self._append_to_messages(
                     widgets.tool_result_panel(event.content, is_error=event.is_error)
                 )
-            self._update_messages()
             self._scroll_to_end()
         elif isinstance(event, Usage):
             self._refresh_top_bar(note="thinking…")
@@ -1417,7 +1380,6 @@ class OpenHApp:
                 padding=ft.padding.only(left=4),
             )
             self._append_to_messages(self._stream_message_widget)
-            self._update_messages()
         self._stream_text_buf.append(delta)
         joined = "".join(self._stream_text_buf)
         try:
@@ -1444,7 +1406,6 @@ class OpenHApp:
             if not text:
                 if idx >= 0:
                     self.message_column.controls.pop(idx)
-                    self._update_messages()
             elif idx >= 0:
                 # Replace bare streaming widget with full assistant_message (with retry)
                 msg_idx = len(self.session.messages) - 1
@@ -1453,7 +1414,6 @@ class OpenHApp:
                     on_retry=self._on_retry_message,
                     msg_index=msg_idx,
                 )
-                self._update_messages()
             self._stream_message_widget = None
             self._stream_md = None
             self._stream_text_buf = []
@@ -1480,7 +1440,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"can't switch to {target}: {exc}")
             )
-            self._update_messages()
             return
         self.session.switch_provider(new_provider)
         self._refresh_top_bar()
@@ -1488,7 +1447,6 @@ class OpenHApp:
         self._append_to_messages(
             widgets.system_note(f"switched to {target}:{new_provider.model}")
         )
-        self._update_messages()
         self._scroll_to_end()
 
     def _new_chat(self) -> None:
@@ -1512,7 +1470,6 @@ class OpenHApp:
         self._stream_message_widget = None
         self._welcome_widget = None
         self._show_welcome()
-        self._update_messages()
         self._refresh_top_bar()
         self._refresh_status_bar()
         self._refresh_input()
@@ -1530,7 +1487,6 @@ class OpenHApp:
             self._append_to_messages(
                 widgets.error_panel(f"failed to load session: {exc}")
             )
-            self._update_messages()
             return
         self.session.messages = messages
         self.session.read_files.clear()
@@ -1556,7 +1512,6 @@ class OpenHApp:
             self._replay_messages_all()
         else:
             self._show_welcome()
-        self._update_messages()
         self._refresh_top_bar()
         self._refresh_status_bar()
         self._refresh_input()
