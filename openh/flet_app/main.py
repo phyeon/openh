@@ -425,6 +425,7 @@ class OpenHApp:
                     groups_by_name[gname] = entries
             # Collect registered profiles for sidebar buttons
             profiles = list_profiles()
+            _cur_profile = get_profile(self.session.profile_id)
             bar = widgets.sidebar(
                 groups=groups_by_name,
                 active_session_id=self.session.session_id,
@@ -437,6 +438,7 @@ class OpenHApp:
                 width=int(self._sidebar_width),
                 profiles=profiles,
                 on_new_profile=self._new_profile_chat,
+                active_profile=_cur_profile,
             )
         else:
             bar = ft.Container(width=0)
@@ -1990,23 +1992,25 @@ class OpenHApp:
         self.session.title = ""
         self.session.profile_id = "default"
         self.session.tools = default_tools()
-        # Restore default color theme if was in a profile
-        from ..settings import load_settings
-        _s = load_settings()
-        _cp = getattr(_s, "color_preset", "Claude")
-        theme.set_color_preset(_cp)
         self._current_title = ""
         self._queued_turns = []
         self._reset_live_tool_stack()
         # New JSONL writer for the new session
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         self._jsonl_written_count = 0
+        # Restore default color theme + full rebuild
+        from ..settings import load_settings
+        _s = load_settings()
+        _cp = getattr(_s, "color_preset", "Claude")
+        theme.set_color_preset(_cp)
+        self.page.bgcolor = theme.BG_PAGE
+        self._rebuild_ui_after_theme_change()
+        # Show welcome on fresh UI
         self._stop_welcome_wordmark_animation()
-        self.message_column.controls.clear()
-        self._stream_message_widget = None
         self._welcome_widget = None
         self._welcome_wordmark_host = None
         self._welcome_wordmark_letters = []
+        self.message_column.controls.clear()
         self._show_welcome()
         self._refresh_top_bar()
         self._refresh_status_bar()
@@ -2080,29 +2084,53 @@ class OpenHApp:
     def _build_profile_wordmark(self, spec) -> ft.Container:
         """Build an animated wordmark for a profile welcome screen."""
         color = spec.accent_color or theme.ACCENT
+        # Fruit emoji cluster
+        emoji_row = ft.Row(
+            [
+                ft.Text("🍓", size=28, opacity=0.9, offset=ft.Offset(0, 0),
+                         animate_offset=300, animate_opacity=300),
+                ft.Text("🍰", size=24, opacity=0.8, offset=ft.Offset(0, 0),
+                         animate_offset=300, animate_opacity=300),
+                ft.Text("🫐", size=28, opacity=0.9, offset=ft.Offset(0, 0),
+                         animate_offset=300, animate_opacity=300),
+            ],
+            spacing=8, tight=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
+        # Wordmark letters (serif style)
         letters: list[ft.Text] = []
         for ch in spec.wordmark:
             letters.append(
                 ft.Text(
                     ch,
                     color=color,
-                    size=32,
+                    size=34,
                     weight=ft.FontWeight.W_300,
-                    font_family=theme.FONT_SANS,
-                    opacity=0.84,
-                    offset=ft.Offset(0, 0),
-                    animate_offset=240,
-                    animate_opacity=240,
+                    font_family=theme.FONT_EM,
+                    italic=True,
+                    opacity=0.0,
+                    offset=ft.Offset(0, 0.15),
+                    animate_offset=280,
+                    animate_opacity=280,
                 )
             )
         self._welcome_wordmark_letters = letters
+        wordmark_row = ft.Row(
+            letters,
+            spacing=1,
+            tight=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         self._welcome_wordmark_host = ft.Container(
-            content=ft.Row(
-                letters,
-                spacing=2,
-                tight=True,
-                alignment=ft.MainAxisAlignment.CENTER,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            content=ft.Column(
+                [
+                    emoji_row,
+                    ft.Container(height=6),
+                    wordmark_row,
+                ],
+                spacing=0,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             animate_opacity=240,
         )

@@ -47,20 +47,37 @@ def sidebar(
     width: int = theme.SIDEBAR_WIDTH,
     profiles: list | None = None,
     on_new_profile: Callable[[str], None] | None = None,
+    active_profile=None,
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
-    new_chat_btn = ft.IconButton(
-        icon=ft.Icons.EDIT_SQUARE,
-        icon_color=theme.TEXT_PRIMARY,
-        icon_size=18,
-        tooltip="New chat",
-        on_click=lambda e: on_new_chat(),
-        style=ft.ButtonStyle(
-            shape=ft.CircleBorder(),
-            padding=ft.padding.all(8),
-        ),
-    )
+    # Profile이 활성이면 아이콘을 프로필 이모지로 교체
+    if active_profile is not None:
+        _icon_content = ft.Text(
+            active_profile.icon,
+            size=18,
+        )
+        new_chat_btn = ft.Container(
+            content=_icon_content,
+            width=36, height=36,
+            border_radius=18,
+            alignment=ft.Alignment(0, 0),
+            tooltip=f"{active_profile.display_name} (click for new chat)",
+            on_click=lambda e: on_new_chat(),
+            ink=True,
+        )
+    else:
+        new_chat_btn = ft.IconButton(
+            icon=ft.Icons.EDIT_SQUARE,
+            icon_color=theme.TEXT_PRIMARY,
+            icon_size=18,
+            tooltip="New chat",
+            on_click=lambda e: on_new_chat(),
+            style=ft.ButtonStyle(
+                shape=ft.CircleBorder(),
+                padding=ft.padding.all(8),
+            ),
+        )
 
     def group_label(text: str) -> ft.Container:
         return ft.Container(
