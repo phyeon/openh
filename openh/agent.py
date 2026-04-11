@@ -66,12 +66,12 @@ class Agent:
                 pass
 
         from .compaction import compact_messages, should_compact
-        if should_compact(self.session.messages):
+        if should_compact(self.session.model_messages):
             try:
                 compacted = await compact_messages(
-                    self.session.messages, self.session.provider
+                    self.session.model_messages, self.session.provider
                 )
-                self.session.messages = compacted
+                self.session.model_messages = compacted
             except Exception:
                 pass
 
@@ -111,7 +111,7 @@ class Agent:
             stop_reason = "end_turn"
 
             stream = self.session.provider.stream(
-                messages=self.session.messages,
+                messages=self.session.model_messages,
                 system=self.system_prompt,
                 tools=self._tool_schemas(),  # type: ignore[arg-type]
             )

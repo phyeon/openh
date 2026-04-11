@@ -52,6 +52,7 @@ from ..cc_compat import (
 # Keep old persistence module for backward compat (no longer used)
 SessionMeta = CCSessionMeta
 from ..providers import get_provider
+from ..pricing import estimate_cost_usd
 from ..session import AgentSession
 from ..tools import default_tools
 from . import theme, widgets
@@ -143,11 +144,21 @@ class OpenHApp:
         self._queued_turns: list[tuple[str, list[Any]]] = []
         self._live_tool_entries: list[tuple[str, dict[str, Any], str | None, bool]] = []
         self._live_tool_stack_widget: ft.Control | None = None
+        self._content_width = theme.MESSAGE_MAX_WIDTH
+        self._stick_to_bottom = True
         self._scroll_in_flight = False
         self._scroll_requested = False
         self._pending_scroll_animated = False
+        self._jsonl_written_count = 0
+        self._busy_note_active = False
+        self._busy_indicator_host: ft.Container | None = None
+        self._busy_indicator_letters: list[ft.Text] = []
+        self._busy_indicator_task_running = False
+        self._busy_indicator_token = 0
 
         self._build_ui()
+        if not self._restore_last_session():
+            self._remember_current_session()
 
     # ---------------- UI scaffolding ----------------
 
@@ -183,7 +194,7 @@ class OpenHApp:
         if not self._window_initialized:
             self.page.window.width = self.settings.window_width
             self.page.window.height = self.settings.window_height
-            self.page.window.min_width = 760
+            self.page.window.min_width = 420
             self.page.window.min_height = 540
             self.page.window.on_event = self._on_window_event
             self._window_initialized = True
@@ -200,17 +211,22 @@ class OpenHApp:
         self.message_column = ft.Column(
             spacing=0,
             scroll=ft.ScrollMode.AUTO,
+            scroll_interval=80,
+            on_scroll=self._on_message_scroll,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             expand=True,
         )
         self._ensure_message_end_spacer()
         self._show_welcome()
 
+        self._content_width = self._compute_content_width()
+        self._message_width_holder = ft.Container(
+            content=self.message_column,
+            width=self._content_width,
+        )
         # Centered message container (max 760px wide)
         message_area = ft.Container(
-            content=ft.Container(
-                content=self.message_column,
-                width=theme.MESSAGE_MAX_WIDTH,
-            ),
+            content=self._message_width_holder,
             alignment=ft.Alignment(0, -1),
             padding=ft.padding.symmetric(horizontal=theme.PADDING_GUTTER),
             expand=True,
@@ -267,7 +283,7 @@ class OpenHApp:
         # We keep a reference so it can be hidden when the sidebar collapses.
         self._resize_handle = ft.GestureDetector(
             content=ft.Container(
-                width=6,
+                width=2,
                 bgcolor=theme.BORDER_FAINT,
             ),
             drag_interval=10,
@@ -413,6 +429,7 @@ class OpenHApp:
         # Mark dirty; actual save happens on drag-end (see below).
         self.settings.sidebar_width = int(new_w)
         self._sidebar_width_dirty = True
+        self._update_content_width()
 
     def _flush_sidebar_width(self, e=None) -> None:
         if getattr(self, "_sidebar_width_dirty", False):
@@ -433,6 +450,7 @@ class OpenHApp:
                     self.settings.window_width = w
                     self.settings.window_height = h
                     save_settings(self.settings)
+                    self._update_content_width()
         except Exception:
             pass
 
@@ -463,6 +481,12 @@ class OpenHApp:
         p_label = self.session.prompt_preset or self.settings.active_prompt or "default"
         if self.session.prompt_override:
             p_label = f"{p_label} (edited)"
+        self._busy_note_active = bool(note)
+        busy_indicator = self._ensure_busy_indicator() if note else None
+        if note:
+            self._start_busy_indicator_animation()
+        else:
+            self._stop_busy_indicator_animation()
         bar = widgets.top_bar(
             title=self._current_title or "New chat",
             on_toggle_sidebar=self._toggle_sidebar,
@@ -471,13 +495,90 @@ class OpenHApp:
             on_open_settings=self._open_settings,
             on_edit_prompt=self._open_prompt_editor,
             prompt_label=p_label,
-            busy_note=note,
+            busy_indicator=busy_indicator,
         )
         self.top_bar_holder.content = bar
         try:
             self.top_bar_holder.update()
         except Exception:
             pass
+
+    def _ensure_busy_indicator(self) -> ft.Container:
+        if self._busy_indicator_host is not None:
+            return self._busy_indicator_host
+        letters: list[ft.Text] = []
+        for ch in "thinking...":
+            letters.append(
+                ft.Text(
+                    ch,
+                    color=theme.ACCENT,
+                    size=12,
+                    italic=True,
+                    opacity=0.6,
+                    offset=ft.Offset(0, 0),
+                    animate_offset=180,
+                    animate_opacity=180,
+                )
+            )
+        self._busy_indicator_letters = letters
+        self._busy_indicator_host = ft.Container(
+            content=ft.Row(
+                letters,
+                spacing=0,
+                tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.only(left=2, right=2),
+        )
+        return self._busy_indicator_host
+
+    def _start_busy_indicator_animation(self) -> None:
+        if self._busy_indicator_task_running:
+            return
+        try:
+            self.page.run_task(self._animate_busy_indicator)
+        except Exception:
+            pass
+
+    def _stop_busy_indicator_animation(self) -> None:
+        self._busy_indicator_token += 1
+        for letter in self._busy_indicator_letters:
+            letter.offset = ft.Offset(0, 0)
+            letter.opacity = 0.6
+        try:
+            if self._busy_indicator_host is not None:
+                self._busy_indicator_host.update()
+        except Exception:
+            pass
+
+    async def _animate_busy_indicator(self) -> None:
+        import asyncio
+
+        self._busy_indicator_task_running = True
+        self._busy_indicator_token += 1
+        token = self._busy_indicator_token
+        try:
+            while token == self._busy_indicator_token and self._busy_note_active:
+                letters = self._busy_indicator_letters
+                for idx, letter in enumerate(letters):
+                    if token != self._busy_indicator_token or not self._busy_note_active:
+                        break
+                    for j, other in enumerate(letters):
+                        other.offset = ft.Offset(0, -0.18 if j == idx else 0)
+                        other.opacity = 1.0 if j == idx else 0.42
+                    if self._busy_indicator_host is not None:
+                        self._busy_indicator_host.update()
+                    await asyncio.sleep(0.07)
+                for letter in letters:
+                    letter.offset = ft.Offset(0, 0)
+                    letter.opacity = 0.6
+                if self._busy_indicator_host is not None:
+                    self._busy_indicator_host.update()
+                await asyncio.sleep(0.16)
+        except Exception:
+            pass
+        finally:
+            self._busy_indicator_task_running = False
 
     def _refresh_status_bar(self) -> None:
         model = getattr(self.session.provider, "model", "")
@@ -499,6 +600,7 @@ class OpenHApp:
             in_tokens=self.session.total_input_tokens,
             out_tokens=self.session.total_output_tokens,
             model=model,
+            cost_usd=self.session.total_estimated_cost_usd,
             context_tokens=context_tokens,
             context_limit=context_limit,
         )
@@ -521,6 +623,7 @@ class OpenHApp:
             skip_permissions=self._skip_permissions,
             busy=self._busy,
             on_stop=self._stop_generation,
+            content_width=self._content_width,
             attachments=[(i, type(b).__name__, getattr(b, "data_base64", "")) for i, b in enumerate(pending)],
             queued_inputs=[
                 text + (" [media]" if media_blocks else "")
@@ -534,6 +637,62 @@ class OpenHApp:
             self.input_holder.update()
         except Exception:
             pass
+
+    def _compute_content_width(self) -> int:
+        window_w = int(
+            getattr(self.page, "width", 0)
+            or self.page.window.width
+            or self.settings.window_width
+            or 0
+        )
+        sidebar_w = int(self._sidebar_width) if self._sidebar_visible else 0
+        handle_w = 2 if self._sidebar_visible else 0
+        gutter = 14 if window_w < 720 else theme.PADDING_GUTTER
+        main_area_w = max(window_w - sidebar_w - handle_w, 260)
+        inner_w = max(220, main_area_w - (gutter * 2))
+        return int(min(theme.MESSAGE_MAX_WIDTH, inner_w))
+
+    def _update_content_width(self) -> None:
+        new_width = self._compute_content_width()
+        if new_width == getattr(self, "_content_width", 0):
+            return
+        self._content_width = new_width
+        holder = getattr(self, "_message_width_holder", None)
+        if holder is not None:
+            holder.width = new_width
+            try:
+                holder.update()
+            except Exception:
+                pass
+        if hasattr(self, "input_holder"):
+            self._refresh_input()
+
+    def _on_message_scroll(self, e) -> None:
+        try:
+            threshold = max(72.0, float(getattr(e, "viewport_dimension", 0.0) or 0.0) * 0.15)
+            extent_after = float(getattr(e, "extent_after", 0.0) or 0.0)
+            self._stick_to_bottom = extent_after <= threshold
+        except Exception:
+            pass
+
+    def _remember_current_session(self, *, save: bool = True) -> None:
+        self.settings.last_session_id = self.session.session_id
+        self.settings.last_session_cwd = self.session.cwd
+        if not save:
+            return
+        try:
+            save_settings(self.settings)
+        except Exception:
+            pass
+
+    def _restore_last_session(self) -> bool:
+        last_session_id = (getattr(self.settings, "last_session_id", "") or "").strip()
+        if not last_session_id:
+            return False
+        if not any(meta.session_id == last_session_id for meta in self._session_metas):
+            return False
+        self._select_session(last_session_id)
+        return True
 
     def _pick_model(self, provider_name: str, model: str) -> None:
         """Called when the user picks a specific provider+model from the dropdown."""
@@ -570,7 +729,7 @@ class OpenHApp:
         self._append_to_messages(
             widgets.system_note(f"switched to {provider_name}:{model}")
         )
-        self._scroll_to_end()
+        self._scroll_to_end(force=True)
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(
@@ -637,6 +796,7 @@ class OpenHApp:
             except Exception:
                 pass
         self._refresh_sidebar()
+        self._update_content_width()
         # Restore scroll position after layout change
         self._scroll_to_end()
 
@@ -711,7 +871,6 @@ class OpenHApp:
                         if t.startswith("<environment>"):
                             continue
                         if t.startswith("[Conversation compacted") or t.startswith("[Prior conversation summary"):
-                            queue(widgets.system_note(t.splitlines()[0]))
                             continue
                         text_parts.append(b.text)
                     # ToolResultBlocks are rendered with their matching tool_call above
@@ -721,6 +880,7 @@ class OpenHApp:
                             "\n".join(text_parts),
                             on_edit=self._on_edit_message,
                             msg_index=msg_index,
+                            content_width=self._content_width,
                         )
                     )
             else:
@@ -793,9 +953,11 @@ class OpenHApp:
                 return
             # Truncate history from this point
             self.session.messages = self.session.messages[:msg_index]
+            self.session.reset_model_messages()
             self._jsonl_written_count = min(
                 getattr(self, "_jsonl_written_count", 0), msg_index
             )
+            self._persist_session_snapshot(rewrite=True)
             # Re-render
             self.message_column.controls.clear()
             self._welcome_widget = None
@@ -840,9 +1002,11 @@ class OpenHApp:
             self.page.pop_dialog()
             # Keep everything before this assistant message
             self.session.messages = self.session.messages[:msg_index]
+            self.session.reset_model_messages()
             self._jsonl_written_count = min(
                 getattr(self, "_jsonl_written_count", 0), msg_index
             )
+            self._persist_session_snapshot(rewrite=True)
             # Re-render
             self.message_column.controls.clear()
             self._welcome_widget = None
@@ -873,11 +1037,17 @@ class OpenHApp:
         self._refresh_input()
         try:
             from ..agent import Agent
+            from ..compaction import compact_messages, should_compact
             agent = Agent(
                 session=self.session,
                 system_prompt=self._get_system_prompt(),
                 event_sink=self._handle_stream_event,
+                permission_cb=self._ask_permission,
             )
+            if should_compact(self.session.model_messages):
+                self.session.model_messages = await compact_messages(
+                    self.session.model_messages, self.session.provider
+                )
             await agent._drive_loop()
         except Exception as exc:
             self._append_to_messages(
@@ -1011,6 +1181,7 @@ class OpenHApp:
         if not new_title:
             return
         self._current_title = new_title
+        self.session.title = new_title
         # Update sidebar meta
         for m in self._session_metas:
             if m.session_id == self.session.session_id:
@@ -1045,6 +1216,7 @@ class OpenHApp:
         if result:
             os.chdir(result)
             self.session.cwd = result
+            self._remember_current_session()
             # Rebuild welcome to show new cwd
             self._welcome_widget = None
             self.message_column.controls.clear()
@@ -1103,6 +1275,7 @@ class OpenHApp:
 
         def set_title(new_title: str) -> None:
             self._current_title = new_title
+            self.session.title = new_title
             self._refresh_top_bar()
 
         def compact_now() -> None:
@@ -1123,18 +1296,14 @@ class OpenHApp:
 
     async def _compact_now_async(self) -> None:
         from ..compaction import compact_messages
-        if self._busy or not self.session.messages:
+        if self._busy or not self.session.model_messages:
             return
         self._busy = True
         self._refresh_top_bar(note="compacting…")
         try:
-            self.session.messages = await compact_messages(
-                self.session.messages, self.session.provider
+            self.session.model_messages = await compact_messages(
+                self.session.model_messages, self.session.provider
             )
-            self.message_column.controls.clear()
-            self._welcome_widget = None
-            self._stream_message_widget = None
-            self._replay_messages_all()
         except Exception as exc:  # noqa: BLE001
             self._append_to_messages(
                 widgets.error_panel(f"compact failed: {exc}")
@@ -1143,7 +1312,7 @@ class OpenHApp:
             self._busy = False
             self._refresh_top_bar()
             self._refresh_input()
-            self._autosave()
+            self._refresh_status_bar()
 
     async def _init_claude_md_async(self) -> None:
         from pathlib import Path
@@ -1203,23 +1372,28 @@ class OpenHApp:
         if not self.session.messages:
             from ..memory import build_system_context
             from datetime import date
-            from ..messages import Message, TextBlock
+            from ..messages import TextBlock
             ctx = build_system_context(self.session.cwd, date.today().isoformat())
             if ctx.strip():
-                self.session.messages.append(
-                    Message(role="user", content=[TextBlock(text=ctx)])
-                )
-                self.session.messages.append(
-                    Message(role="assistant", content=[TextBlock(text="Acknowledged. Ready to help.")])
-                )
-        self._append_to_messages(widgets.user_bubble(text))
-        self._scroll_to_end()
+                self.session.append_message("user", [TextBlock(text=ctx)])
+                self.session.append_message("assistant", [TextBlock(text="Acknowledged. Ready to help.")])
+        self._append_to_messages(widgets.user_bubble(text, content_width=self._content_width))
+        self._stick_to_bottom = True
+        self._busy = True
+        self._refresh_top_bar(note="thinking…")
         self._refresh_input()
+        self._scroll_to_end(force=True)
 
-        if media_blocks:
-            self._current_task = self.page.run_task(self._run_turn_with_media_async, text, media_blocks)
-        else:
-            self._current_task = self.page.run_task(self._run_turn_async, text)
+        try:
+            if media_blocks:
+                self._current_task = self.page.run_task(self._run_turn_with_media_async, text, media_blocks)
+            else:
+                self._current_task = self.page.run_task(self._run_turn_async, text)
+        except Exception:
+            self._busy = False
+            self._refresh_top_bar()
+            self._refresh_input()
+            raise
 
     def _drain_queued_turns(self) -> None:
         if self._busy or not self._queued_turns:
@@ -1231,10 +1405,15 @@ class OpenHApp:
 
     async def _run_turn_with_media_async(self, user_text: str, media_blocks: list) -> None:
         """Like _run_turn_async but first injects image/document blocks on the user message."""
-        from ..messages import Message, TextBlock
+        from ..compaction import compact_messages, should_compact
+        from ..messages import TextBlock
+        if should_compact(self.session.model_messages):
+            self.session.model_messages = await compact_messages(
+                self.session.model_messages, self.session.provider
+            )
         # Append user message with media + text
         content = list(media_blocks) + [TextBlock(text=user_text)]
-        self.session.messages.append(Message(role="user", content=content))
+        self.session.append_message("user", content)
 
         # Now run the loop manually (skip the append inside Agent.run_turn by
         # calling a bypass method). Simpler: invoke the agent loop but with
@@ -1304,8 +1483,10 @@ class OpenHApp:
         except Exception:
             pass
 
-    def _scroll_to_end(self, animated: bool = False) -> None:
-        """Scroll to bottom without stacking dozens of concurrent scroll tasks."""
+    def _scroll_to_end(self, animated: bool = False, force: bool = False) -> None:
+        """Scroll to bottom without hijacking the user while reading older content."""
+        if not force and not self._stick_to_bottom:
+            return
         self._scroll_requested = True
         self._pending_scroll_animated = self._pending_scroll_animated or animated
         if self._scroll_in_flight:
@@ -1324,10 +1505,11 @@ class OpenHApp:
                 duration = 180 if self._pending_scroll_animated else 0
                 self._pending_scroll_animated = False
                 await self.message_column.scroll_to(offset=-1, duration=duration)
-                # Flet may settle layout one frame later (input height / thinking row),
-                # so do a second pass to avoid stopping halfway above the composer.
-                await asyncio.sleep(0.03)
-                await self.message_column.scroll_to(offset=-1, duration=0)
+                # Flet may settle layout more than once (input shrink, image chips,
+                # streaming widget replacement), so follow up with a few forced passes.
+                for delay in (0.03, 0.10):
+                    await asyncio.sleep(delay)
+                    await self.message_column.scroll_to(offset=-1, duration=0)
         except Exception:
             pass
         finally:
@@ -1361,6 +1543,7 @@ class OpenHApp:
         # Auto-set title from first user message if not yet set
         if not self._current_title:
             self._current_title = user_text[:60]
+            self.session.title = self._current_title
             self._refresh_top_bar(note="thinking…")
 
         try:
@@ -1413,18 +1596,7 @@ class OpenHApp:
                 self._reset_live_tool_stack()
             self._hide_thinking()
             self._stream_text_buf = []
-            # Create a bare Markdown for streaming (no retry wrapper)
-            self._stream_md = ft.Markdown(
-                "…",
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                selectable=True,
-                code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
-            )
-            self._stream_message_widget = ft.Container(
-                content=self._stream_md,
-                margin=ft.margin.only(top=12, bottom=4, right=40),
-                padding=ft.padding.only(left=4),
-            )
+            self._stream_message_widget = widgets.streaming_assistant_message("")
             self._append_to_messages(self._stream_message_widget)
         self._stream_text_buf.append(delta)
         import time
@@ -1440,11 +1612,17 @@ class OpenHApp:
             self._scroll_to_end()
 
     def _flush_streaming_markdown(self) -> None:
-        if self._stream_md is None:
+        if self._stream_message_widget is None:
             return
         try:
-            self._stream_md.value = "".join(self._stream_text_buf)
-            self._stream_md.update()
+            idx = self.message_column.controls.index(self._stream_message_widget)
+        except ValueError:
+            return
+        try:
+            widget = widgets.streaming_assistant_message("".join(self._stream_text_buf))
+            self.message_column.controls[idx] = widget
+            self._stream_message_widget = widget
+            self._flush_message_column()
         except Exception:
             pass
 
@@ -1470,7 +1648,6 @@ class OpenHApp:
                 )
             self._flush_message_column()
             self._stream_message_widget = None
-            self._stream_md = None
             self._stream_text_buf = []
 
     def _load_session_data(self, target: CCSessionMeta) -> tuple[list[Any], dict[str, Any]]:
@@ -1496,10 +1673,13 @@ class OpenHApp:
         path = session_jsonl_path(self.session.cwd, self.session.session_id)
         metadata = {
             "session_id": self.session.session_id,
+            "title": self.session.title or self._current_title,
             "session_cwd": self.session.cwd,
             "prompt_override": self.session.prompt_override,
             "total_input_tokens": self.session.total_input_tokens,
             "total_output_tokens": self.session.total_output_tokens,
+            "last_input_tokens": self.session.last_input_tokens,
+            "total_estimated_cost_usd": self.session.total_estimated_cost_usd,
         }
         try:
             stat = path.stat()
@@ -1516,12 +1696,7 @@ class OpenHApp:
         self,
         entries: list[tuple[str, dict[str, Any], str | None, bool]],
     ) -> ft.Control:
-        if len(entries) > 1:
-            return widgets.tool_stack_panel(entries)
-        name, input_dict, result_content, is_error = entries[0]
-        if result_content is None:
-            return widgets.tool_call_panel(name, input_dict)
-        return widgets.tool_combined_panel(name, input_dict, result_content, is_error=is_error)
+        return widgets.tool_turn_panel(entries)
 
     def _reset_live_tool_stack(self) -> None:
         self._live_tool_entries = []
@@ -1581,10 +1756,13 @@ class OpenHApp:
             return
         import time
         self.session.messages.clear()
+        self.session.model_messages.clear()
         self.session.read_files.clear()
         self.session.always_allow.clear()
         self.session.total_input_tokens = 0
         self.session.total_output_tokens = 0
+        self.session.last_input_tokens = 0
+        self.session.total_estimated_cost_usd = 0.0
         self.session.session_id = new_session_uuid()
         self.session.created_at = time.time()
         self.session.title = ""
@@ -1592,7 +1770,7 @@ class OpenHApp:
         self._queued_turns = []
         self._reset_live_tool_stack()
         # New JSONL writer for the new session
-        self._jsonl_writer = JsonlSessionWriter(self.config.cwd, self.session.session_id)
+        self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
         self._jsonl_written_count = 0
         self.message_column.controls.clear()
         self._stream_message_widget = None
@@ -1603,6 +1781,8 @@ class OpenHApp:
         self._refresh_input()
         self._refresh_sidebar()
         self._full_update()
+        self._stick_to_bottom = True
+        self._remember_current_session()
 
     def _select_session(self, session_id: str) -> None:
         if self._busy:
@@ -1620,21 +1800,36 @@ class OpenHApp:
             )
             return
         self.session.messages = messages
+        self.session.reset_model_messages()
         self.session.read_files.clear()
         self.session.always_allow.clear()
         # Restore persisted state from metadata (includes __meta__ fields)
         self.session.total_input_tokens = metadata.get("total_input_tokens", 0)
         self.session.total_output_tokens = metadata.get("total_output_tokens", 0)
+        self.session.last_input_tokens = int(metadata.get("last_input_tokens", 0) or 0)
+        self.session.total_estimated_cost_usd = float(
+            metadata.get(
+                "total_estimated_cost_usd",
+                estimate_cost_usd(
+                    getattr(self.session.provider, "model", ""),
+                    self.session.total_input_tokens,
+                    self.session.total_output_tokens,
+                ),
+            ) or 0.0
+        )
         if metadata.get("session_cwd"):
             self.session.cwd = metadata["session_cwd"]
+        elif metadata.get("cwd"):
+            self.session.cwd = metadata["cwd"]
         self.session.prompt_override = metadata.get("prompt_override", "")
         self.session.session_id = metadata.get("session_id") or session_id
-        self.session.title = target.title or ""
-        self._current_title = target.title or ""
+        self.session.title = metadata.get("title") or target.title or ""
+        self._current_title = self.session.title or target.title or ""
         self._queued_turns = []
         self._reset_live_tool_stack()
         # Point JSONL writer at the resumed session (append new turns)
         self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
+        self._jsonl_written_count = len(self.session.messages)
         # Re-render
         self.message_column.controls.clear()
         self._welcome_widget = None
@@ -1648,7 +1843,9 @@ class OpenHApp:
         self._refresh_input()
         self._refresh_sidebar()
         self._full_update()
-        self._scroll_to_end()
+        self._stick_to_bottom = True
+        self._remember_current_session()
+        self._scroll_to_end(force=True)
 
     def _delete_session_by_id(self, session_id: str) -> None:
         if self._busy:
@@ -1685,57 +1882,89 @@ class OpenHApp:
         set_session_flag(session_id, hidden=new_val)
         self._refresh_sidebar()
 
+    def _persist_session_snapshot(self, *, rewrite: bool = False) -> None:
+        p = session_jsonl_path(self.session.cwd, self.session.session_id)
+        if rewrite:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            self._session_cache.pop(self.session.session_id, None)
+            self._jsonl_writer = JsonlSessionWriter(self.session.cwd, self.session.session_id)
+            self._jsonl_written_count = 0
+
+        if not self.session.messages:
+            self._session_cache.pop(self.session.session_id, None)
+            self._remember_current_session()
+            self._refresh_sidebar()
+            return
+
+        # Append whichever messages haven't been written yet.
+        n_written = getattr(self, "_jsonl_written_count", 0)
+        for msg in self.session.messages[n_written:]:
+            if msg.role == "user":
+                self._jsonl_writer.append_user(msg)
+            else:
+                self._jsonl_writer.append_assistant(msg)
+        self._jsonl_written_count = len(self.session.messages)
+
+        save_session_meta(
+            p,
+            title=self.session.title or self._current_title or None,
+            total_input_tokens=self.session.total_input_tokens,
+            total_output_tokens=self.session.total_output_tokens,
+            last_input_tokens=self.session.last_input_tokens,
+            total_estimated_cost_usd=self.session.total_estimated_cost_usd,
+            session_cwd=self.session.cwd,
+            prompt_override=self.session.prompt_override or None,
+        )
+        self._cache_current_session()
+        self._remember_current_session()
+
+        import time as _t
+        try:
+            stat = p.stat()
+            mtime = stat.st_mtime
+            size = stat.st_size
+        except OSError:
+            mtime = _t.time()
+            size = 0
+        found = False
+        for i, meta in enumerate(self._session_metas):
+            if meta.session_id == self.session.session_id:
+                self._session_metas[i] = CCSessionMeta(
+                    session_id=meta.session_id,
+                    path=meta.path,
+                    cwd=self.session.cwd,
+                    mtime=mtime,
+                    size=size,
+                    title=self._current_title or meta.title,
+                    starred=meta.starred,
+                    hidden=meta.hidden,
+                )
+                found = True
+                break
+        if not found:
+            self._session_metas.insert(
+                0,
+                CCSessionMeta(
+                    session_id=self.session.session_id,
+                    path=p,
+                    cwd=self.session.cwd,
+                    mtime=mtime,
+                    size=size,
+                    title=self._current_title or "",
+                ),
+            )
+        self._refresh_sidebar()
+
     def _autosave(self) -> None:
         """Append the last turn (user + assistant) to the JSONL session file."""
         if not self.session.messages:
             return
         try:
-            # Append whichever messages haven't been written yet.
-            n_written = getattr(self, "_jsonl_written_count", 0)
-            for msg in self.session.messages[n_written:]:
-                if msg.role == "user":
-                    self._jsonl_writer.append_user(msg)
-                else:
-                    self._jsonl_writer.append_assistant(msg)
-            self._jsonl_written_count = len(self.session.messages)
-            # Persist token counts
-            p = session_jsonl_path(self.session.cwd, self.session.session_id)
-            save_session_meta(
-                p,
-                total_input_tokens=self.session.total_input_tokens,
-                total_output_tokens=self.session.total_output_tokens,
-                session_cwd=self.session.cwd,
-                prompt_override=self.session.prompt_override or None,
-            )
-            self._cache_current_session()
-            # Update current session in the cached meta list (no full rescan)
-            import time as _t
-            try:
-                stat = p.stat()
-                mtime = stat.st_mtime
-                size = stat.st_size
-            except OSError:
-                mtime = _t.time()
-                size = 0
-            found = False
-            for i, m in enumerate(self._session_metas):
-                if m.session_id == self.session.session_id:
-                    self._session_metas[i] = CCSessionMeta(
-                        session_id=m.session_id, path=m.path, cwd=self.session.cwd,
-                        mtime=mtime, size=size,
-                        title=self._current_title or m.title,
-                        starred=m.starred, hidden=m.hidden,
-                    )
-                    found = True
-                    break
-            if not found:
-                p = session_jsonl_path(self.session.cwd, self.session.session_id)
-                self._session_metas.insert(0, CCSessionMeta(
-                    session_id=self.session.session_id, path=p, cwd=self.session.cwd,
-                    mtime=mtime, size=size,
-                    title=self._current_title or "",
-                ))
-            self._refresh_sidebar()
+            rewrite = getattr(self, "_jsonl_written_count", 0) > len(self.session.messages)
+            self._persist_session_snapshot(rewrite=rewrite)
         except Exception:
             pass
 

@@ -37,6 +37,7 @@ class SettingsDialog:
         # Prompt editor state
         self._presets = prompts.list_presets()
         self._active_preset_name = current.active_prompt
+        self._default_preset_name = current.active_prompt or prompts.BUILTIN_NAME
         self._prompt_dirty = False
         self._prompt_new_name: str = ""
 
@@ -116,7 +117,6 @@ class SettingsDialog:
             ("Tokens", self._tab_tokens),
             ("Agents", self._tab_agents),
             ("Prompt", self._tab_prompt),
-            ("Workspace", self._tab_workspace),
         ]
         self._current_category = 0
 
@@ -303,7 +303,7 @@ class SettingsDialog:
         )
         self._compact_field = ft.TextField(
             value=str(self.settings.auto_compact_threshold),
-            label="Auto-compact threshold (tokens)",
+            label="Model auto-compact threshold (tokens)",
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
@@ -317,9 +317,7 @@ class SettingsDialog:
                 self._compact_field,
                 ft.Container(height=14),
                 _hint(
-                    "Auto-compact triggers when the conversation exceeds this "
-                    "rough character-based estimate. Old turns are summarized "
-                    "into a single message, keeping the last ~6 turns verbatim."
+                    "모델에게 보내는 컨텍스트만 줄여. 네가 보는 transcript는 그대로 두고, 0이면 자동 compact를 끈다."
                 ),
             ]
         )
@@ -409,14 +407,16 @@ class SettingsDialog:
             width=250,
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
-            on_select=lambda e: setattr(self.settings, "font_preset", e.control.value),
+            on_select=self._on_font_preset_change,
         )
+        self._appearance_preview = ft.Container()
+        self._refresh_appearance_preview()
 
         return _padded_column(
             [
                 _label("Color theme"),
                 ft.Text(
-                    "Select a palette. Applied on save.",
+                    "Select a palette. Preview updates instantly below.",
                     color=theme.TEXT_TERTIARY, size=11, italic=True,
                 ),
                 ft.Container(height=8),
@@ -424,9 +424,12 @@ class SettingsDialog:
                 ft.Container(height=16),
                 _label("Font"),
                 font_dropdown,
+                ft.Container(height=16),
+                _label("Preview"),
+                self._appearance_preview,
                 ft.Container(height=8),
                 ft.Text(
-                    "Tip: toggle light/dark (top bar icon) to see both variants.",
+                    "Dark / light 둘 다 같이 보여줄게. 실제 앱 반영은 Save 때 돼.",
                     color=theme.TEXT_TERTIARY, size=10,
                 ),
             ]
@@ -453,6 +456,150 @@ class SettingsDialog:
                 t.update()
         except Exception:
             pass
+        self._refresh_appearance_preview()
+
+    def _on_font_preset_change(self, e) -> None:
+        self.settings.font_preset = e.control.value or self.settings.font_preset
+        self._refresh_appearance_preview()
+
+    def _refresh_appearance_preview(self) -> None:
+        from . import theme as theme_mod
+
+        dark_tokens, light_tokens = theme_mod.COLOR_PRESETS.get(
+            self.settings.color_preset,
+            next(iter(theme_mod.COLOR_PRESETS.values())),
+        )
+        self._appearance_preview.content = ft.ResponsiveRow(
+            [
+                ft.Container(
+                    col={"xs": 12, "md": 6},
+                    content=self._appearance_preview_card("Dark", dark_tokens),
+                ),
+                ft.Container(
+                    col={"xs": 12, "md": 6},
+                    content=self._appearance_preview_card("Light", light_tokens),
+                ),
+            ],
+            columns=12,
+            spacing=10,
+            run_spacing=10,
+        )
+        try:
+            self._appearance_preview.update()
+        except Exception:
+            pass
+
+    def _appearance_preview_card(self, title: str, tokens) -> ft.Container:
+        from . import theme as theme_mod
+
+        sans_font, mono_font = theme_mod.FONT_PRESETS.get(
+            self.settings.font_preset,
+            theme_mod.FONT_PRESETS["System (Sans)"],
+        )
+
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(
+                                title,
+                                color=tokens.TEXT_TERTIARY,
+                                size=10,
+                                font_family=mono_font,
+                                weight=ft.FontWeight.W_700,
+                            ),
+                            ft.Container(expand=True),
+                            ft.Container(width=10, height=10, border_radius=5, bgcolor=tokens.ACCENT),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Container(height=8),
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Text(
+                                    "openh",
+                                    color=tokens.TEXT_PRIMARY,
+                                    size=13,
+                                    font_family=sans_font,
+                                    weight=ft.FontWeight.W_700,
+                                ),
+                                ft.Container(expand=True),
+                                ft.Text(
+                                    "thinking...",
+                                    color=tokens.ACCENT,
+                                    size=12,
+                                    font_family=mono_font,
+                                    italic=True,
+                                ),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        bgcolor=tokens.BG_ELEVATED,
+                        border=ft.border.all(1, tokens.BORDER_FAINT),
+                        border_radius=theme.RADIUS_MD,
+                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    ),
+                    ft.Container(height=10),
+                    ft.Container(
+                        content=ft.Text(
+                            "방금 보낸 메시지. font / color / contrast를 여기서 바로 본다.",
+                            color=tokens.TEXT_PRIMARY,
+                            size=14,
+                            font_family=sans_font,
+                            weight=ft.FontWeight.W_600,
+                        ),
+                        bgcolor=tokens.BG_ELEVATED,
+                        border_radius=theme.RADIUS_LG,
+                        padding=ft.padding.symmetric(horizontal=12, vertical=10),
+                    ),
+                    ft.Container(height=8),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "> 0 bash rg -n \"preview\" settings_dialog.py",
+                                    color=tokens.ACCENT,
+                                    size=12,
+                                    font_family=mono_font,
+                                    weight=ft.FontWeight.W_700,
+                                ),
+                                ft.Text(
+                                    "exit_code: 0",
+                                    color=tokens.SUCCESS,
+                                    size=11,
+                                    font_family=mono_font,
+                                ),
+                            ],
+                            spacing=3,
+                            tight=True,
+                        ),
+                        border=ft.border.only(left=ft.BorderSide(1, tokens.BORDER_FAINT)),
+                        padding=ft.padding.only(left=12, top=2, bottom=2),
+                    ),
+                    ft.Container(height=8),
+                    ft.Container(
+                        content=ft.Text(
+                            "```txt\n코드 블록도 너무 밝지 않게.\n```",
+                            color=tokens.TEXT_SECONDARY,
+                            size=12,
+                            font_family=mono_font,
+                        ),
+                        bgcolor=tokens.BG_DEEPEST,
+                        border=ft.border.all(1, tokens.BORDER_SUBTLE),
+                        border_radius=theme.RADIUS_MD,
+                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    ),
+                ],
+                spacing=0,
+                tight=True,
+            ),
+            bgcolor=tokens.BG_PAGE,
+            border=ft.border.all(1, tokens.BORDER_FAINT),
+            border_radius=theme.RADIUS_MD,
+            padding=ft.padding.all(12),
+        )
 
     def _tab_workspace(self) -> ft.Control:
         import os
@@ -517,17 +664,21 @@ class SettingsDialog:
     # --------------------------------------------------------------- tab 5
 
     def _tab_prompt(self) -> ft.Control:
-        # Preset dropdown
         self._preset_dropdown = ft.Dropdown(
             value=self._active_preset_name,
             options=[ft.dropdown.Option(p.name) for p in self._presets],
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
-            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
-            label="Active preset",
             on_select=self._on_preset_change,
             expand=True,
         )
+        self._default_preset_badge = ft.Container()
+        self._set_default_btn = ft.OutlinedButton(
+            content=ft.Text("Make default", color=theme.TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_500),
+            icon=ft.Icons.STAR_BORDER,
+            on_click=self._on_make_default_preset,
+        )
+        self._refresh_default_preset_controls()
 
         # Editor
         initial = prompts.resolve_active(self._active_preset_name)
@@ -589,7 +740,33 @@ class SettingsDialog:
 
         return _padded_column(
             [
-                self._preset_dropdown,
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                ft.Text("Preset to edit", color=theme.TEXT_TERTIARY, size=12),
+                                self._preset_dropdown,
+                            ],
+                            spacing=6,
+                            expand=True,
+                            tight=True,
+                        ),
+                        ft.Container(width=12),
+                        ft.Column(
+                            [
+                                ft.Text("App default", color=theme.TEXT_TERTIARY, size=12),
+                                ft.Row(
+                                    [self._default_preset_badge, self._set_default_btn],
+                                    spacing=8,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                            ],
+                            spacing=6,
+                            tight=True,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.END,
+                ),
                 ft.Container(height=10),
                 self._prompt_editor,
                 ft.Container(height=10),
@@ -622,6 +799,7 @@ class SettingsDialog:
         self._prompt_dirty = False
         self._name_field.value = ""
         self._prompt_feedback.value = ""
+        self._refresh_default_preset_controls()
         try:
             self._prompt_editor.update()
             self._name_field.update()
@@ -632,6 +810,77 @@ class SettingsDialog:
     def _on_editor_change(self, e) -> None:
         self._prompt_dirty = True
 
+    def _refresh_default_preset_controls(self) -> None:
+        selected_name = (self._active_preset_name or "").strip()
+        default_name = self._default_preset_name or prompts.BUILTIN_NAME
+        is_selected_default = bool(selected_name) and selected_name == default_name
+
+        badge_bg = theme.ACCENT if selected_name and is_selected_default else theme.BG_HOVER
+        badge_fg = theme.TEXT_ON_ACCENT if selected_name and is_selected_default else theme.TEXT_SECONDARY
+        badge_icon = ft.Icons.CHECK if selected_name and is_selected_default else ft.Icons.STAR
+
+        self._default_preset_badge.content = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(badge_icon, size=12, color=badge_fg),
+                    ft.Text(default_name, color=badge_fg, size=12, weight=ft.FontWeight.W_600),
+                ],
+                spacing=6,
+                tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.symmetric(horizontal=10, vertical=9),
+            border_radius=theme.RADIUS_MD,
+            bgcolor=badge_bg,
+            border=ft.border.all(1, theme.BORDER_SUBTLE if badge_bg == theme.BG_HOVER else badge_bg),
+        )
+
+        if not selected_name:
+            self._set_default_btn.content = ft.Text(
+                "Save new preset first",
+                color=theme.TEXT_TERTIARY,
+                size=12,
+                weight=ft.FontWeight.W_500,
+            )
+            self._set_default_btn.icon = ft.Icons.LOCK_OUTLINE
+            self._set_default_btn.disabled = True
+        elif is_selected_default:
+            self._set_default_btn.content = ft.Text(
+                "Using as default",
+                color=theme.TEXT_TERTIARY,
+                size=12,
+                weight=ft.FontWeight.W_500,
+            )
+            self._set_default_btn.icon = ft.Icons.CHECK
+            self._set_default_btn.disabled = True
+        else:
+            self._set_default_btn.content = ft.Text(
+                "Make default",
+                color=theme.TEXT_PRIMARY,
+                size=12,
+                weight=ft.FontWeight.W_500,
+            )
+            self._set_default_btn.icon = ft.Icons.STAR_BORDER
+            self._set_default_btn.disabled = False
+
+        for control in (self._default_preset_badge, self._set_default_btn):
+            try:
+                control.update()
+            except Exception:
+                pass
+
+    def _on_make_default_preset(self, e) -> None:
+        selected_name = (self._active_preset_name or "").strip()
+        if not selected_name:
+            return
+        self._default_preset_name = selected_name
+        self._prompt_feedback.value = f"'{selected_name}' will be used as the app default when you save settings."
+        self._refresh_default_preset_controls()
+        try:
+            self._prompt_feedback.update()
+        except Exception:
+            pass
+
     def _on_new_blank(self, e) -> None:
         self._prompt_editor.value = ""
         self._prompt_editor.read_only = False
@@ -639,6 +888,7 @@ class SettingsDialog:
         self._preset_dropdown.value = None
         self._name_field.value = ""
         self._prompt_feedback.value = "Start typing a new preset, then enter a name and click Save."
+        self._refresh_default_preset_controls()
         try:
             self._prompt_editor.update()
             self._preset_dropdown.update()
@@ -655,6 +905,7 @@ class SettingsDialog:
         self._active_preset_name = ""
         self._preset_dropdown.value = None
         self._prompt_feedback.value = "Edit freely and Save under a new name."
+        self._refresh_default_preset_controls()
         try:
             self._prompt_editor.update()
             self._preset_dropdown.update()
@@ -692,10 +943,10 @@ class SettingsDialog:
         self._preset_dropdown.options = [ft.dropdown.Option(p.name) for p in self._presets]
         self._preset_dropdown.value = preset.name
         self._active_preset_name = preset.name
-        self.settings.active_prompt = preset.name
         self._prompt_dirty = False
         self._name_field.value = ""
         self._prompt_feedback.value = f"Saved as '{preset.name}'."
+        self._refresh_default_preset_controls()
         try:
             self._preset_dropdown.update()
             self._name_field.update()
@@ -722,14 +973,17 @@ class SettingsDialog:
             except Exception:
                 pass
             return
+        deleted_name = self._active_preset_name
         self._presets = prompts.list_presets()
         self._preset_dropdown.options = [ft.dropdown.Option(p.name) for p in self._presets]
         self._preset_dropdown.value = prompts.BUILTIN_NAME
         self._active_preset_name = prompts.BUILTIN_NAME
-        self.settings.active_prompt = prompts.BUILTIN_NAME
+        if self._default_preset_name == deleted_name:
+            self._default_preset_name = prompts.BUILTIN_NAME
         self._prompt_editor.value = prompts.resolve_active(prompts.BUILTIN_NAME)
         self._prompt_editor.read_only = True
         self._prompt_feedback.value = "Deleted."
+        self._refresh_default_preset_controls()
         try:
             self._preset_dropdown.update()
             self._prompt_editor.update()
@@ -743,6 +997,7 @@ class SettingsDialog:
         self.settings.active_provider = self._provider_radio.value or "anthropic"
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
+        self.settings.active_prompt = self._default_preset_name or prompts.BUILTIN_NAME
 
         try:
             self.settings.max_output_tokens = int(self._max_tokens_field.value or 0) or 8192

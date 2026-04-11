@@ -459,6 +459,9 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
 
     Checks __meta__ title (last one wins), skips <environment> blocks.
     """
+    def skip_title(text: str) -> bool:
+        return text.startswith("[Conversation compacted") or text.startswith("[Prior conversation summary")
+
     cwd = ""
     first_user_title = ""
     explicit_title = ""
@@ -479,13 +482,13 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
                     content = msg.get("content")
                     if isinstance(content, str):
                         text = content.strip()
-                        if not text.startswith("<environment>") and text:
+                        if not text.startswith("<environment>") and not skip_title(text) and text:
                             first_user_title = text.splitlines()[0][:70]
                     elif isinstance(content, list):
                         for b in content:
                             if isinstance(b, dict) and b.get("type") == "text":
                                 t = (b.get("text") or "").strip()
-                                if t.startswith("<environment>"):
+                                if t.startswith("<environment>") or skip_title(t):
                                     continue
                                 if t:
                                     first_user_title = t.splitlines()[0][:70]
@@ -508,6 +511,9 @@ def _peek_title(path: Path) -> str:
     Skips system-injected <environment> blocks.
     Also checks for an explicit __title__ metadata line.
     """
+    def skip_title(text: str) -> bool:
+        return text.startswith("[Conversation compacted") or text.startswith("[Prior conversation summary")
+
     try:
         explicit_title = ""
         first_user_title = ""
@@ -527,7 +533,7 @@ def _peek_title(path: Path) -> str:
                 content = msg.get("content")
                 if isinstance(content, str):
                     text = content.strip()
-                    if text.startswith("<environment>"):
+                    if text.startswith("<environment>") or skip_title(text):
                         continue
                     if text:
                         first_user_title = text.splitlines()[0][:70]
@@ -535,7 +541,7 @@ def _peek_title(path: Path) -> str:
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "text":
                             text = (b.get("text") or "").strip()
-                            if text.startswith("<environment>"):
+                            if text.startswith("<environment>") or skip_title(text):
                                 continue
                             if text:
                                 first_user_title = text.splitlines()[0][:70]
@@ -557,6 +563,8 @@ def save_session_meta(
     title: str | None = None,
     total_input_tokens: int | None = None,
     total_output_tokens: int | None = None,
+    last_input_tokens: int | None = None,
+    total_estimated_cost_usd: float | None = None,
     session_cwd: str | None = None,
     prompt_override: str | None = None,
 ) -> None:
@@ -568,6 +576,10 @@ def save_session_meta(
         meta["total_input_tokens"] = total_input_tokens
     if total_output_tokens is not None:
         meta["total_output_tokens"] = total_output_tokens
+    if last_input_tokens is not None:
+        meta["last_input_tokens"] = last_input_tokens
+    if total_estimated_cost_usd is not None:
+        meta["total_estimated_cost_usd"] = round(total_estimated_cost_usd, 8)
     if session_cwd is not None:
         meta["session_cwd"] = session_cwd
     if prompt_override is not None:

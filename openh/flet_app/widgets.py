@@ -20,10 +20,12 @@ Colors sampled from Claude.app's actual CSS variables (dark mode):
 from __future__ import annotations
 
 import json
+import re
 from typing import Callable
 
 import flet as ft
 
+from ..pricing import estimate_cost_usd
 from . import theme
 
 
@@ -192,7 +194,6 @@ def sidebar(
     return ft.Container(
         width=width,
         bgcolor=theme.BG_SIDEBAR,
-        border=ft.border.only(right=ft.BorderSide(1, theme.BORDER_FAINT)),
         content=ft.Column(
             [
                 ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
@@ -224,7 +225,7 @@ def top_bar(
     on_open_settings: Callable,
     on_edit_prompt: Callable | None = None,
     prompt_label: str = "",
-    busy_note: str = "",
+    busy_indicator: ft.Control | None = None,
 ) -> ft.Container:
     """Conversation title bar — claude.app style with sidebar toggle on the left."""
     toggle_btn = ft.IconButton(
@@ -293,35 +294,10 @@ def top_bar(
         ink=True,
         on_click=lambda e: on_rename(),
         tooltip="Click to rename conversation",
+        expand=True,
     )
 
-    note_text = ft.Container(
-        content=ft.Row(
-            [
-                ft.ProgressRing(
-                    width=12,
-                    height=12,
-                    stroke_width=2,
-                    color=theme.ACCENT,
-                ),
-                ft.Text(
-                    busy_note,
-                    color=theme.ACCENT,
-                    size=11,
-                    italic=True,
-                ),
-            ],
-            spacing=8,
-            tight=True,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.padding.symmetric(horizontal=10, vertical=6),
-        border_radius=theme.RADIUS_PILL,
-        bgcolor=theme.ACCENT_FAINT,
-        border=ft.border.all(1, theme.TOOL_CALL_BORDER),
-        animate_opacity=180,
-        animate_scale=180,
-    ) if busy_note else ft.Container()
+    note_text = busy_indicator or ft.Container()
 
     return ft.Container(
         height=theme.TOP_BAR_HEIGHT,
@@ -344,12 +320,14 @@ def top_bar(
                                 size=11,
                                 max_lines=1,
                                 overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True,
                             ),
                         ],
                         spacing=4,
                         tight=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    width=120,
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
                     border_radius=theme.RADIUS_PILL,
                     border=ft.border.all(1, theme.BORDER_FAINT),
@@ -370,25 +348,7 @@ def top_bar(
 
 def _estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
     """Rough USD cost estimate based on published pricing (per 1M tokens)."""
-    # Pricing: (input $/M, output $/M)
-    pricing = {
-        # Anthropic
-        "claude-opus-4-6":    (15.0, 75.0),
-        "claude-opus-4":      (15.0, 75.0),
-        "claude-sonnet-4-6":  (3.0, 15.0),
-        "claude-sonnet-4-5":  (3.0, 15.0),
-        "claude-sonnet-4":    (3.0, 15.0),
-        "claude-haiku-4-5":   (0.80, 4.0),
-        "claude-haiku-4":     (0.80, 4.0),
-        # Gemini
-        "gemini-3.1-pro-preview": (1.25, 10.0),
-        "gemini-2.5-pro":     (1.25, 10.0),
-        "gemini-2.5-flash":   (0.15, 0.60),
-        "gemini-2.0-flash":   (0.10, 0.40),
-        "gemini-2.0-flash-exp": (0.0, 0.0),
-    }
-    in_price, out_price = pricing.get(model, (3.0, 15.0))
-    return (in_tokens * in_price + out_tokens * out_price) / 1_000_000
+    return estimate_cost_usd(model, in_tokens, out_tokens)
 
 
 def _format_cost(cost: float) -> str:
@@ -404,11 +364,12 @@ def bottom_status_bar(
     in_tokens: int,
     out_tokens: int,
     model: str = "",
+    cost_usd: float | None = None,
     context_tokens: int = 0,
     context_limit: int = 200_000,
 ) -> ft.Container:
     """Thin status strip — cwd + token counts + cost estimate + context usage."""
-    cost = _estimate_cost(model, in_tokens, out_tokens)
+    cost = cost_usd if cost_usd is not None else _estimate_cost(model, in_tokens, out_tokens)
     cost_str = _format_cost(cost)
 
     token_label = f"in {in_tokens:,} · out {out_tokens:,}"
@@ -490,10 +451,161 @@ def bottom_status_bar(
 #  Messages
 # ============================================================================
 
+_ANTML_THINKING_RE = re.compile(
+    r"<antml:thinking\b[^>]*>(.*?)</antml:thinking>",
+    re.IGNORECASE | re.DOTALL,
+)
+_ANTML_THINKING_OPEN_PREFIX = "<antml:thinking"
+_ANTML_THINKING_CLOSE = "</antml:thinking>"
+
+
+def _extract_antml_thinking(markdown_text: str) -> tuple[list[str], str]:
+    thoughts: list[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        thought = (match.group(1) or "").strip()
+        if thought:
+            thoughts.append(thought)
+        return ""
+
+    visible = _ANTML_THINKING_RE.sub(_replace, markdown_text or "")
+    visible = re.sub(r"\n{3,}", "\n\n", visible).strip()
+    return thoughts, visible
+
+
+def _strip_incomplete_suffix(text: str, marker: str) -> str:
+    max_len = min(len(text), len(marker) - 1)
+    for size in range(max_len, 0, -1):
+        if marker.startswith(text[-size:]):
+            return text[:-size]
+    return text
+
+
+def _parse_streaming_antml(markdown_text: str) -> tuple[list[str], str, str, bool]:
+    thoughts: list[str] = []
+    visible_parts: list[str] = []
+    cursor = 0
+
+    while True:
+        match = re.search(r"<antml:thinking\b[^>]*>", markdown_text[cursor:], re.IGNORECASE)
+        if match is None:
+            visible_parts.append(
+                _strip_incomplete_suffix(markdown_text[cursor:], _ANTML_THINKING_OPEN_PREFIX)
+            )
+            break
+
+        start = cursor + match.start()
+        end = cursor + match.end()
+        visible_parts.append(markdown_text[cursor:start])
+
+        close_idx = markdown_text.find(_ANTML_THINKING_CLOSE, end)
+        if close_idx == -1:
+            visible = re.sub(r"\n{3,}", "\n\n", "".join(visible_parts)).strip()
+            open_thought = _strip_incomplete_suffix(
+                markdown_text[end:],
+                _ANTML_THINKING_CLOSE,
+            )
+            return thoughts, visible, open_thought, True
+
+        thought = markdown_text[end:close_idx].strip()
+        if thought:
+            thoughts.append(thought)
+        cursor = close_idx + len(_ANTML_THINKING_CLOSE)
+
+    visible = re.sub(r"\n{3,}", "\n\n", "".join(visible_parts)).strip()
+    return thoughts, visible, "", False
+
+
+def _message_markdown(value: str, *, subdued: bool = False) -> ft.Markdown:
+    chat_font = "Apple SD Gothic Neo"
+    chat_fallback = [theme.FONT_SANS]
+    primary = theme.TEXT_SECONDARY if subdued else theme.TEXT_PRIMARY
+    secondary = theme.TEXT_TERTIARY
+    return ft.Markdown(
+        value or " ",
+        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+        selectable=True,
+        code_theme=(
+            ft.MarkdownCodeTheme.GRUVBOX_DARK
+            if theme.is_dark()
+            else ft.MarkdownCodeTheme.GRUVBOX_LIGHT
+        ),
+        code_style_sheet=ft.MarkdownStyleSheet(
+            code_text_style=ft.TextStyle(
+                font_family=theme.FONT_MONO,
+                size=13 if subdued else 14,
+                color=theme.TEXT_SECONDARY if not subdued else theme.TEXT_TERTIARY,
+            ),
+            p_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=14 if subdued else 16,
+                color=primary,
+                height=1.5 if subdued else 1.55,
+            ),
+            em_text_style=ft.TextStyle(
+                font_family="Georgia",
+                font_family_fallback=["Times New Roman", chat_font, theme.FONT_SANS],
+                size=14 if subdued else 16,
+                color=secondary,
+                italic=True,
+                height=1.5 if subdued else 1.55,
+            ),
+            strong_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=14 if subdued else 16,
+                color=theme.TEXT_PRIMARY,
+                weight=ft.FontWeight.W_700,
+                height=1.5 if subdued else 1.55,
+            ),
+            blockquote_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=14 if subdued else 15,
+                color=theme.TEXT_SECONDARY,
+                height=1.5,
+            ),
+            blockquote_decoration=ft.BoxDecoration(
+                bgcolor=theme.BG_ELEVATED,
+                border=ft.border.only(left=ft.BorderSide(3, theme.ACCENT_FAINT)),
+                border_radius=theme.RADIUS_MD,
+            ),
+            codeblock_padding=ft.padding.symmetric(horizontal=12, vertical=10),
+            codeblock_decoration=ft.BoxDecoration(
+                bgcolor=theme.BG_ELEVATED,
+                border=ft.border.all(1, theme.BORDER_SUBTLE),
+                border_radius=theme.RADIUS_MD,
+            ),
+            h1_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=22,
+                color=theme.TEXT_PRIMARY,
+                weight=ft.FontWeight.W_700,
+            ),
+            h2_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=18,
+                color=theme.TEXT_PRIMARY,
+                weight=ft.FontWeight.W_700,
+            ),
+            h3_text_style=ft.TextStyle(
+                font_family=chat_font,
+                font_family_fallback=chat_fallback,
+                size=16,
+                color=theme.TEXT_PRIMARY,
+                weight=ft.FontWeight.W_600,
+            ),
+        ),
+    )
+
 def user_bubble(
     text: str,
     on_edit: Callable | None = None,
     msg_index: int = -1,
+    content_width: int | None = None,
 ) -> ft.Container:
     """User message: right-aligned, rounded warm box. Edit icon on hover."""
     edit_btn = ft.IconButton(
@@ -521,18 +633,28 @@ def user_bubble(
         content=ft.Text(
             text,
             color=theme.TEXT_PRIMARY,
-            size=15,
+            size=16,
             selectable=True,
+            no_wrap=False,
+            overflow=ft.TextOverflow.VISIBLE,
+            font_family="Apple SD Gothic Neo",
+            font_family_fallback=[theme.FONT_SANS],
         ),
         bgcolor=theme.BG_ELEVATED,
         padding=ft.padding.symmetric(horizontal=16, vertical=12),
         border_radius=theme.RADIUS_LG,
     )
+    max_bubble_width = max(160, int((content_width or theme.MESSAGE_MAX_WIDTH) * 0.86))
+    bubble_shell = ft.Container(
+        content=bubble,
+        width=max_bubble_width,
+        alignment=ft.Alignment(1, 0),
+    )
 
     col = ft.Column(
         [
             ft.Row(
-                [ft.Container(expand=True), bubble],
+                [ft.Container(expand=True), bubble_shell],
                 spacing=0,
             ),
             ft.Row(
@@ -551,7 +673,7 @@ def user_bubble(
 
     return ft.Container(
         content=wrapper,
-        width=theme.MESSAGE_MAX_WIDTH,
+        width=content_width or theme.MESSAGE_MAX_WIDTH,
         alignment=ft.Alignment(1, 0),
         margin=ft.margin.only(top=16, bottom=8),
     )
@@ -563,43 +685,8 @@ def assistant_message(
     msg_index: int = -1,
 ) -> ft.Container:
     """Assistant: full-width markdown with hover retry button."""
-    md = ft.Markdown(
-        markdown_text or " ",
-        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-        selectable=True,
-        code_theme=ft.MarkdownCodeTheme.ATOM_ONE_DARK,
-        code_style_sheet=ft.MarkdownStyleSheet(
-            code_text_style=ft.TextStyle(
-                font_family=theme.FONT_MONO,
-                size=13,
-                color=theme.TEXT_PRIMARY,
-            ),
-            p_text_style=ft.TextStyle(
-                font_family=theme.FONT_SANS,
-                size=15,
-                color=theme.TEXT_PRIMARY,
-                height=1.55,
-            ),
-            h1_text_style=ft.TextStyle(
-                font_family=theme.FONT_SANS,
-                size=22,
-                color=theme.TEXT_PRIMARY,
-                weight=ft.FontWeight.W_700,
-            ),
-            h2_text_style=ft.TextStyle(
-                font_family=theme.FONT_SANS,
-                size=18,
-                color=theme.TEXT_PRIMARY,
-                weight=ft.FontWeight.W_700,
-            ),
-            h3_text_style=ft.TextStyle(
-                font_family=theme.FONT_SANS,
-                size=16,
-                color=theme.TEXT_PRIMARY,
-                weight=ft.FontWeight.W_600,
-            ),
-        ),
-    )
+    thoughts, visible_markdown = _extract_antml_thinking(markdown_text or "")
+    md = _message_markdown(visible_markdown or " ")
     retry_btn = ft.IconButton(
         icon=ft.Icons.REFRESH,
         icon_color=theme.TEXT_TERTIARY,
@@ -621,13 +708,12 @@ def assistant_message(
         retry_btn.opacity = 0
         retry_btn.update()
 
-    col = ft.Column(
-        [
-            md,
-            retry_btn if on_retry else ft.Container(height=0),
-        ],
-        spacing=2,
-    )
+    body_controls: list[ft.Control] = [_thinking_panel(thought) for thought in thoughts]
+    if visible_markdown or not thoughts:
+        body_controls.append(md)
+    body_controls.append(retry_btn if on_retry else ft.Container(height=0))
+
+    col = ft.Column(body_controls, spacing=2)
 
     if on_retry:
         wrapper = ft.GestureDetector(content=col, on_enter=_show, on_exit=_hide)
@@ -649,6 +735,7 @@ def _make_collapsible_panel(
     border_color: str,
     margin_top: int = 6,
     margin_bottom: int = 2,
+    margin_right: int = 40,
     initially_open: bool = False,
 ) -> ft.Container:
     """Create a collapsible panel: header always visible, body toggled on click."""
@@ -684,93 +771,102 @@ def _make_collapsible_panel(
         border=ft.border.all(1, border_color),
         border_radius=theme.RADIUS_MD,
         padding=ft.padding.symmetric(horizontal=14, vertical=10),
-        margin=ft.margin.only(top=margin_top, bottom=margin_bottom, right=40),
+        margin=ft.margin.only(top=margin_top, bottom=margin_bottom, right=margin_right),
     )
     return outer
 
 
-def tool_call_panel(name: str, input_dict: dict) -> ft.Container:
-    try:
-        body = json.dumps(input_dict, indent=2, ensure_ascii=False)
-    except Exception:
-        body = str(input_dict)
-    if len(body) > 2000:
-        body = body[:2000] + "\n…"
-
-    # Build a one-line summary for the collapsed header
-    summary = _tool_call_summary(name, input_dict)
-
+def _thinking_panel(
+    thought: str,
+    *,
+    initially_open: bool = False,
+    title: str = "Thinking",
+) -> ft.Container:
     header = ft.Row(
         [
-            ft.Container(
-                width=6,
-                height=6,
-                border_radius=3,
-                bgcolor=theme.ACCENT,
-            ),
+            ft.Icon(ft.Icons.PSYCHOLOGY_ALT_OUTLINED, color=theme.ACCENT, size=13),
             ft.Text(
-                name,
+                title,
                 color=theme.ACCENT,
                 size=12,
-                weight=ft.FontWeight.W_700,
-                font_family=theme.FONT_MONO,
-            ),
-            ft.Text(
-                summary,
-                color=theme.TEXT_TERTIARY,
-                size=11,
-                font_family=theme.FONT_MONO,
-                no_wrap=True,
-                overflow=ft.TextOverflow.ELLIPSIS,
-                expand=True,
+                weight=ft.FontWeight.W_600,
             ),
         ],
-        spacing=8,
+        spacing=6,
         tight=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
-
-    body_text = ft.Text(
-        body,
-        font_family=theme.FONT_MONO,
-        size=11,
-        color=theme.TEXT_SECONDARY,
-        selectable=True,
+    return _make_collapsible_panel(
+        header,
+        _message_markdown(thought or "…", subdued=True),
+        bg=theme.BG_ELEVATED,
+        border_color=theme.BORDER_FAINT,
+        margin_top=0,
+        margin_bottom=8,
+        margin_right=0,
+        initially_open=initially_open,
     )
 
-    panel = _make_collapsible_panel(
-        header, body_text,
-        bg=theme.TOOL_CALL_BG,
-        border_color=theme.TOOL_CALL_BORDER,
-        margin_top=4, margin_bottom=2,
-        initially_open=False,
+
+def streaming_assistant_message(markdown_text: str) -> ft.Container:
+    thoughts, visible_markdown, open_thought, thinking_open = _parse_streaming_antml(markdown_text or "")
+    body_controls: list[ft.Control] = [_thinking_panel(thought) for thought in thoughts]
+    if thinking_open:
+        body_controls.append(
+            _thinking_panel(
+                open_thought,
+                initially_open=True,
+                title="Thinking…",
+            )
+        )
+    if visible_markdown:
+        body_controls.append(_message_markdown(visible_markdown))
+    elif not body_controls:
+        body_controls.append(_message_markdown("…"))
+
+    return ft.Container(
+        content=ft.Column(body_controls, spacing=2),
+        margin=ft.margin.only(top=12, bottom=8, right=40),
+        padding=ft.padding.only(left=4),
     )
-    panel._is_tool_call = True  # marker for replacement by tool_combined_panel
-    return panel
+
+
+def tool_call_panel(name: str, input_dict: dict, *, nested: bool = False) -> ft.Container:
+    return _tool_log_entry(
+        name=name,
+        input_dict=input_dict,
+        result_content=None,
+        is_error=False,
+        nested=nested,
+    )
 
 
 def _tool_call_summary(name: str, input_dict: dict) -> str:
     """Return a short one-line summary string for the collapsed tool call header."""
+    def squish(text: str) -> str:
+        return " ".join((text or "").split())
+
     n = name.lower()
     if n in ("read", "write") and "file_path" in input_dict:
-        return input_dict["file_path"]
+        return squish(input_dict["file_path"])
     if n == "edit" and "file_path" in input_dict:
-        return input_dict["file_path"]
+        return squish(input_dict["file_path"])
     if n == "bash" and "command" in input_dict:
-        cmd = input_dict["command"]
+        cmd = squish(input_dict["command"])
         return cmd if len(cmd) <= 80 else cmd[:77] + "…"
     if n in ("glob",) and "pattern" in input_dict:
-        return input_dict["pattern"]
+        return squish(input_dict["pattern"])
     if n in ("grep",) and "pattern" in input_dict:
-        return input_dict["pattern"]
+        return squish(input_dict["pattern"])
     if n == "agent" and "description" in input_dict:
-        return input_dict["description"]
+        return squish(input_dict["description"])
     if "description" in input_dict:
-        d = input_dict["description"]
+        d = squish(input_dict["description"])
         return d if len(d) <= 80 else d[:77] + "…"
     # Fallback: first string value
     for v in input_dict.values():
         if isinstance(v, str) and v:
+            v = squish(v)
             return v if len(v) <= 60 else v[:57] + "…"
     return ""
 
@@ -809,194 +905,190 @@ def _result_summary(name: str, content: str, is_error: bool) -> str:
 
 
 def tool_combined_panel(
-    name: str, input_dict: dict, result_content: str, is_error: bool = False,
+    name: str, input_dict: dict, result_content: str, is_error: bool = False, *, nested: bool = False,
 ) -> ft.Container:
-    """Combined tool call + result in one collapsible panel (Claude Code style)."""
-    summary = _tool_call_summary(name, input_dict)
-    result_summary = _result_summary(name, result_content, is_error)
-
-    result_icon = ft.Icons.ERROR_OUTLINE if is_error else ft.Icons.CHECK_CIRCLE_OUTLINE
-    result_color = theme.ERROR if is_error else theme.SUCCESS
-
-    header = ft.Row(
-        [
-            ft.Container(width=6, height=6, border_radius=3, bgcolor=theme.ACCENT),
-            ft.Text(name, color=theme.ACCENT, size=12, weight=ft.FontWeight.W_700, font_family=theme.FONT_MONO),
-            ft.Text(summary, color=theme.TEXT_TERTIARY, size=11, font_family=theme.FONT_MONO,
-                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS, expand=True),
-            ft.Icon(result_icon, color=result_color, size=12),
-            ft.Text(result_summary, color=theme.TEXT_TERTIARY, size=10, font_family=theme.FONT_MONO,
-                    no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
-        ],
-        spacing=6, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-    # Body: input JSON + result output
-    try:
-        input_body = json.dumps(input_dict, indent=2, ensure_ascii=False)
-    except Exception:
-        input_body = str(input_dict)
-    if len(input_body) > 1500:
-        input_body = input_body[:1500] + "\n…"
-    if len(result_content) > 3000:
-        result_content = result_content[:3000] + f"\n…(+{len(result_content)-3000} chars)"
-
-    body = ft.Column([
-        ft.Text("Input:", color=theme.TEXT_TERTIARY, size=10, weight=ft.FontWeight.W_600),
-        ft.Text(input_body, font_family=theme.FONT_MONO, size=11, color=theme.TEXT_SECONDARY, selectable=True),
-        ft.Container(height=6),
-        ft.Text("Result:", color=result_color, size=10, weight=ft.FontWeight.W_600),
-        ft.Text(result_content, font_family=theme.FONT_MONO, size=11,
-                color=theme.ERROR if is_error else theme.TEXT_SECONDARY, selectable=True),
-    ], spacing=2, tight=True)
-
-    return _make_collapsible_panel(
-        header, body,
-        bg=theme.TOOL_CALL_BG,
-        border_color=theme.TOOL_CALL_BORDER,
-        margin_top=4, margin_bottom=4,
-        initially_open=False,
+    return _tool_log_entry(
+        name=name,
+        input_dict=input_dict,
+        result_content=result_content,
+        is_error=is_error,
+        nested=nested,
     )
 
 
 def tool_stack_panel(
     entries: list[tuple[str, dict, str | None, bool]],
+    *,
+    nested: bool = False,
 ) -> ft.Container:
-    """Grouped command stack for a single turn."""
-    previews: list[str] = []
-    for name, input_dict, _result_content, _is_error in entries[:3]:
-        summary = _tool_call_summary(name, input_dict)
-        previews.append(f"{name} {summary}".strip())
-    preview_text = " • ".join(previews)
-    if len(entries) > 3:
-        preview_text += f"  +{len(entries) - 3}"
-
-    header = ft.Row(
-        [
-            ft.Container(width=6, height=6, border_radius=3, bgcolor=theme.ACCENT),
-            ft.Text(
-                f"{len(entries)} commands",
-                color=theme.ACCENT,
-                size=12,
-                weight=ft.FontWeight.W_700,
-                font_family=theme.FONT_MONO,
-            ),
-            ft.Text(
-                preview_text,
-                color=theme.TEXT_TERTIARY,
-                size=11,
-                font_family=theme.FONT_MONO,
-                no_wrap=True,
-                overflow=ft.TextOverflow.ELLIPSIS,
-                expand=True,
-            ),
-        ],
-        spacing=6,
-        tight=True,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    if not entries:
+        return ft.Container(height=0)
+    return ft.Container(
+        content=ft.Column(
+            [
+                _tool_log_entry(
+                    name=name,
+                    input_dict=input_dict,
+                    result_content=result_content,
+                    is_error=is_error,
+                    nested=nested,
+                    index=index,
+                )
+                for index, (name, input_dict, result_content, is_error) in enumerate(entries, start=1)
+            ],
+            spacing=0,
+            tight=True,
+        ),
+        margin=ft.margin.only(top=6, bottom=6),
     )
 
-    body_children: list[ft.Control] = []
-    for index, (name, input_dict, result_content, is_error) in enumerate(entries, start=1):
-        try:
-            input_body = json.dumps(input_dict, indent=2, ensure_ascii=False)
-        except Exception:
-            input_body = str(input_dict)
-        if len(input_body) > 700:
-            input_body = input_body[:700] + "\n…"
 
-        result_body = result_content or "running…"
-        if len(result_body) > 1200:
-            result_body = result_body[:1200] + f"\n…(+{len(result_body) - 1200} chars)"
-        result_summary = _result_summary(name, result_content or "", is_error) if result_content else "running…"
-        result_icon = (
-            ft.Icons.ERROR_OUTLINE
-            if is_error else (ft.Icons.CHECK_CIRCLE_OUTLINE if result_content else ft.Icons.MORE_HORIZ)
-        )
-        result_color = (
-            theme.ERROR if is_error else (theme.SUCCESS if result_content else theme.TEXT_TERTIARY)
-        )
+def tool_turn_panel(
+    entries: list[tuple[str, dict, str | None, bool]],
+) -> ft.Container:
+    return tool_stack_panel(entries)
 
-        body_children.append(
-            ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Text(
-                                    f"{index}.",
-                                    color=theme.TEXT_TERTIARY,
-                                    size=11,
-                                    font_family=theme.FONT_MONO,
-                                ),
-                                ft.Text(
-                                    name,
-                                    color=theme.ACCENT,
-                                    size=12,
-                                    weight=ft.FontWeight.W_700,
-                                    font_family=theme.FONT_MONO,
-                                ),
-                                ft.Text(
-                                    _tool_call_summary(name, input_dict),
-                                    color=theme.TEXT_TERTIARY,
-                                    size=11,
-                                    font_family=theme.FONT_MONO,
-                                    no_wrap=True,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                    expand=True,
-                                ),
-                                ft.Icon(result_icon, color=result_color, size=12),
-                                ft.Text(
-                                    result_summary,
-                                    color=result_color if is_error else theme.TEXT_TERTIARY,
-                                    size=10,
-                                    font_family=theme.FONT_MONO,
-                                    no_wrap=True,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                            ],
-                            spacing=6,
-                            tight=True,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        ft.Container(height=6),
-                        ft.Text("Input:", color=theme.TEXT_TERTIARY, size=10, weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            input_body,
-                            font_family=theme.FONT_MONO,
-                            size=11,
-                            color=theme.TEXT_SECONDARY,
-                            selectable=True,
-                        ),
-                        ft.Container(height=6),
-                        ft.Text("Result:", color=result_color, size=10, weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            result_body,
-                            font_family=theme.FONT_MONO,
-                            size=11,
-                            color=theme.ERROR if is_error else theme.TEXT_SECONDARY,
-                            selectable=True,
-                        ),
-                    ],
-                    spacing=2,
-                    tight=True,
+
+def _tool_inline_body(
+    content: ft.Control,
+    *,
+    nested: bool = False,
+    initially_open: bool = False,
+) -> tuple[ft.Container, ft.Icon]:
+    body_wrapper = ft.Container(
+        content=ft.Container(
+            content=content,
+            border=ft.border.only(left=ft.BorderSide(1, theme.BORDER_FAINT)),
+            padding=ft.padding.only(left=12, top=2, bottom=2),
+            margin=ft.margin.only(left=18, top=4),
+        ),
+        visible=initially_open,
+    )
+    chevron = ft.Icon(
+        ft.Icons.EXPAND_MORE if initially_open else ft.Icons.CHEVRON_RIGHT,
+        color=theme.TEXT_TERTIARY,
+        size=14,
+    )
+    return body_wrapper, chevron
+
+
+def _tool_log_entry(
+    *,
+    name: str,
+    input_dict: dict,
+    result_content: str | None,
+    is_error: bool,
+    nested: bool = False,
+    index: int | None = None,
+) -> ft.Container:
+    try:
+        input_body = json.dumps(input_dict, indent=2, ensure_ascii=False)
+    except Exception:
+        input_body = str(input_dict)
+    if len(input_body) > 1200:
+        input_body = input_body[:1200] + "\n…"
+
+    result_body = result_content or ""
+    if len(result_body) > 2500:
+        result_body = result_body[:2500] + f"\n…(+{len(result_body) - 2500} chars)"
+
+    prefix = f"> {index} {name.lower()}" if index is not None else f"> {name.lower()}"
+    summary = _tool_call_summary(name, input_dict)
+    status_text = (
+        "running…"
+        if result_content is None
+        else _result_summary(name, result_content, is_error)
+    )
+    status_color = (
+        theme.TEXT_TERTIARY
+        if result_content is None
+        else (theme.ERROR if is_error else theme.SUCCESS)
+    )
+
+    detail_children: list[ft.Control] = [
+        ft.Text("Input", color=theme.TEXT_TERTIARY, size=10, weight=ft.FontWeight.W_600),
+        ft.Text(
+            input_body or "{}",
+            font_family=theme.FONT_MONO,
+            size=11,
+            color=theme.TEXT_SECONDARY,
+            selectable=True,
+        ),
+    ]
+    if result_content is not None:
+        detail_children.extend(
+            [
+                ft.Container(height=6),
+                ft.Text(
+                    "Result",
+                    color=status_color,
+                    size=10,
+                    weight=ft.FontWeight.W_600,
                 ),
-                bgcolor=theme.BG_DEEPEST,
-                border=ft.border.all(1, theme.BORDER_SUBTLE),
-                border_radius=theme.RADIUS_SM,
-                padding=ft.padding.symmetric(horizontal=10, vertical=8),
-            )
+                ft.Text(
+                    result_body or "done",
+                    font_family=theme.FONT_MONO,
+                    size=11,
+                    color=theme.ERROR if is_error else theme.TEXT_SECONDARY,
+                    selectable=True,
+                ),
+            ]
         )
 
-    return _make_collapsible_panel(
-        header,
-        ft.Column(body_children, spacing=8, tight=True),
-        bg=theme.TOOL_CALL_BG,
-        border_color=theme.TOOL_CALL_BORDER,
-        margin_top=4,
-        margin_bottom=4,
+    body_wrapper, chevron = _tool_inline_body(
+        ft.Column(detail_children, spacing=2, tight=True),
+        nested=nested,
         initially_open=False,
     )
+
+    def toggle(_e):
+        body_wrapper.visible = not body_wrapper.visible
+        chevron.name = ft.Icons.EXPAND_MORE if body_wrapper.visible else ft.Icons.CHEVRON_RIGHT
+        outer.update()
+
+    header = ft.Container(
+        content=ft.Row(
+            [
+                chevron,
+                ft.Text(
+                    prefix,
+                    color=theme.ACCENT,
+                    size=12,
+                    weight=ft.FontWeight.W_700,
+                    font_family=theme.FONT_MONO,
+                ),
+                ft.Text(
+                    summary,
+                    color=theme.TEXT_SECONDARY,
+                    size=12,
+                    font_family=theme.FONT_MONO,
+                    no_wrap=True,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    expand=True,
+                ),
+                ft.Text(
+                    status_text,
+                    color=status_color,
+                    size=11,
+                    font_family=theme.FONT_MONO,
+                    no_wrap=True,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+            spacing=6,
+            tight=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        on_click=toggle,
+        padding=ft.padding.only(top=2, bottom=2),
+        ink=False,
+    )
+
+    outer = ft.Container(
+        content=ft.Column([header, body_wrapper], spacing=0, tight=True),
+        margin=ft.margin.only(top=2, bottom=2, right=0 if nested else 40),
+    )
+    return outer
 
 
 def thinking_indicator() -> ft.Container:
@@ -1263,6 +1355,7 @@ def input_area(
     skip_permissions: bool,
     busy: bool = False,
     on_stop: Callable | None = None,
+    content_width: int | None = None,
     attachments: list[tuple[int, str]] | None = None,
     queued_inputs: list[str] | None = None,
     on_remove_queued_input: Callable[[int], None] | None = None,
@@ -1308,36 +1401,38 @@ def input_area(
 
     right_buttons: list[ft.Control] = [model_btn, ft.Container(width=10)]
 
+    send_btn = ft.Container(
+        content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=20),
+        width=46,
+        height=46,
+        alignment=ft.Alignment(0, 0),
+        bgcolor=theme.ACCENT,
+        border_radius=16,
+        ink=True,
+        on_click=lambda e: on_send(),
+        tooltip="Send / queue steering (Enter)",
+    )
+
     if busy and on_stop:
-        # Busy: show only stop button (small rounded square)
-        right_buttons.append(
-            ft.Container(
-                content=ft.Icon(ft.Icons.STOP_ROUNDED, color=theme.TEXT_SECONDARY, size=16),
-                width=44,
-                height=44,
-                alignment=ft.Alignment(0, 0),
-                border=ft.border.all(1, theme.BORDER_SUBTLE),
-                border_radius=14,
-                ink=True,
-                on_click=lambda e: on_stop(),
-                tooltip="Stop generation (Esc)",
-            )
+        right_buttons.extend(
+            [
+                send_btn,
+                ft.Container(width=8),
+                ft.Container(
+                    content=ft.Icon(ft.Icons.STOP_ROUNDED, color=theme.TEXT_SECONDARY, size=16),
+                    width=46,
+                    height=46,
+                    alignment=ft.Alignment(0, 0),
+                    border=ft.border.all(1, theme.BORDER_SUBTLE),
+                    border_radius=16,
+                    ink=True,
+                    on_click=lambda e: on_stop(),
+                    tooltip="Stop generation (Esc)",
+                ),
+            ]
         )
     else:
-        # Not busy: show send button
-        right_buttons.append(
-            ft.Container(
-                content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=20),
-                width=48,
-                height=48,
-                alignment=ft.Alignment(0, 0),
-                bgcolor=theme.ACCENT,
-                border_radius=14,
-                ink=True,
-                on_click=lambda e: on_send(),
-                tooltip="Send (Enter)",
-            )
-        )
+        right_buttons.append(send_btn)
 
     bottom_row = ft.Row(
         [
@@ -1498,7 +1593,7 @@ def input_area(
     return ft.Container(
         content=ft.Container(
             content=box,
-            width=theme.MESSAGE_MAX_WIDTH,
+            width=content_width or theme.MESSAGE_MAX_WIDTH,
         ),
         alignment=ft.Alignment(0, 0),
         padding=ft.padding.only(

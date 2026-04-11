@@ -59,10 +59,7 @@ class SendMessageTool(Tool):
             return f"Error: agent '{to}' has no active session."
 
         # Inject the message and run another turn
-        from ..messages import Message, TextBlock
-        sub_agent.session.messages.append(
-            Message(role="user", content=[TextBlock(text=message)])
-        )
+        sub_agent.session.append_user_text(message)
 
         try:
             result = await sub_agent.run_turn()

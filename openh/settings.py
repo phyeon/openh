@@ -46,6 +46,8 @@ class Settings:
     window_width: int = 1080
     window_height: int = 820
     skip_permissions: bool = False
+    last_session_id: str = ""
+    last_session_cwd: str = ""
 
 
 def load_settings() -> Settings:
