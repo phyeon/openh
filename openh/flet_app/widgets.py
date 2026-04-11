@@ -232,6 +232,8 @@ def top_bar(
     on_rename: Callable,
     on_toggle_theme: Callable,
     on_open_settings: Callable,
+    on_edit_prompt: Callable | None = None,
+    prompt_label: str = "",
     busy_note: str = "",
 ) -> ft.Container:
     """Conversation title bar — claude.app style with sidebar toggle on the left."""
@@ -321,6 +323,30 @@ def top_bar(
                 ft.Container(expand=True),
                 note_text,
                 ft.Container(width=8),
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ARTICLE_OUTLINED, color=theme.TEXT_TERTIARY, size=13),
+                            ft.Text(
+                                prompt_label or "default",
+                                color=theme.TEXT_TERTIARY,
+                                size=11,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=4,
+                        tight=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    border_radius=theme.RADIUS_PILL,
+                    border=ft.border.all(1, theme.BORDER_FAINT),
+                    on_click=lambda e: on_edit_prompt() if on_edit_prompt else None,
+                    ink=True,
+                    tooltip="Edit session prompt",
+                ) if on_edit_prompt else ft.Container(),
+                ft.Container(width=4),
                 theme_btn,
                 settings_btn,
             ],

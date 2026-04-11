@@ -26,6 +26,8 @@ class AgentSession:
     session_id: str = ""
     title: str = ""
     created_at: float = 0.0
+    prompt_preset: str = ""       # per-session preset name (empty = global)
+    prompt_override: str = ""     # per-session custom prompt text (empty = use preset)
     _cwd: str = ""
 
     @property

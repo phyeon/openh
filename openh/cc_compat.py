@@ -551,6 +551,7 @@ def save_session_meta(
     total_input_tokens: int | None = None,
     total_output_tokens: int | None = None,
     session_cwd: str | None = None,
+    prompt_override: str | None = None,
 ) -> None:
     """Append a __meta__ line with session metadata to the JSONL file."""
     meta: dict[str, Any] = {"type": "__meta__"}
@@ -562,6 +563,8 @@ def save_session_meta(
         meta["total_output_tokens"] = total_output_tokens
     if session_cwd is not None:
         meta["session_cwd"] = session_cwd
+    if prompt_override is not None:
+        meta["prompt_override"] = prompt_override
     line = json.dumps(meta, ensure_ascii=False)
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")

@@ -174,7 +174,6 @@ class OpenHApp:
         self.message_column = ft.Column(
             spacing=0,
             scroll=ft.ScrollMode.AUTO,
-            auto_scroll=True,
             expand=True,
             controls=[],
         )
@@ -410,8 +409,18 @@ class OpenHApp:
     def _get_system_prompt(self) -> str:
         """Return the effective system prompt.
 
-        Priority: settings.active_prompt preset > env var / ~/.openh/system_prompt.md > built-in.
+        Priority: session override > session preset > global preset > built-in.
         """
+        # 1. Per-session custom override
+        if self.session.prompt_override:
+            return self.session.prompt_override
+        # 2. Per-session preset
+        session_preset = (self.session.prompt_preset or "").strip()
+        if session_preset and session_preset.lower() != prompts_mod.BUILTIN_NAME:
+            preset = prompts_mod.get_preset(session_preset)
+            if preset is not None and preset.text.strip():
+                return preset.text
+        # 3. Global active preset
         active = (self.settings.active_prompt or "").strip()
         if active and active.lower() != prompts_mod.BUILTIN_NAME:
             preset = prompts_mod.get_preset(active)
@@ -420,12 +429,18 @@ class OpenHApp:
         return load_system_prompt()
 
     def _refresh_top_bar(self, note: str = "") -> None:
+        # Determine prompt label for the pill
+        p_label = self.session.prompt_preset or self.settings.active_prompt or "default"
+        if self.session.prompt_override:
+            p_label = f"{p_label} (edited)"
         bar = widgets.top_bar(
             title=self._current_title or "New chat",
             on_toggle_sidebar=self._toggle_sidebar,
             on_rename=self._open_rename_dialog,
             on_toggle_theme=self._toggle_theme,
             on_open_settings=self._open_settings,
+            on_edit_prompt=self._open_prompt_editor,
+            prompt_label=p_label,
             busy_note=note,
         )
         self.top_bar_holder.content = bar
@@ -799,6 +814,90 @@ class OpenHApp:
             self._autosave()
             self._focus_input()
             self._scroll_to_end()
+
+    def _open_prompt_editor(self) -> None:
+        """Open a dialog to edit this session's system prompt."""
+        current_text = self._get_system_prompt()
+        presets = prompts_mod.list_presets()
+        preset_names = [p.name for p in presets]
+
+        field = ft.TextField(
+            value=current_text,
+            multiline=True,
+            min_lines=8,
+            max_lines=20,
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12, font_family=theme.FONT_MONO),
+        )
+
+        def load_preset(name):
+            p = prompts_mod.get_preset(name)
+            if p:
+                field.value = p.text
+                field.update()
+
+        preset_items = [
+            ft.PopupMenuItem(
+                content=name,
+                on_click=lambda e, n=name: load_preset(n),
+            )
+            for name in preset_names
+        ]
+        preset_btn = ft.PopupMenuButton(
+            items=preset_items,
+            content=ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Icon(ft.Icons.BOOKMARK_OUTLINE, color=theme.TEXT_SECONDARY, size=14),
+                        ft.Text("Load preset", color=theme.TEXT_SECONDARY, size=12),
+                    ],
+                    spacing=4, tight=True,
+                ),
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+            ),
+        )
+
+        def apply(e):
+            new_text = (field.value or "").strip()
+            if new_text == prompts_mod.resolve_active(self.settings.active_prompt):
+                # Same as global — clear override
+                self.session.prompt_override = ""
+                self.session.prompt_preset = ""
+            else:
+                self.session.prompt_override = new_text
+            self.page.pop_dialog()
+            self._refresh_top_bar()
+
+        def reset(e):
+            self.session.prompt_override = ""
+            self.session.prompt_preset = ""
+            self.page.pop_dialog()
+            self._refresh_top_bar()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            bgcolor=theme.BG_ELEVATED,
+            title=ft.Row(
+                [
+                    ft.Text("Session prompt", color=theme.TEXT_PRIMARY, size=16),
+                    ft.Container(expand=True),
+                    preset_btn,
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            content=ft.Container(content=field, width=600, height=400),
+            actions=[
+                ft.TextButton("Reset to default", on_click=reset),
+                ft.TextButton("Cancel", on_click=lambda e: self.page.pop_dialog()),
+                ft.ElevatedButton(
+                    "Apply to this session",
+                    on_click=apply,
+                    style=ft.ButtonStyle(bgcolor=theme.ACCENT, color=theme.TEXT_ON_ACCENT),
+                ),
+            ],
+        )
+        self.page.show_dialog(dialog)
 
     def _open_rename_dialog(self) -> None:
         field = ft.TextField(
@@ -1309,6 +1408,7 @@ class OpenHApp:
         self.session.total_output_tokens = meta.get("total_output_tokens", 0)
         if meta.get("session_cwd"):
             self.session.cwd = meta["session_cwd"]
+        self.session.prompt_override = meta.get("prompt_override", "")
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = target.title or ""
         self._current_title = target.title or ""
@@ -1383,6 +1483,7 @@ class OpenHApp:
                 total_input_tokens=self.session.total_input_tokens,
                 total_output_tokens=self.session.total_output_tokens,
                 session_cwd=self.session.cwd,
+                prompt_override=self.session.prompt_override or None,
             )
             self._session_metas = apply_flags(list_all_recent_sessions())
             self._refresh_sidebar()
