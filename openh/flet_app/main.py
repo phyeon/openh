@@ -337,19 +337,24 @@ class OpenHApp:
                     return ".../" + "/".join(parts[-2:])
                 return str(p)
 
-            for gname, items in grouped.items():
-                # Starred first within each group
-                sorted_items = sorted(items, key=lambda m: (not m.starred, -m.mtime))
-                groups_by_name[gname] = [
-                    (
-                        m.session_id,
-                        m.title or "Untitled",
-                        project_display(m.cwd),
-                        m.starred,
-                        m.hidden,
-                    )
-                    for m in sorted_items
+            # Collect pinned sessions into a separate group at the top
+            pinned = [m for m in self._session_metas if m.starred]
+            if pinned:
+                pinned.sort(key=lambda m: -m.mtime)
+                groups_by_name["Pinned"] = [
+                    (m.session_id, m.title or "Untitled", project_display(m.cwd), m.starred, m.hidden)
+                    for m in pinned
                 ]
+            pinned_ids = {m.session_id for m in pinned}
+
+            for gname, items in grouped.items():
+                sorted_items = sorted(items, key=lambda m: -m.mtime)
+                entries = [
+                    (m.session_id, m.title or "Untitled", project_display(m.cwd), m.starred, m.hidden)
+                    for m in sorted_items if m.session_id not in pinned_ids
+                ]
+                if entries:
+                    groups_by_name[gname] = entries
             bar = widgets.sidebar(
                 groups=groups_by_name,
                 active_session_id=self.session.session_id,
@@ -1518,6 +1523,7 @@ class OpenHApp:
         self._refresh_status_bar()
         self._refresh_input()
         self._refresh_sidebar()
+        self._full_update()
         self._scroll_to_end()
 
     def _delete_session_by_id(self, session_id: str) -> None:
