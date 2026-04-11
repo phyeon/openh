@@ -1991,8 +1991,8 @@ class OpenHApp:
         self.session.profile_id = "default"
         self.session.tools = default_tools()
         # Restore default color theme if was in a profile
-        from ..settings import get_settings
-        _s = get_settings()
+        from ..settings import load_settings
+        _s = load_settings()
         _cp = getattr(_s, "color_preset", "Claude")
         theme.set_color_preset(_cp)
         self._current_title = ""
