@@ -14,7 +14,7 @@ Claude Code stores everything under ~/.claude/ with a very specific layout:
     ├── skills/<skill>/SKILL.md            # user-defined skills
     └── todos/<uuid>-agent-<uuid>.json     # todo list snapshots
 
-`<path-hash>` is just the absolute cwd with '/' replaced by '-'.
+`<path-hash>` is the project root encoded as URL-safe base64 without padding.
 
 This module provides the path calculations and JSONL session read/write so
 openh can share the exact directory layout with Claude Code. A session file
@@ -22,6 +22,7 @@ written by openh can be resumed by Claude Code, and vice versa.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import uuid
@@ -41,10 +42,13 @@ from .messages import (
 )
 
 OPENH_DIR = Path.home() / ".openh"
-PROJECTS_DIR = OPENH_DIR / "sessions"
+PROJECTS_DIR = OPENH_DIR / "projects"
+LEGACY_PROJECTS_DIR = OPENH_DIR / "sessions"
 PLANS_DIR = OPENH_DIR / "plans"
 SKILLS_DIR = OPENH_DIR / "skills"
 TODOS_DIR = OPENH_DIR / "todos"
+MAX_TRANSCRIPT_BYTES = 50 * 1024 * 1024
+TAIL_READ_BYTES = 65_536
 
 OPENH_VERSION = "0.1.0"   # shows up in JSONL `version` field
 OPENH_ENTRYPOINT = "openh"
@@ -55,24 +59,59 @@ OPENH_ENTRYPOINT = "openh"
 # ============================================================================
 
 def path_hash(cwd: str) -> str:
-    """Turn an absolute path into Claude Code's project dir name.
+    """Turn an absolute path into the public transcript dir encoding."""
+    abs_path = os.path.abspath(cwd)
+    return base64.urlsafe_b64encode(abs_path.encode("utf-8")).decode("ascii").rstrip("=")
 
-    /Users/hyeon/Projects -> -Users-hyeon-Projects
-    """
+
+def _legacy_path_hash(cwd: str) -> str:
     abs_path = os.path.abspath(cwd)
     return abs_path.replace(os.sep, "-").replace(":", "")
 
 
-def project_dir(cwd: str) -> Path:
+def _canonical_project_dir(cwd: str) -> Path:
     return PROJECTS_DIR / path_hash(cwd)
 
 
+def _legacy_project_dir(cwd: str) -> Path:
+    return LEGACY_PROJECTS_DIR / _legacy_path_hash(cwd)
+
+
+def _project_dir_candidates(cwd: str) -> list[Path]:
+    candidates: list[Path] = []
+    for candidate in (_canonical_project_dir(cwd), _legacy_project_dir(cwd)):
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def project_dir(cwd: str) -> Path:
+    primary = _canonical_project_dir(cwd)
+    legacy = _legacy_project_dir(cwd)
+    if primary.exists():
+        return primary
+    if legacy.exists():
+        return legacy
+    return primary
+
+
 def session_jsonl_path(cwd: str, session_id: str) -> Path:
-    return project_dir(cwd) / f"{session_id}.jsonl"
+    filename = f"{session_id}.jsonl"
+    for candidate in _project_dir_candidates(cwd):
+        existing = candidate / filename
+        if existing.exists():
+            return existing
+    return _canonical_project_dir(cwd) / filename
 
 
 def memory_dir(cwd: str) -> Path:
-    return project_dir(cwd) / "memory"
+    primary = _canonical_project_dir(cwd) / "memory"
+    legacy = _legacy_project_dir(cwd) / "memory"
+    if primary.exists():
+        return primary
+    if legacy.exists():
+        return legacy
+    return primary
 
 
 def memory_index_file(cwd: str) -> Path:
@@ -80,8 +119,8 @@ def memory_index_file(cwd: str) -> Path:
 
 
 def ensure_project_dirs(cwd: str) -> None:
-    project_dir(cwd).mkdir(parents=True, exist_ok=True)
-    memory_dir(cwd).mkdir(parents=True, exist_ok=True)
+    _canonical_project_dir(cwd).mkdir(parents=True, exist_ok=True)
+    (_canonical_project_dir(cwd) / "memory").mkdir(parents=True, exist_ok=True)
     PLANS_DIR.mkdir(parents=True, exist_ok=True)
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     TODOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,6 +149,118 @@ def git_branch(cwd: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def _extract_message_text(message: Message) -> str:
+    parts: list[str] = []
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            text = block.text.strip()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def _append_jsonl_entry(path: Path, entry: dict[str, Any]) -> None:
+    try:
+        if path.exists() and path.stat().st_size >= MAX_TRANSCRIPT_BYTES:
+            return
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _read_tail_text(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return ""
+    if size <= 0:
+        return ""
+    offset = max(0, size - TAIL_READ_BYTES)
+    try:
+        with path.open("rb") as f:
+            f.seek(offset)
+            return f.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _read_last_chain_uuid(path: Path) -> str | None:
+    text = _read_tail_text(path)
+    if not text:
+        return None
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("type") not in ("user", "assistant"):
+            continue
+        msg_field = obj.get("message") or {}
+        msg_uuid = obj.get("uuid") or msg_field.get("uuid")
+        if isinstance(msg_uuid, str) and msg_uuid:
+            return msg_uuid
+    return None
+
+
+def _read_tail_metadata(path: Path) -> dict[str, str]:
+    metadata: dict[str, str] = {
+        "cwd": "",
+        "title": "",
+        "last_prompt": "",
+        "profile_id": "",
+    }
+    text = _read_tail_text(path)
+    if not text:
+        return metadata
+
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if not metadata["cwd"]:
+            for key in ("session_cwd", "cwd"):
+                val = obj.get(key)
+                if isinstance(val, str) and val:
+                    metadata["cwd"] = val
+                    break
+
+        entry_type = obj.get("type")
+        if not metadata["title"]:
+            if entry_type == "custom-title":
+                val = obj.get("customTitle") or obj.get("custom_title")
+                if isinstance(val, str) and val:
+                    metadata["title"] = val[:70]
+            elif entry_type == "__meta__":
+                val = obj.get("title")
+                if isinstance(val, str) and val:
+                    metadata["title"] = val[:70]
+
+        if not metadata["last_prompt"] and entry_type == "last-prompt":
+            val = obj.get("lastPrompt") or obj.get("last_prompt")
+            if isinstance(val, str) and val:
+                metadata["last_prompt"] = val
+
+        if not metadata["profile_id"] and entry_type == "__meta__":
+            val = obj.get("profile_id")
+            if isinstance(val, str) and val:
+                metadata["profile_id"] = val
+
+        if all(metadata.values()):
+            break
+
+    return metadata
 
 
 # ============================================================================
@@ -230,8 +381,8 @@ class JsonlSessionWriter:
         self.cwd = cwd
         self.session_id = session_id
         self.path = session_jsonl_path(cwd, session_id)
-        self._last_uuid: str | None = None
         ensure_project_dirs(cwd)
+        self._last_uuid: str | None = _read_last_chain_uuid(self.path)
 
     def _base_envelope(self) -> dict[str, Any]:
         return {
@@ -263,6 +414,15 @@ class JsonlSessionWriter:
         })
         self._write_entry(envelope)
         self._last_uuid = envelope["uuid"]
+        prompt_text = _extract_message_text(message)
+        if prompt_text:
+            self._write_entry(
+                {
+                    "type": "last-prompt",
+                    "sessionId": self.session_id,
+                    "lastPrompt": prompt_text,
+                }
+            )
         return envelope["uuid"]
 
     def append_assistant(self, message: Message) -> str:
@@ -286,8 +446,7 @@ class JsonlSessionWriter:
         self._write_entry(entry)
 
     def _write_entry(self, entry: dict[str, Any]) -> None:
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        _append_jsonl_entry(self.path, entry)
 
 
 # ============================================================================
@@ -301,10 +460,26 @@ def read_session_jsonl(path: Path) -> tuple[list[Message], dict[str, Any]]:
     sessionId, cwd, gitBranch etc.
     """
     messages: list[Message] = []
-    metadata: dict[str, Any] = {"session_id": path.stem, "cwd": "", "gitBranch": ""}
+    metadata: dict[str, Any] = {
+        "session_id": path.stem,
+        "cwd": "",
+        "gitBranch": "",
+        "title": "",
+        "last_prompt": "",
+    }
 
     if not path.exists():
         return messages, metadata
+
+    try:
+        if path.stat().st_size > MAX_TRANSCRIPT_BYTES:
+            metadata.update(_read_tail_metadata(path))
+            return messages, metadata
+    except OSError:
+        return messages, metadata
+
+    tombstoned: set[str] = set()
+    entries: list[dict[str, Any]] = []
 
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -315,48 +490,71 @@ def read_session_jsonl(path: Path) -> tuple[list[Message], dict[str, Any]]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            entries.append(obj)
+            if obj.get("type") == "tombstone":
+                deleted_uuid = obj.get("deletedUuid") or obj.get("deleted_uuid")
+                if isinstance(deleted_uuid, str) and deleted_uuid:
+                    tombstoned.add(deleted_uuid)
 
-            entry_type = obj.get("type")
-            if "sessionId" in obj:
-                metadata["session_id"] = obj["sessionId"]
-            if "cwd" in obj:
-                metadata["cwd"] = obj["cwd"]
-            if "gitBranch" in obj:
-                metadata["gitBranch"] = obj["gitBranch"]
+    for obj in entries:
+        entry_type = obj.get("type")
+        if "sessionId" in obj:
+            metadata["session_id"] = obj["sessionId"]
+        if "cwd" in obj:
+            metadata["cwd"] = obj["cwd"]
+        if "gitBranch" in obj:
+            metadata["gitBranch"] = obj["gitBranch"]
 
-            if entry_type == "__meta__":
-                # Merge __meta__ fields into metadata (last wins)
-                for k, v in obj.items():
-                    if k != "type":
-                        metadata[k] = v
+        if entry_type == "__meta__":
+            for k, v in obj.items():
+                if k != "type":
+                    metadata[k] = v
+            continue
+
+        if entry_type == "custom-title":
+            title = obj.get("customTitle") or obj.get("custom_title")
+            if isinstance(title, str) and title:
+                metadata["title"] = title[:70]
+            continue
+
+        if entry_type == "last-prompt":
+            last_prompt = obj.get("lastPrompt") or obj.get("last_prompt")
+            if isinstance(last_prompt, str) and last_prompt:
+                metadata["last_prompt"] = last_prompt
+            continue
+
+        if entry_type == "tombstone":
+            continue
+
+        if entry_type in ("user", "assistant"):
+            msg_field = obj.get("message") or {}
+            role = msg_field.get("role")
+            if role not in ("user", "assistant"):
                 continue
-
-            if entry_type in ("user", "assistant"):
-                msg_field = obj.get("message") or {}
-                role = msg_field.get("role")
-                if role not in ("user", "assistant"):
-                    continue
-                raw_content = msg_field.get("content")
-                blocks: list[Block] = []
-                if isinstance(raw_content, str):
-                    if raw_content:
-                        blocks.append(TextBlock(text=raw_content))
-                elif isinstance(raw_content, list):
-                    for bd in raw_content:
-                        if isinstance(bd, dict):
-                            b = _cc_dict_to_block(bd)
-                            if b is not None:
-                                blocks.append(b)
-                        elif isinstance(bd, str):
-                            blocks.append(TextBlock(text=bd))
-                if blocks:
-                    messages.append(
-                        Message(
-                            role=role,
-                            content=blocks,
-                            uuid=obj.get("uuid") or msg_field.get("uuid"),
-                        )
+            msg_uuid = obj.get("uuid") or msg_field.get("uuid")
+            if isinstance(msg_uuid, str) and msg_uuid and msg_uuid in tombstoned:
+                continue
+            raw_content = msg_field.get("content")
+            blocks: list[Block] = []
+            if isinstance(raw_content, str):
+                if raw_content:
+                    blocks.append(TextBlock(text=raw_content))
+            elif isinstance(raw_content, list):
+                for bd in raw_content:
+                    if isinstance(bd, dict):
+                        b = _cc_dict_to_block(bd)
+                        if b is not None:
+                            blocks.append(b)
+                    elif isinstance(bd, str):
+                        blocks.append(TextBlock(text=bd))
+            if blocks:
+                messages.append(
+                    Message(
+                        role=role,
+                        content=blocks,
+                        uuid=msg_uuid,
                     )
+                )
 
     return messages, metadata
 
@@ -393,37 +591,46 @@ class CCSessionMeta:
 
 def list_sessions_for_cwd(cwd: str) -> list[CCSessionMeta]:
     """All .jsonl files in the project dir for the given cwd."""
-    d = project_dir(cwd)
-    if not d.exists():
-        return []
     metas: list[CCSessionMeta] = []
-    for p in d.glob("*.jsonl"):
-        try:
-            stat = p.stat()
-        except OSError:
+    seen_paths: set[Path] = set()
+    for d in _project_dir_candidates(cwd):
+        if not d.exists():
             continue
-        # Peek title from first user message (expensive but only at listing time)
-        title = _peek_title(p)
-        pid = _peek_profile_id(p)
-        metas.append(
-            CCSessionMeta(
-                session_id=p.stem,
-                path=p,
-                cwd=cwd,
-                mtime=stat.st_mtime,
-                size=stat.st_size,
-                title=title,
-                profile_id=pid,
+        for p in d.glob("*.jsonl"):
+            if p in seen_paths:
+                continue
+            seen_paths.add(p)
+            try:
+                stat = p.stat()
+            except OSError:
+                continue
+            tail = _read_tail_metadata(p)
+            title = tail["title"] or _peek_title(p)
+            pid = tail["profile_id"] or "default"
+            metas.append(
+                CCSessionMeta(
+                    session_id=p.stem,
+                    path=p,
+                    cwd=tail["cwd"] or cwd,
+                    mtime=stat.st_mtime,
+                    size=stat.st_size,
+                    title=title,
+                    profile_id=pid,
+                )
             )
-        )
     metas.sort(key=lambda m: m.mtime, reverse=True)
     return metas
 
 
 def list_all_projects() -> list[Path]:
-    if not PROJECTS_DIR.exists():
-        return []
-    return sorted([p for p in PROJECTS_DIR.iterdir() if p.is_dir()])
+    projects: list[Path] = []
+    for root in (PROJECTS_DIR, LEGACY_PROJECTS_DIR):
+        if not root.exists():
+            continue
+        for path in root.iterdir():
+            if path.is_dir() and path not in projects:
+                projects.append(path)
+    return sorted(projects)
 
 
 def list_all_recent_sessions(limit: int = 60) -> list[CCSessionMeta]:
@@ -432,25 +639,32 @@ def list_all_recent_sessions(limit: int = 60) -> list[CCSessionMeta]:
     Reads every .jsonl file's stat in one pass (fast), then peeks the first
     user message for title + cwd on only the top `limit` results (slower).
     """
-    if not PROJECTS_DIR.exists():
+    if not PROJECTS_DIR.exists() and not LEGACY_PROJECTS_DIR.exists():
         return []
 
     rough: list[tuple[Path, float, int, Path]] = []
-    for proj_dir in PROJECTS_DIR.iterdir():
-        if not proj_dir.is_dir():
+    for root in (PROJECTS_DIR, LEGACY_PROJECTS_DIR):
+        if not root.exists():
             continue
-        for p in proj_dir.glob("*.jsonl"):
-            try:
-                stat = p.stat()
-            except OSError:
+        for proj_dir in root.iterdir():
+            if not proj_dir.is_dir():
                 continue
-            rough.append((p, stat.st_mtime, stat.st_size, proj_dir))
+            for p in proj_dir.glob("*.jsonl"):
+                try:
+                    stat = p.stat()
+                except OSError:
+                    continue
+                rough.append((p, stat.st_mtime, stat.st_size, proj_dir))
 
     rough.sort(key=lambda t: t[1], reverse=True)
     top = rough[:limit]
 
     metas: list[CCSessionMeta] = []
+    seen_session_ids: set[str] = set()
     for path, mtime, size, proj_dir in top:
+        if path.stem in seen_session_ids:
+            continue
+        seen_session_ids.add(path.stem)
         cwd, title = _peek_cwd_and_title(path)
         if not cwd:
             cwd = _unhash_project_dir_name(proj_dir.name)
@@ -475,9 +689,10 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
     def skip_title(text: str) -> bool:
         return text.startswith("[Conversation compacted") or text.startswith("[Prior conversation summary")
 
-    cwd = ""
+    tail = _read_tail_metadata(path)
+    cwd = tail["cwd"]
     first_user_title = ""
-    explicit_title = ""
+    explicit_title = tail["title"]
     try:
         with path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -492,7 +707,7 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
                             cwd = val
                             break
                 if obj.get("type") == "__meta__" and obj.get("title"):
-                    explicit_title = obj["title"][:70]
+                    explicit_title = str(obj["title"])[:70]
                     continue
                 if not first_user_title and obj.get("type") == "user":
                     msg = obj.get("message") or {}
@@ -516,14 +731,22 @@ def _peek_cwd_and_title(path: Path) -> tuple[str, str]:
 
 
 def _unhash_project_dir_name(name: str) -> str:
-    """Best-effort reverse of path_hash() — used only for display."""
-    if not name.startswith("-"):
-        return name
-    return "/" + "/".join(name.lstrip("-").split("-"))
+    """Best-effort reverse of project dir encoding — used only for display."""
+    padded = name + "=" * (-len(name) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except Exception:
+        if not name.startswith("-"):
+            return name
+        return "/" + "/".join(name.lstrip("-").split("-"))
+    return decoded
 
 
 def _peek_profile_id(path: Path) -> str:
     """Read __meta__ lines to find profile_id. Returns 'default' if not found."""
+    tail = _read_tail_metadata(path)
+    if tail["profile_id"]:
+        return tail["profile_id"]
     try:
         with path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -548,7 +771,7 @@ def _peek_title(path: Path) -> str:
         return text.startswith("[Conversation compacted") or text.startswith("[Prior conversation summary")
 
     try:
-        explicit_title = ""
+        explicit_title = _read_tail_metadata(path)["title"]
         first_user_title = ""
         with path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -587,8 +810,27 @@ def _peek_title(path: Path) -> str:
 
 
 def save_session_title(path: Path, title: str) -> None:
-    """Append a __meta__ line with the explicit title to the JSONL file."""
+    """Append public + local title metadata to the JSONL file."""
+    _append_jsonl_entry(
+        path,
+        {
+            "type": "custom-title",
+            "sessionId": path.stem,
+            "customTitle": title,
+        },
+    )
     save_session_meta(path, title=title)
+
+
+def tombstone_entry(path: Path, uuid: str) -> None:
+    """Append a public tombstone entry for a deleted transcript message."""
+    _append_jsonl_entry(
+        path,
+        {
+            "type": "tombstone",
+            "deletedUuid": uuid,
+        },
+    )
 
 
 def save_session_meta(
@@ -698,9 +940,7 @@ def save_session_meta(
         meta["session_memory_last_extracted_tool_call_count"] = (
             session_memory_last_extracted_tool_call_count
         )
-    line = json.dumps(meta, ensure_ascii=False)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    _append_jsonl_entry(path, meta)
 
 
 def read_session_meta(path: Path) -> dict[str, Any]:
@@ -719,6 +959,15 @@ def read_session_meta(path: Path) -> dict[str, Any]:
                             merged[k] = v
     except OSError:
         pass
+    tail = _read_tail_metadata(path)
+    if tail["title"] and "title" not in merged:
+        merged["title"] = tail["title"]
+    if tail["last_prompt"] and "last_prompt" not in merged:
+        merged["last_prompt"] = tail["last_prompt"]
+    if tail["cwd"] and "cwd" not in merged and "session_cwd" not in merged:
+        merged["cwd"] = tail["cwd"]
+    if tail["profile_id"] and "profile_id" not in merged:
+        merged["profile_id"] = tail["profile_id"]
     return merged
 
 
