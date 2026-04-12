@@ -1588,19 +1588,21 @@ def input_area(
     )
 
     if busy and on_stop:
-        dim_send = ft.Container(
-            content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=18),
-            width=36,
-            height=36,
-            alignment=ft.Alignment(0, 0),
-            bgcolor=theme.ACCENT,
-            border_radius=12,
-            ink=True,
-            on_click=lambda e: on_send(),
-            tooltip="Send / queue steering (Enter)",
-            opacity=1.0 if has_text else 0.3,
-        )
-        right_buttons.extend([dim_send, ft.Container(width=2), stop_btn])
+        if has_text:
+            steering_send = ft.Container(
+                content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=18),
+                width=36,
+                height=36,
+                alignment=ft.Alignment(0, 0),
+                bgcolor=theme.ACCENT,
+                border_radius=12,
+                ink=True,
+                on_click=lambda e: on_send(),
+                tooltip="Send / queue steering (Enter)",
+            )
+            right_buttons.extend([steering_send, ft.Container(width=2), stop_btn])
+        else:
+            right_buttons.append(stop_btn)
     else:
         right_buttons.append(send_btn)
 
