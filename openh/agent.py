@@ -7,6 +7,7 @@ from .messages import (
     Block,
     Message,
     MessageStop,
+    StatusEvent,
     StreamEvent,
     TextBlock,
     TextDelta,
@@ -57,6 +58,40 @@ class Agent:
             if t.name == name:
                 return t
         return None
+
+    def _build_todo_nudge(self) -> str:
+        try:
+            from .tools.todowrite import _load_persisted_todos
+        except Exception:
+            return ""
+
+        todos = _load_persisted_todos(self.session.session_id)
+        incomplete_count = 0
+        for todo in todos:
+            if not isinstance(todo, dict):
+                continue
+            status = str(todo.get("status") or "").strip().lower()
+            if status != "completed":
+                incomplete_count += 1
+        if incomplete_count == 0:
+            return ""
+        suffix = "" if incomplete_count == 1 else "s"
+        return (
+            f"You have {incomplete_count} incomplete task{suffix} in your TodoWrite list. "
+            "Make sure to complete all tasks before ending your response."
+        )
+
+    def _system_prompt_for_turn(self, turn: int) -> str:
+        system_prompt = self.system_prompt
+        if turn <= 2:
+            return system_prompt
+
+        todo_nudge = self._build_todo_nudge().strip()
+        if not todo_nudge:
+            return system_prompt
+        if todo_nudge in system_prompt:
+            return system_prompt
+        return system_prompt.rstrip() + "\n\n" + todo_nudge
 
     async def run_turn(self, user_text: str) -> None:
         from .hooks import fire_hook
@@ -299,7 +334,7 @@ class Agent:
 
             stream = self.session.provider.stream(
                 messages=self.session.model_messages,
-                system=self.system_prompt,
+                system=self._system_prompt_for_turn(turns),
                 tools=self._tool_schemas(),  # type: ignore[arg-type]
             )
 
@@ -340,19 +375,15 @@ class Agent:
                     stall_retries_left -= 1
                     turns -= 1
                     await self._emit(
-                        TextDelta(
+                        StatusEvent(
                             text=(
-                                f"\n\n[agent: no stream event for {self.STREAM_LIVENESS_TIMEOUT}s "
-                                f"— retrying ({stall_retries_left + 1} left)]"
+                                f"No response for {self.STREAM_LIVENESS_TIMEOUT}s — "
+                                f"retrying ({stall_retries_left + 1} left)…"
                             )
                         )
                     )
                     continue
-                msg = f"\n\n[agent: {timeout_reason}]"
-                assistant_blocks.append(TextBlock(text=msg))
-                await self._emit(TextDelta(text=msg))
-                self.session.append_assistant_message(assistant_blocks)
-                return
+                raise RuntimeError(timeout_reason)
             stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
 
             self.session.append_assistant_message(assistant_blocks)
@@ -363,6 +394,14 @@ class Agent:
                     if max_tokens_recovery_count < self.MAX_TOKENS_RECOVERY_LIMIT:
                         max_tokens_recovery_count += 1
                         turns -= 1
+                        await self._emit(
+                            StatusEvent(
+                                text=(
+                                    "Output token limit hit — continuing "
+                                    f"(attempt {max_tokens_recovery_count}/{self.MAX_TOKENS_RECOVERY_LIMIT})"
+                                )
+                            )
+                        )
                         self.session.append_message(
                             "user",
                             [TextBlock(text=self.MAX_TOKENS_RECOVERY_MSG)],

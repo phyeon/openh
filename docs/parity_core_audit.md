@@ -18,7 +18,7 @@ Status legend:
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/agent.py` | `crates/query/src/lib.rs` | Reviewed multiple times. `max_turns`, `tool_result_budget`, command queue, compact trigger, AutoDream hook checked. Still not a generator/state-machine architecture. |
+| `[~]` | `openh/agent.py` | `crates/query/src/lib.rs` | Reviewed multiple times. `max_turns`, `tool_result_budget`, command queue, compact trigger, AutoDream hook, todo nudge, and retry/max-token status surface checked. Still not a generator/state-machine architecture. |
 | `[~]` | `openh/session.py` | `crates/query/src/lib.rs`, `crates/core/src/lib.rs` | Reviewed for max_turns, managed executor config, usage rollup. Still simpler than reference config graph. |
 | `[~]` | `openh/compaction.py` | `crates/query/src/compact.rs` | Reviewed and ported major compact paths. Still needs continuous re-check for exact prompt text and failure semantics. |
 | `[~]` | `openh/auto_dream.py` | `crates/query/src/auto_dream.rs` | Reviewed and wired into turn-end flow. Layout/storage assumptions still differ from reference. |
@@ -56,8 +56,8 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/tools/base.py` | `crates/tools/src/lib.rs` | Reviewed. `resolve_path()` added to match public relative-path behavior. |
 | `[~]` | `openh/tools/__init__.py` | `crates/tools/src/lib.rs` | Reviewed. Legacy `LS` removed from default built-ins because public built-ins do not expose it. |
-| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, worktree behavior checked. |
-| `[~]` | `openh/tools/send_message.py` | `crates/tools/src/send_message.rs` | Reviewed. Mailbox/broadcast/status surface exists, but helper parity is still open. |
+| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, worktree behavior checked. Mode prompt wiring and wrapper output fixed. Background poll surface is still not exact public helper parity. |
+| `[~]` | `openh/tools/send_message.py` | `crates/tools/src/send_message.rs` | Reviewed. Mailbox/broadcast/status surface exists, and `__status__` now polls finished background workers. Full helper parity is still open. |
 | `[~]` | `openh/tools/task_tools.py` | `crates/tools/src/tasks.rs` | Reviewed. Task board added, but still lighter than public task model. |
 | `[~]` | `openh/tools/todowrite.py` | `crates/tools/src/todo_write.rs` | Reviewed. Input/status parity partially matched. |
 | `[~]` | `openh/tools/tool_search.py` | `crates/tools/src/tool_search.rs` | Reviewed. Keyword scoring improved. Deferred-loading parity still open. |
@@ -106,15 +106,16 @@ These are the main open deltas after the reviewed files above:
 1. Permission handler model still needs another exact pass against `crates/core/src/lib.rs`.
 2. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
 3. Background sub-agent surface is closer now, but still not identical to the public helper flow.
-4. Plugin-discovered output styles are still incomplete.
-5. File-by-file audit is still missing for `commands.py`, `cc_compat.py`, `persistence.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
+4. OpenAI/Gemini provider behavior is still only partially audited.
+5. Plugin-discovered output styles are still incomplete.
+6. File-by-file audit is still missing for `commands.py`, `cc_compat.py`, `persistence.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `commands.py` + public `crates/commands/src/lib.rs`
-2. `cc_compat.py` + `session_storage/sqlite_storage` public files
-3. `webfetch.py`, `websearch.py`, `worktree.py`
-4. `providers/openai.py`, `providers/gemini.py`
-5. `flet_app/main.py` and `flet_app/widgets.py` for local runtime consistency
+1. `permission_rules.py` + public `crates/core/src/lib.rs` exact handler-model pass
+2. `tools/agent_tool.py` + `tools/send_message.py` + public background-helper flow
+3. `providers/openai.py`, `providers/gemini.py`
+4. `cc_compat.py` + `session_storage/sqlite_storage` public files
+5. `commands.py`, then `webfetch.py`, `websearch.py`, `worktree.py`

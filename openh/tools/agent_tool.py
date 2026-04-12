@@ -31,6 +31,23 @@ _MODE_DEFAULT_TURNS = {
 }
 
 
+def poll_background_agent(session: AgentSession, target: str) -> str | None:
+    entry = find_subagent_entry(session, target)
+    if entry is None:
+        return None
+
+    task = entry.get("task")
+    if task is not None and not task.done():
+        return None
+
+    error = str(entry.get("error") or "").strip()
+    if error:
+        return f"[Agent error: {error}]"
+
+    output = extract_subagent_text(entry).strip()
+    return output or "(sub-agent finished without text output)"
+
+
 def get_coordination_root(session: AgentSession) -> AgentSession:
     root = getattr(session, "_coordination_root", None)
     if isinstance(root, AgentSession):
@@ -468,7 +485,7 @@ class AgentTool(Tool):
                 "{"
                 f"\"agent_id\": \"{agent_id}\", "
                 f"\"status\": \"running\", "
-                f"\"message\": \"Agent '{desc}' started in background.\""
+                f"\"message\": \"Agent '{desc}' started in background. Use SendMessage with message='__status__' and to='{agent_id}' to check status.\""
                 "}"
             )
 
@@ -476,7 +493,7 @@ class AgentTool(Tool):
         streamed = "".join(collected).strip()
         if streamed and not output.strip():
             output = streamed
-        return f"# {desc}\n\n{output}"
+        return output
 
     @staticmethod
     def _select_tools(all_tools: list[Tool], allowed: Any, mode: str) -> list[Tool]:
@@ -546,12 +563,20 @@ class AgentTool(Tool):
         system_override: str,
         cwd: str,
     ) -> str:
+        custom_parts: list[str] = []
+        session_custom = cls._session_custom_prompt_text(parent)
+        if session_custom.strip():
+            custom_parts.append(session_custom.strip())
+        mode_prompt = _MODE_PROMPTS.get(mode, "").strip()
+        if mode_prompt:
+            custom_parts.append(mode_prompt)
+        if system_override.strip():
+            custom_parts.append(system_override.strip())
         return build_runtime_system_prompt(
             load_system_prompt(),
             cwd,
             date.today().isoformat(),
-            custom_prompt=cls._session_custom_prompt_text(parent),
-            append_system_prompt=system_override,
+            custom_prompt="\n\n".join(custom_parts),
             is_non_interactive=True,
             output_style=getattr(parent, "output_style", "default"),
             custom_output_style_prompt=getattr(parent, "output_style_prompt", ""),

@@ -10,6 +10,7 @@ from .agent_tool import (
     get_coordination_root,
     get_subagent_registry,
     pending_subagent_message_count,
+    poll_background_agent,
     queue_coordinator_message,
     queue_subagent_message,
     run_subagent_prompt,
@@ -104,6 +105,11 @@ class SendMessageTool(Tool):
                 coordination_root,
                 str(agent_entry.get("id") or ""),
             )
+            polled = poll_background_agent(coordination_root, str(agent_entry.get("id") or ""))
+            if polled is not None:
+                agent_entry["last_output"] = polled
+                agent_entry["status"] = "idle" if not error else "error"
+                return polled
             if status == "running":
                 return f"Agent {agent_entry.get('id')} is still running. queued_messages={queued}"
             if error:

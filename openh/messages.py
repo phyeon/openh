@@ -153,6 +153,11 @@ class MessageStop:
     stop_reason: str  # "end_turn", "tool_use", "max_tokens", etc.
 
 
+@dataclass
+class StatusEvent:
+    text: str
+
+
 StreamEvent = Union[
     TextDelta,
     ToolUseStart,
@@ -161,4 +166,5 @@ StreamEvent = Union[
     ToolResultEvent,
     Usage,
     MessageStop,
+    StatusEvent,
 ]

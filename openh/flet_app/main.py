@@ -37,6 +37,7 @@ from ..system_prompt import (
 )
 from ..messages import (
     MessageStop,
+    StatusEvent,
     StreamEvent,
     TextDelta,
     ToolResultEvent,
@@ -2231,6 +2232,8 @@ class OpenHApp:
             self._scroll_to_end()
         elif isinstance(event, Usage):
             self._refresh_top_bar(note="thinking…")
+        elif isinstance(event, StatusEvent):
+            self._refresh_top_bar(note=event.text)
         elif isinstance(event, MessageStop):
             self._finalize_streaming_message()
             self._reset_live_tool_stack()
