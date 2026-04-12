@@ -9,7 +9,8 @@ from typing import Any, ClassVar
 from .base import PermissionDecision, Tool, ToolContext
 
 DEFAULT_TIMEOUT = 120
-MAX_OUTPUT_BYTES = 30_000
+MAX_TIMEOUT = 600  # 10 minutes hard cap (CC pattern)
+MAX_OUTPUT_CHARS = 100_000  # CC uses 100K
 
 _BG_SHELLS: dict[str, "BackgroundShell"] = {}
 
@@ -81,12 +82,23 @@ class BashTool(Tool):
     async def _run_foreground(
         self, command: str, input: dict[str, Any], ctx: ToolContext
     ) -> str:
-        timeout = int(input.get("timeout") or DEFAULT_TIMEOUT)
+        timeout = min(int(input.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
+
+        # Wrap command to track cwd changes (CC sentinel pattern)
+        sentinel = "__OPENH_STATE__"
+        wrapped = (
+            f"cd {_shell_quote(ctx.session.cwd)} 2>/dev/null\n"
+            f"{command}\n"
+            f"__openh_rc=$?\n"
+            f"echo\necho '{sentinel}'\npwd\n"
+            f"exit $__openh_rc"
+        )
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
+            proc = await asyncio.create_subprocess_exec(
+                "bash", "-c", wrapped,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,  # CC: prevent stdin hangs
                 cwd=ctx.session.cwd,
             )
         except OSError as exc:
@@ -102,20 +114,39 @@ class BashTool(Tool):
                 pass
             return f"error: command timed out after {timeout}s"
 
-        stdout = _truncate(stdout_b.decode("utf-8", errors="replace"))
-        stderr = _truncate(stderr_b.decode("utf-8", errors="replace"))
+        raw_stdout = stdout_b.decode("utf-8", errors="replace")
+        stderr_text = _truncate(stderr_b.decode("utf-8", errors="replace"))
         rc = proc.returncode
 
+        # Extract new cwd from sentinel (CC pattern)
+        stdout_text = raw_stdout
+        if sentinel in raw_stdout:
+            parts = raw_stdout.rsplit(sentinel, 1)
+            stdout_text = parts[0]
+            state_lines = parts[1].strip().splitlines()
+            if state_lines:
+                import os
+                new_cwd = state_lines[0].strip()
+                if os.path.isdir(new_cwd):
+                    ctx.session.cwd = new_cwd
+
+        stdout_text = _truncate(stdout_text)
+
         out_lines = [f"exit_code: {rc}"]
-        if stdout:
+        if stdout_text:
             out_lines.append("stdout:")
-            out_lines.append(stdout)
-        if stderr:
+            out_lines.append(stdout_text)
+        if stderr_text:
             out_lines.append("stderr:")
-            out_lines.append(stderr)
-        if not stdout and not stderr:
+            out_lines.append(stderr_text)
+        if not stdout_text and not stderr_text:
             out_lines.append("(no output)")
         return "\n".join(out_lines)
+
+
+def _shell_quote(s: str) -> str:
+    """Single-quote a string for shell (CC pattern)."""
+    return "'" + s.replace("'", "'\\''") + "'"
 
     async def _run_background(
         self, command: str, description: str, ctx: ToolContext
@@ -125,6 +156,7 @@ class BashTool(Tool):
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
                 cwd=ctx.session.cwd,
             )
         except OSError as exc:
@@ -203,15 +235,14 @@ def _strip_ansi(text: str) -> str:
 
 def _truncate(text: str) -> str:
     text = _strip_ansi(text)
-    if len(text) <= MAX_OUTPUT_BYTES:
+    if len(text) <= MAX_OUTPUT_CHARS:
         return text
-    # Keep first and last portions for context
-    head = MAX_OUTPUT_BYTES * 3 // 4
-    tail = MAX_OUTPUT_BYTES // 4
+    # CC pattern: 50/50 head/tail split
+    half = MAX_OUTPUT_CHARS // 2
     return (
-        text[:head]
-        + f"\n\n… ({len(text) - MAX_OUTPUT_BYTES:,} chars truncated) …\n\n"
-        + text[-tail:]
+        text[:half]
+        + f"\n\n… ({len(text) - MAX_OUTPUT_CHARS:,} chars truncated) …\n\n"
+        + text[-half:]
     )
 
 
