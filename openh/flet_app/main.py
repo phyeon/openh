@@ -979,17 +979,17 @@ class OpenHApp:
             if theme.is_fnd():
                 while self._welcome_wordmark_should_run and self._welcome_widget is not None:
                     for el in elements:
-                        el.opacity = 0.88
+                        el.opacity = 0.6
                     if self._welcome_wordmark_host is not None:
                         self._welcome_wordmark_host.update()
-                    await asyncio.sleep(2.5)
+                    await asyncio.sleep(1.8)
                     if not self._welcome_wordmark_should_run:
                         break
                     for el in elements:
-                        el.opacity = 0.96
+                        el.opacity = 0.95
                     if self._welcome_wordmark_host is not None:
                         self._welcome_wordmark_host.update()
-                    await asyncio.sleep(2.5)
+                    await asyncio.sleep(1.8)
         except Exception:
             pass
         finally:
@@ -1000,43 +1000,14 @@ class OpenHApp:
     # ---- FnD ambient effects (particles + breathing gradient) ----
 
     def _build_fnd_ambient_layout(self, content: ft.Control) -> ft.Control:
-        """Wrap content in a minimal FnD ambient layout — single-hue vignette only."""
-        dark = theme.is_dark()
-
-        # Single subtle radial vignette using only the accent hue family
-        self._fnd_gradient_layers = [
-            ft.Container(
-                expand=True,
-                gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.0, -0.6),
-                    radius=1.1 if dark else 0.9,
-                    colors=(
-                        ["#ff4f9c12", "#00000000"]
-                        if dark
-                        else ["#f5ddd418", "#00000000"]
-                    ),
-                ),
-                opacity=0.5 if dark else 0.6,
-                animate_opacity=ft.Animation(6000, ft.AnimationCurve.EASE_IN_OUT),
-            ),
-        ]
-
+        """FnD layout — flat background, no ambient effects."""
+        self._fnd_gradient_layers = []
         self._fnd_particles = []
-        content_layer = ft.Container(content=content, expand=True)
-
-        self._fnd_ambient_should_run = True
-        try:
-            self.page.run_task(self._animate_fnd_ambient)
-        except Exception:
-            pass
-
-        return ft.Stack(
-            [
-                ft.Container(expand=True, bgcolor=theme.BG_PAGE),
-                *self._fnd_gradient_layers,
-                content_layer,
-            ],
+        self._fnd_ambient_should_run = False
+        return ft.Container(
+            content=content,
             expand=True,
+            bgcolor=theme.BG_PAGE,
         )
 
     async def _animate_fnd_ambient(self) -> None:
@@ -2643,7 +2614,6 @@ class OpenHApp:
                     font_family=theme.FONT_SANS,
                     color=theme.ACCENT,
                     text_align=ft.TextAlign.CENTER,
-                    letter_spacing=6,
                 )
             else:
                 # Fruit: warm serif italic

@@ -374,7 +374,7 @@ _register_preset("Slate",
 # Light: per-fruit variants.
 
 _FND_DARK = Tokens(
-    BG_SIDEBAR="#0a0b10ee",
+    BG_SIDEBAR="#0a0b10",
     BG_DEEPEST="#060710",
     BG_PAGE="#0B0C10",
     BG_ELEVATED="#141726",
@@ -406,7 +406,7 @@ _FND_DARK = Tokens(
 
 # Light 1: Strawberry — blush pink
 _FND_LIGHT_STRAWBERRY = Tokens(
-    BG_SIDEBAR="#FFF0F3ee",
+    BG_SIDEBAR="#FFF0F3",
     BG_DEEPEST="#FFEBEF",
     BG_PAGE="#FFF5F7",
     BG_ELEVATED="#FFFFFF",
@@ -438,7 +438,7 @@ _FND_LIGHT_STRAWBERRY = Tokens(
 
 # Light 2: Mango — warm orange / gold
 _FND_LIGHT_MANGO = Tokens(
-    BG_SIDEBAR="#FFF6EEee",
+    BG_SIDEBAR="#FFF6EE",
     BG_DEEPEST="#FFF2E8",
     BG_PAGE="#FFFBF7",
     BG_ELEVATED="#FFFFFF",
@@ -470,7 +470,7 @@ _FND_LIGHT_MANGO = Tokens(
 
 # Light 3: Blueberry — cool lavender / indigo
 _FND_LIGHT_BLUEBERRY = Tokens(
-    BG_SIDEBAR="#F3F1FAee",
+    BG_SIDEBAR="#F3F1FA",
     BG_DEEPEST="#EEEAF7",
     BG_PAGE="#F8F7FC",
     BG_ELEVATED="#FFFFFF",
@@ -502,7 +502,7 @@ _FND_LIGHT_BLUEBERRY = Tokens(
 
 # Light 6: Tropical — coral + teal
 _FND_LIGHT_TROPICAL = Tokens(
-    BG_SIDEBAR="#F2F6F7ee",
+    BG_SIDEBAR="#F2F6F7",
     BG_DEEPEST="#ECF2F3",
     BG_PAGE="#F8FAFB",
     BG_ELEVATED="#FFFFFF",

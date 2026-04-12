@@ -1432,7 +1432,6 @@ def welcome_screen(
                                 weight=ft.FontWeight.W_700,
                                 text_align=ft.TextAlign.CENTER,
                                 font_family=theme.FONT_SANS,
-                                letter_spacing=6,
                             ) if dark else ft.Text(
                                 "Fruits & Dessert",
                                 color=accent_color or theme.ACCENT,
@@ -1449,7 +1448,6 @@ def welcome_screen(
                             size=12 if dark else 13,
                             text_align=ft.TextAlign.CENTER,
                             font_family=theme.FONT_MONO,
-                            letter_spacing=2 if dark else 0,
                         ),
                         ft.Container(height=6),
                         workspace,
@@ -1690,16 +1688,6 @@ def input_area(
         alignment=ft.Alignment(0, 0),
         bgcolor=theme.ACCENT,
         border_radius=12,
-        shadow=(
-            ft.BoxShadow(
-                color="#ff4f9c44" if dark_fnd else "#d98d7f26",
-                blur_radius=12 if dark_fnd else 10,
-                spread_radius=1,
-                offset=ft.Offset(0, 4 if dark_fnd else 3),
-            )
-            if is_fnd
-            else None
-        ),
         ink=True,
         on_click=lambda e: on_send(),
         tooltip="Send / queue steering (Enter)",
@@ -1727,21 +1715,11 @@ def input_area(
                 alignment=ft.Alignment(0, 0),
                 bgcolor=theme.ACCENT,
                 border_radius=12,
-                shadow=(
-                    ft.BoxShadow(
-                        color="#ff4f9c44" if dark_fnd else "#d98d7f26",
-                        blur_radius=12 if dark_fnd else 10,
-                        spread_radius=1,
-                        offset=ft.Offset(0, 4 if dark_fnd else 3),
-                    )
-                    if is_fnd
-                    else None
-                ),
                 ink=True,
                 on_click=lambda e: on_send(),
                 tooltip="Send / queue steering (Enter)",
             )
-            right_buttons.extend([steering_send, ft.Container(width=2), stop_btn])
+            right_buttons.extend([steering_send, stop_btn])
         else:
             right_buttons.append(stop_btn)
     else:
@@ -1887,33 +1865,10 @@ def input_area(
             spacing=0,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
-        bgcolor=(
-            "#09111cf2"
-            if dark_fnd
-            else ("#fffaf5" if is_fnd else theme.BG_DEEPEST)
-        ),
-        gradient=(
-            ft.LinearGradient(
-                begin=ft.Alignment(0, -1),
-                end=ft.Alignment(0, 1),
-                colors=["#0c1320", "#09111c"],
-            )
-            if dark_fnd
-            else None
-        ),
+        bgcolor=theme.BG_ELEVATED if is_fnd else theme.BG_DEEPEST,
         border=ft.border.all(1, theme.BORDER_SUBTLE),
         border_radius=24 if is_fnd else theme.RADIUS_LG,
         padding=ft.padding.only(left=14, right=10, top=10, bottom=10),
-        shadow=(
-            ft.BoxShadow(
-                color="#08111d58" if dark_fnd else "#d6b3a626",
-                blur_radius=18 if dark_fnd else 14,
-                spread_radius=0,
-                offset=ft.Offset(0, 8 if dark_fnd else 6),
-            )
-            if is_fnd
-            else None
-        ),
     )
 
     return ft.Container(

@@ -913,7 +913,7 @@ class SettingsDialog:
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
             label="Output style",
-            on_change=_on_output_style_change,
+            on_select=_on_output_style_change,
             expand=True,
         )
         self._output_style_help = ft.Text(
