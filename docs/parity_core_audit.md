@@ -26,7 +26,7 @@ Status legend:
 | `[~]` | `openh/coordinator.py` | `crates/query/src/coordinator.rs`, `crates/query/src/managed_orchestrator.rs` | Reviewed. Prompt/runtime split improved, but coordinator surface is still not fully exact. |
 | `[~]` | `openh/session_memory.py` | `crates/query/src/session_memory.rs` | Reviewed. UUID cursor added. Extraction/storage logic still lighter than reference. |
 | `[~]` | `openh/cc_compat.py` | `crates/core/src/session_storage.rs`, `crates/core/src/sqlite_storage.rs` | Reviewed this pass. Transcript root now prefers public-style `projects/<base64url(cwd)>`, last-prompt/custom-title/tombstone entries are understood, tail metadata + writer parent-UUID recovery were added, and legacy `sessions/` paths still resolve for backwards compatibility. Still no SQLite parity, no typed transcript union, and local `__meta__` append-only state remains OpenH-specific. |
-| `[ ]` | `openh/persistence.py` | `crates/core/src/session_storage.rs` | Partial spot checks only. |
+| `[~]` | `openh/persistence.py` | `crates/core/src/lib.rs` persistent session helpers | Reviewed this pass. The legacy JSON session helpers now follow the public `sessions/*.json` shape more closely: UUID session IDs, `sessions_dir()/session_path()`, load/delete by ID, rename/tag/untag/search helpers, and broader message-content decoding. Still not the primary runtime path, and the stored session payload is much lighter than the public `ConversationSession` struct. |
 | `[ ]` | `openh/commands.py` | `crates/commands/src/lib.rs` | Only selected commands checked. No full line audit yet. |
 
 ## 2. Prompt / Config / Message / Memory
@@ -107,14 +107,14 @@ These are the main open deltas after the reviewed files above:
 2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges.
 3. Permission handler model is much closer, but still not a literal `PermissionManager` port.
 4. Plugin-discovered output styles are still incomplete.
-5. File-by-file audit is still missing for `persistence.py`, `commands.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
+5. File-by-file audit is still missing for `commands.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `persistence.py`
-2. `commands.py`
-3. `webfetch.py`, `websearch.py`, `worktree.py`
-4. `providers/openai.py`, `providers/gemini.py` edge-capability pass
-5. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
+1. `commands.py`
+2. `webfetch.py`, `websearch.py`, `worktree.py`
+3. `providers/openai.py`, `providers/gemini.py` edge-capability pass
+4. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
+5. `memdir.py`
