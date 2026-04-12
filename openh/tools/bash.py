@@ -127,6 +127,10 @@ class BashTool(Tool):
                 "type": "boolean",
                 "description": "Start in background; returns immediately with shell_id.",
             },
+            "use_pty": {
+                "type": "boolean",
+                "description": "Run in a pseudo-terminal (for programs that need a TTY like npm, cargo, pytest).",
+            },
         },
         "required": ["command"],
     }
@@ -135,8 +139,25 @@ class BashTool(Tool):
     async def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
     ) -> PermissionDecision:
+        from .bash_classifier import classify, RiskLevel
+
+        command = input.get("command", "")
+        level = classify(command)
+
+        # Critical → unconditionally blocked (CC pattern)
+        if level == RiskLevel.CRITICAL:
+            return PermissionDecision(
+                behavior="deny",
+                reason=f"BLOCKED: critical-risk command detected",
+            )
+
+        # Always-allow only covers Safe + Low
         if ("Bash", "*") in ctx.session.always_allow:
-            return PermissionDecision(behavior="allow")
+            if level <= RiskLevel.LOW:
+                return PermissionDecision(behavior="allow")
+            # Medium/High still need explicit permission even with always_allow
+            return PermissionDecision(behavior="ask")
+
         return PermissionDecision(behavior="ask")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
@@ -148,6 +169,8 @@ class BashTool(Tool):
 
         if background:
             return await self._run_background(command, description, ctx)
+        if bool(input.get("use_pty")):
+            return await self._run_pty(command, input, ctx)
         return await self._run_foreground(command, input, ctx)
 
     async def _run_foreground(
@@ -230,6 +253,98 @@ class BashTool(Tool):
             out_lines.append("stderr:")
             out_lines.append(stderr_text)
         if not stdout_text and not stderr_text:
+            out_lines.append("(no output)")
+        return "\n".join(out_lines)
+
+    async def _run_pty(
+        self, command: str, input: dict[str, Any], ctx: ToolContext
+    ) -> str:
+        """Run command in a pseudo-terminal (CC pty_bash.rs pattern).
+
+        Programs that check isatty() (npm, cargo, pytest, git) will see a real
+        TTY and produce their normal interactive output. Output is ANSI-stripped.
+        """
+        import pty as _pty
+        import struct
+        import termios
+        import fcntl
+
+        timeout = min(int(input.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
+        max_bytes = 2 * 1024 * 1024  # 2 MB raw cap (CC pattern)
+
+        # Create PTY pair
+        master_fd, slave_fd = _pty.openpty()
+
+        # Set PTY size: 50 rows x 220 cols (CC pattern)
+        winsize = struct.pack("HHHH", 50, 220, 0, 0)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+        loop = asyncio.get_event_loop()
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bash", "-c", command,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                stdin=asyncio.subprocess.DEVNULL,
+                cwd=ctx.session.cwd,
+                close_fds=True,
+            )
+        except OSError as exc:
+            os.close(master_fd)
+            os.close(slave_fd)
+            return f"error: failed to start: {exc}"
+
+        os.close(slave_fd)  # parent doesn't need slave
+
+        # Read from master_fd with timeout
+        output_chunks: list[bytes] = []
+        total_bytes = 0
+
+        async def _read_pty():
+            nonlocal total_bytes
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(
+                        None, lambda: os.read(master_fd, 4096)
+                    )
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output_chunks.append(chunk)
+                total_bytes += len(chunk)
+                if total_bytes >= max_bytes:
+                    break
+
+        try:
+            await asyncio.wait_for(_read_pty(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+            os.close(master_fd)
+            raw = b"".join(output_chunks).decode("utf-8", errors="replace")
+            return f"error: command timed out after {timeout}s\n{_truncate(raw)}"
+
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+
+        os.close(master_fd)
+        rc = proc.returncode or 0
+
+        raw = b"".join(output_chunks).decode("utf-8", errors="replace")
+        cleaned = _truncate(raw)
+
+        out_lines = [f"exit_code: {rc}"]
+        if cleaned:
+            out_lines.append("output:")
+            out_lines.append(cleaned)
+        else:
             out_lines.append("(no output)")
         return "\n".join(out_lines)
 
