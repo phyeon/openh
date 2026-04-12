@@ -10,6 +10,7 @@ from .system_prompt import DEFAULT_SYSTEM_PROMPT
 
 OPENH_DIR = Path.home() / ".openh"
 REPO_DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+LEGACY_DOTENV_PATH = REPO_DOTENV_PATH.parent.parent / ".env"
 USER_DOTENV_PATH = OPENH_DIR / ".env"
 DOTENV_PATH = REPO_DOTENV_PATH
 SYSTEM_PROMPT_FILE = OPENH_DIR / "system_prompt.md"
@@ -43,10 +44,17 @@ def _get_nonempty(name: str) -> str | None:
 
 def dotenv_paths() -> tuple[Path, ...]:
     ordered: list[Path] = []
-    for path in (USER_DOTENV_PATH, REPO_DOTENV_PATH):
+    for path in (USER_DOTENV_PATH, LEGACY_DOTENV_PATH, REPO_DOTENV_PATH):
         if path not in ordered:
             ordered.append(path)
     return tuple(ordered)
+
+
+def preferred_dotenv_path() -> Path:
+    for path in (REPO_DOTENV_PATH, LEGACY_DOTENV_PATH, USER_DOTENV_PATH):
+        if path.exists():
+            return path
+    return REPO_DOTENV_PATH
 
 
 def load_env_files() -> tuple[Path, ...]:

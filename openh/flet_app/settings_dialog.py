@@ -14,7 +14,13 @@ from typing import Callable
 
 import flet as ft
 
-from ..config import DOTENV_PATH, USER_DOTENV_PATH, load_env_files
+from ..config import (
+    LEGACY_DOTENV_PATH,
+    REPO_DOTENV_PATH,
+    USER_DOTENV_PATH,
+    load_env_files,
+    preferred_dotenv_path,
+)
 from .. import output_styles, prompts, settings as settings_mod
 from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
 from ..session import normalize_usage_by_model
@@ -34,8 +40,10 @@ class SettingsDialog:
         self.on_save = on_save
         self._session = session
         self.dialog: ft.AlertDialog | None = None
-        self._env_path = DOTENV_PATH
-        self._env_read_paths = tuple(dict.fromkeys((DOTENV_PATH, USER_DOTENV_PATH)))
+        self._env_path = preferred_dotenv_path()
+        self._env_read_paths = tuple(
+            dict.fromkeys((REPO_DOTENV_PATH, LEGACY_DOTENV_PATH, USER_DOTENV_PATH))
+        )
 
         # Prompt editor state
         self._presets = prompts.list_presets()
