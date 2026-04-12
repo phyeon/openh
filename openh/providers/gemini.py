@@ -170,6 +170,12 @@ class GeminiProvider:
         system: str,
         tools: list[ToolSchema],
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        stop_sequences: list[str] | None = None,
+        thinking_budget: int | None = None,
+        provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         api_model = self._normalize_model_name(self.model)
         contents = self._to_gemini_contents(messages)
@@ -178,13 +184,25 @@ class GeminiProvider:
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
         config_kwargs["max_output_tokens"] = int(max_tokens or MAX_OUTPUT_TOKENS)
-        thinking_budget = getattr(self, "thinking_budget", None)
+        if temperature is not None:
+            config_kwargs["temperature"] = float(temperature)
+        if top_p is not None:
+            config_kwargs["top_p"] = float(top_p)
+        if top_k is not None:
+            config_kwargs["top_k"] = int(top_k)
+        if stop_sequences:
+            config_kwargs["stop_sequences"] = list(stop_sequences)
+        resolved_thinking_budget = (
+            thinking_budget
+            if thinking_budget is not None
+            else getattr(self, "thinking_budget", None)
+        )
         if (
-            thinking_budget is not None
+            resolved_thinking_budget is not None
             and self._supports_thinking(api_model)
         ):
             try:
-                budget = int(thinking_budget)
+                budget = int(resolved_thinking_budget)
             except Exception:
                 budget = 0
             if budget > 0:
@@ -192,6 +210,10 @@ class GeminiProvider:
                     include_thoughts=True,
                     thinking_budget=budget,
                 )
+        if isinstance(provider_options, dict):
+            for key, value in provider_options.items():
+                if key not in config_kwargs and value is not None:
+                    config_kwargs[key] = value
 
         config = gtypes.GenerateContentConfig(**config_kwargs)
 

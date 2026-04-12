@@ -602,14 +602,17 @@ class OpenHApp:
             if provider_name and provider_model
             else provider_model
         )
-        self.session.managed_agent_enabled = True
-        self.session.managed_executor_model = executor_model
-        self.session.managed_executor_max_turns = 10
-        self.session.managed_max_concurrent_executors = max(
-            1,
-            int(self.settings.subagent_parallel or 1),
-        )
-        self.session.managed_executor_isolation = True
+        if not getattr(self.session, "managed_executor_model", "").strip():
+            self.session.managed_executor_model = executor_model
+        if int(getattr(self.session, "managed_executor_max_turns", 0) or 0) <= 0:
+            self.session.managed_executor_max_turns = 10
+        if int(getattr(self.session, "managed_max_concurrent_executors", 0) or 0) <= 0:
+            self.session.managed_max_concurrent_executors = max(
+                1,
+                int(self.settings.subagent_parallel or 1),
+            )
+        if not hasattr(self.session, "managed_executor_isolation"):
+            self.session.managed_executor_isolation = True
 
     def _sync_session_output_style(self) -> None:
         style_name = str(getattr(self.settings, "output_style", "default") or "default")
@@ -618,10 +621,12 @@ class OpenHApp:
 
     def _apply_provider_runtime_options(self, provider: Any) -> None:
         if str(getattr(provider, "name", "") or "").strip() != "gemini":
+            self.session.thinking_budget = None
             return
         budget = self._thinking_budget_for_effort(
             getattr(self.settings, "gemini_thinking_effort", "low")
         )
+        self.session.thinking_budget = budget
         setattr(provider, "thinking_budget", budget)
 
     def _set_session_output_style(self, style_name: str, *, persist: bool = True) -> None:
@@ -969,47 +974,19 @@ class OpenHApp:
                 self._welcome_wordmark_host.update()
 
             if theme.is_fnd():
-                rng = random.Random(17)
                 while self._welcome_wordmark_should_run and self._welcome_widget is not None:
-                    if theme.is_dark():
-                        for idx, el in enumerate(elements):
-                            el.opacity = 0.78 + rng.random() * 0.18
-                            el.offset = ft.Offset(
-                                -0.012 + (idx % 3) * 0.012,
-                                -0.012 + rng.random() * 0.024,
-                            )
-                        if self._welcome_wordmark_host is not None:
-                            self._welcome_wordmark_host.update()
-                        await asyncio.sleep(1.25)
-                        if not self._welcome_wordmark_should_run:
-                            break
-                        flicker = elements[rng.randrange(len(elements))]
-                        flicker.opacity = 0.34
-                        flicker.offset = ft.Offset(rng.uniform(-0.05, 0.05), 0)
-                        if self._welcome_wordmark_host is not None:
-                            self._welcome_wordmark_host.update()
-                        await asyncio.sleep(0.08)
-                        for el in elements:
-                            el.opacity = 0.96
-                            el.offset = ft.Offset(0, 0)
-                        if self._welcome_wordmark_host is not None:
-                            self._welcome_wordmark_host.update()
-                        await asyncio.sleep(1.9)
-                    else:
-                        for idx, el in enumerate(elements):
-                            el.opacity = 0.84 + (0.03 * (idx % 3))
-                            el.offset = ft.Offset(0, -0.018 if idx % 2 == 0 else 0.012)
-                        if self._welcome_wordmark_host is not None:
-                            self._welcome_wordmark_host.update()
-                        await asyncio.sleep(1.7)
-                        if not self._welcome_wordmark_should_run:
-                            break
-                        for el in elements:
-                            el.opacity = 0.96
-                            el.offset = ft.Offset(0, 0)
-                        if self._welcome_wordmark_host is not None:
-                            self._welcome_wordmark_host.update()
-                        await asyncio.sleep(1.7)
+                    for el in elements:
+                        el.opacity = 0.88
+                    if self._welcome_wordmark_host is not None:
+                        self._welcome_wordmark_host.update()
+                    await asyncio.sleep(2.5)
+                    if not self._welcome_wordmark_should_run:
+                        break
+                    for el in elements:
+                        el.opacity = 0.96
+                    if self._welcome_wordmark_host is not None:
+                        self._welcome_wordmark_host.update()
+                    await asyncio.sleep(2.5)
         except Exception:
             pass
         finally:
@@ -1020,119 +997,28 @@ class OpenHApp:
     # ---- FnD ambient effects (particles + breathing gradient) ----
 
     def _build_fnd_ambient_layout(self, content: ft.Control) -> ft.Control:
-        """Wrap content in a quieter FnD ambient layout."""
-        import random
-
+        """Wrap content in a minimal FnD ambient layout — single-hue vignette only."""
         dark = theme.is_dark()
+
+        # Single subtle radial vignette using only the accent hue family
         self._fnd_gradient_layers = [
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(-0.08, -0.72 if dark else -0.68),
-                    radius=0.94 if dark else 0.76,
+                    center=ft.Alignment(0.0, -0.6),
+                    radius=1.1 if dark else 0.9,
                     colors=(
-                        ["#ff4f9c30", "#00000000"]
+                        ["#ff4f9c12", "#00000000"]
                         if dark
-                        else ["#f8d7c580", "#00000000"]
+                        else ["#f5ddd418", "#00000000"]
                     ),
                 ),
-                opacity=0.32 if dark else 0.42,
-                animate_opacity=ft.Animation(4200, ft.AnimationCurve.EASE_IN_OUT),
-            ),
-            ft.Container(
-                expand=True,
-                gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.54, -0.06 if dark else 0.04),
-                    radius=0.78 if dark else 0.66,
-                    colors=(
-                        ["#89d5ff22", "#00000000"]
-                        if dark
-                        else ["#ffd7e288", "#00000000"]
-                    ),
-                ),
-                opacity=0.28 if dark else 0.36,
-                animate_opacity=ft.Animation(5200, ft.AnimationCurve.EASE_IN_OUT),
-            ),
-            ft.Container(
-                expand=True,
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment(-1, -1),
-                    end=ft.Alignment(1, 1),
-                    colors=(
-                        ["#00000000", "#20112f55", "#00000000"]
-                        if dark
-                        else ["#fff7ef", "#fff0ea", "#fbf5ef"]
-                    ),
-                ),
-                opacity=0.22 if dark else 0.9,
-                animate_opacity=ft.Animation(6100, ft.AnimationCurve.EASE_IN_OUT),
+                opacity=0.5 if dark else 0.6,
+                animate_opacity=ft.Animation(6000, ft.AnimationCurve.EASE_IN_OUT),
             ),
         ]
 
-        particle_colors = (
-            ["#ff4f9c", "#a18cff", "#8ed8ff"]
-            if dark
-            else []
-        )
         self._fnd_particles = []
-        random.seed(42)
-        for _ in range(5 if dark else 0):
-            sz = random.uniform(2, 4.2 if dark else 3.6)
-            color = random.choice(particle_colors)
-            p = ft.Container(
-                width=sz,
-                height=sz,
-                border_radius=sz,
-                bgcolor=color,
-                opacity=random.uniform(0.06, 0.14),
-                offset=ft.Offset(random.uniform(-0.9, 0.9), random.uniform(-0.9, 0.9)),
-                animate_opacity=ft.Animation(
-                    int(random.uniform(2800, 6200)),
-                    ft.AnimationCurve.EASE_IN_OUT,
-                ),
-                animate_offset=ft.Animation(
-                    int(random.uniform(8000, 15000)),
-                    ft.AnimationCurve.EASE_IN_OUT,
-                ),
-                shadow=ft.BoxShadow(
-                    color=color.replace("#", "#22"),
-                    blur_radius=sz * 2.6,
-                    spread_radius=1,
-                ),
-            )
-            self._fnd_particles.append(p)
-
-        particle_layer = ft.Container(
-            content=ft.Stack(self._fnd_particles),
-            expand=True,
-            visible=bool(self._fnd_particles),
-        )
-        streak_layer = ft.Container(
-            expand=True,
-            alignment=ft.Alignment(0.0, -0.18 if dark else -0.12),
-            content=ft.Container(
-                width=260 if dark else 220,
-                height=1 if dark else 1,
-                gradient=ft.LinearGradient(
-                    colors=(
-                        ["#00000000", "#70ff5aa8", "#508ed8ff", "#00000000"]
-                        if dark
-                        else ["#00000000", "#90e9b9aa", "#70ef8aa8", "#00000000"]
-                    ),
-                    begin=ft.Alignment(-1, 0),
-                    end=ft.Alignment(1, 0),
-                ),
-                opacity=0.42 if dark else 0.28,
-            ),
-        )
-        grain_layer = ft.Container(
-            expand=True,
-            image=ft.DecorationImage(
-                src="grain.png",
-                repeat=ft.ImageRepeat.REPEAT,
-                opacity=0.018 if dark else 0.01,
-            ),
-        )
         content_layer = ft.Container(content=content, expand=True)
 
         self._fnd_ambient_should_run = True
@@ -1145,53 +1031,31 @@ class OpenHApp:
             [
                 ft.Container(expand=True, bgcolor=theme.BG_PAGE),
                 *self._fnd_gradient_layers,
-                streak_layer,
-                particle_layer,
-                grain_layer,
                 content_layer,
             ],
             expand=True,
         )
 
     async def _animate_fnd_ambient(self) -> None:
-        """Breathing gradients + drifting particles."""
+        """Gentle breathing on the single vignette layer."""
         import asyncio
-        import random
 
         self._fnd_ambient_running = True
-        rng = random.Random(0)
         tick = 0
         try:
             while self._fnd_ambient_should_run:
-                for i, layer in enumerate(self._fnd_gradient_layers):
-                    phase = (tick + i * 40) % 100
-                    if phase < 50:
-                        base = 0.18 if theme.is_dark() else 0.26
-                        spread = 0.18 if theme.is_dark() else 0.12
-                        layer.opacity = base + (phase / 50) * spread
+                for layer in self._fnd_gradient_layers:
+                    phase = tick % 80
+                    if phase < 40:
+                        layer.opacity = 0.35 + (phase / 40) * 0.25
                     else:
-                        base = 0.36 if theme.is_dark() else 0.38
-                        spread = 0.18 if theme.is_dark() else 0.12
-                        layer.opacity = base - ((phase - 50) / 50) * spread
+                        layer.opacity = 0.60 - ((phase - 40) / 40) * 0.25
                     try:
                         layer.update()
                     except Exception:
                         pass
-
-                if tick % 3 == 0:
-                    for p in self._fnd_particles:
-                        p.offset = ft.Offset(
-                            rng.uniform(-0.9, 0.9),
-                            rng.uniform(-0.9, 0.9),
-                        )
-                        p.opacity = rng.uniform(0.06, 0.18)
-                        try:
-                            p.update()
-                        except Exception:
-                            pass
-
                 tick += 1
-                await asyncio.sleep(1.7 if theme.is_dark() else 2.0)
+                await asyncio.sleep(2.5)
         except Exception:
             pass
         finally:
@@ -2362,7 +2226,7 @@ class OpenHApp:
         elif isinstance(event, Usage):
             self._refresh_top_bar(note="thinking…")
         elif isinstance(event, StatusEvent):
-            self._refresh_top_bar(note=event.text)
+            self._set_status_note(event.text, timeout_s=5.0)
         elif isinstance(event, MessageStop):
             self._finalize_streaming_message()
             self._reset_live_tool_stack()
@@ -2766,45 +2630,36 @@ class OpenHApp:
         _is_dark = theme.is_dark()
 
         if getattr(spec, "id", "") == "fnd":
-            title_text = ft.Text(
-                spec.wordmark,
-                size=48 if _is_dark else 44,
-                weight=ft.FontWeight.W_600,
-                font_family=theme.FONT_EM,
-                color="#f7f2ff" if _is_dark else "#e45b8f",
-                text_align=ft.TextAlign.CENTER,
-            )
-            title_display = (
-                ft.ShaderMask(
-                    content=title_text,
-                    shader=ft.LinearGradient(
-                        begin=ft.Alignment(-1, 0),
-                        end=ft.Alignment(1, 0),
-                        colors=["#ff82ba", "#ff4f9c", "#b28dff", "#8ed8ff"],
-                        stops=[0.0, 0.28, 0.7, 1.0],
-                    ),
-                    blend_mode=ft.BlendMode.SRC_IN,
+            _dark = theme.is_dark()
+            if _dark:
+                # Cyberpunk: clean sans, uppercased, letter-spaced
+                title_text = ft.Text(
+                    spec.wordmark.upper(),
+                    size=38,
+                    weight=ft.FontWeight.W_700,
+                    font_family=theme.FONT_SANS,
+                    color=theme.ACCENT,
+                    text_align=ft.TextAlign.CENTER,
+                    letter_spacing=6,
                 )
-                if _is_dark
-                else title_text
-            )
+            else:
+                # Fruit: warm serif italic
+                title_text = ft.Text(
+                    spec.wordmark,
+                    size=44,
+                    weight=ft.FontWeight.W_600,
+                    font_family=theme.FONT_EM,
+                    color=theme.ACCENT,
+                    text_align=ft.TextAlign.CENTER,
+                    italic=True,
+                )
 
             title_host = ft.Container(
-                content=title_display,
+                content=title_text,
                 opacity=0.96,
                 offset=ft.Offset(0, 0),
                 animate_offset=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
                 animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
-                shadow=(
-                    ft.BoxShadow(
-                        color="#ff4f9c30",
-                        blur_radius=12,
-                        spread_radius=0,
-                        offset=ft.Offset(0, 4),
-                    )
-                    if _is_dark
-                    else None
-                ),
             )
 
             self._welcome_wordmark_letters = [title_host]

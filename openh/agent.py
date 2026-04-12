@@ -81,6 +81,15 @@ class Agent:
             "Make sure to complete all tasks before ending your response."
         )
 
+    def _has_visible_assistant_text(self) -> bool:
+        for message in getattr(self.session, "messages", []):
+            if getattr(message, "role", "") != "assistant":
+                continue
+            for block in getattr(message, "content", []):
+                if isinstance(block, TextBlock) and block.text.strip():
+                    return True
+        return False
+
     def _system_prompt_for_turn(self, turn: int) -> str:
         system_prompt = self.system_prompt
         if turn <= 2:
@@ -289,11 +298,10 @@ class Agent:
         while True:
             turns += 1
             if turns > effective_max_turns:
-                if not any(
-                    getattr(message, "role", "") == "assistant"
-                    for message in getattr(self.session, "messages", [])
-                ):
-                    self.session.append_assistant_message([TextBlock(text="Max turns reached.")])
+                notice = f"Reached maximum turn limit ({effective_max_turns})."
+                await self._emit(StatusEvent(text=notice))
+                if not self._has_visible_assistant_text():
+                    self.session.append_assistant_message([TextBlock(text=notice)])
                 return
 
             for text in list(getattr(self.session, "pending_messages", [])):
@@ -336,6 +344,16 @@ class Agent:
                 messages=self.session.model_messages,
                 system=self._system_prompt_for_turn(turns),
                 tools=self._tool_schemas(),  # type: ignore[arg-type]
+                temperature=getattr(self.session, "temperature", None),
+                top_p=getattr(self.session, "top_p", None),
+                top_k=getattr(self.session, "top_k", None),
+                stop_sequences=list(getattr(self.session, "stop_sequences", []) or []),
+                thinking_budget=(
+                    getattr(self.session, "thinking_budget", None)
+                    if getattr(self.session, "thinking_budget", None) is not None
+                    else getattr(self.session.provider, "thinking_budget", None)
+                ),
+                provider_options=dict(getattr(self.session, "provider_options", {}) or {}),
             )
 
             timed_out = False

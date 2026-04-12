@@ -34,6 +34,12 @@ class AnthropicProvider:
         system: str,
         tools: list[ToolSchema],
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        stop_sequences: list[str] | None = None,
+        thinking_budget: int | None = None,
+        provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         msg_dicts = [m.to_anthropic_dict() for m in messages]
         kwargs: dict[str, Any] = {
@@ -44,6 +50,28 @@ class AnthropicProvider:
         kwargs["system"] = self._build_system_blocks(system)
         if tools:
             kwargs["tools"] = list(tools)
+        if temperature is not None:
+            kwargs["temperature"] = float(temperature)
+        if top_p is not None:
+            kwargs["top_p"] = float(top_p)
+        if top_k is not None:
+            kwargs["top_k"] = int(top_k)
+        if stop_sequences:
+            kwargs["stop_sequences"] = list(stop_sequences)
+        if thinking_budget is not None:
+            try:
+                budget = int(thinking_budget)
+            except Exception:
+                budget = 0
+            if budget > 0:
+                kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget,
+                }
+        if isinstance(provider_options, dict):
+            for key, value in provider_options.items():
+                if key not in kwargs and value is not None:
+                    kwargs[key] = value
 
         # Buffers keyed by content_block index
         tool_buffers: dict[int, dict[str, Any]] = {}

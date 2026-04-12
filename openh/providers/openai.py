@@ -176,6 +176,12 @@ class OpenAIProvider:
         system: str,
         tools: list[ToolSchema],
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        stop_sequences: list[str] | None = None,
+        thinking_budget: int | None = None,
+        provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         if self._use_responses_api(self.model):
             raise RuntimeError(
@@ -190,9 +196,19 @@ class OpenAIProvider:
             "stream_options": {"include_usage": True},
             "max_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
         }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        if top_p is not None:
+            payload["top_p"] = float(top_p)
+        if stop_sequences:
+            payload["stop"] = list(stop_sequences)
         openai_tools = self._to_openai_tools(tools)
         if openai_tools is not None:
             payload["tools"] = openai_tools
+        if isinstance(provider_options, dict):
+            for key, value in provider_options.items():
+                if key not in payload and value is not None:
+                    payload[key] = value
 
         try:
             stream = await self._client.chat.completions.create(**payload)

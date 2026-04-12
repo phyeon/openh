@@ -151,6 +151,10 @@ class PermissionManager:
         self.session = session
         self.rules = rules
 
+    def refresh(self, session: Any, rules: PermissionRules) -> None:
+        self.session = session
+        self.rules = rules
+
     def _coordinator_ban(self, request: PermissionRequest) -> tuple[Decision, str]:
         if not is_coordinator_mode():
             return "none", ""
@@ -310,7 +314,12 @@ def build_permission_handler(
     ).strip().lower()
     if forced_non_interactive and kind == "interactive":
         kind = "auto"
-    manager = PermissionManager(session, rules)
+    manager = getattr(session, "permission_manager", None)
+    if isinstance(manager, PermissionManager):
+        manager.refresh(session, rules)
+    else:
+        manager = PermissionManager(session, rules)
+        setattr(session, "permission_manager", manager)
     if kind.strip().lower() == "auto":
         return ManagedAutoPermissionHandler(manager)
     return ManagedInteractivePermissionHandler(manager)

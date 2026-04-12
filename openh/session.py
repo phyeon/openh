@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .config import Config
 from .messages import Block, Message, TextBlock, ToolResultBlock
@@ -55,11 +55,18 @@ class AgentSession:
     tool_result_budget: int = 50_000
     max_budget_usd: float | None = None
     stream_stall_retries: int = 2
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    stop_sequences: list[str] = field(default_factory=list)
+    provider_options: dict[str, Any] = field(default_factory=dict)
+    thinking_budget: int | None = None
     managed_agent_enabled: bool = False
     managed_executor_model: str = ""
     managed_executor_max_turns: int = 10
     managed_max_concurrent_executors: int = 1
     managed_executor_isolation: bool = True
+    permission_manager: Any = None
     session_memory_last_extracted_message_uuid: str = ""
     session_memory_last_extracted_message_count: int = 0
     session_memory_last_extracted_tool_call_count: int = 0

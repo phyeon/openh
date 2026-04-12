@@ -22,5 +22,11 @@ class Provider(Protocol):
         system: str,
         tools: list[ToolSchema],
         max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        stop_sequences: list[str] | None = None,
+        thinking_budget: int | None = None,
+        provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         ...
