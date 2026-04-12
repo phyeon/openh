@@ -1660,7 +1660,17 @@ class OpenHApp:
             if not img_bytes:
                 return  # No image in clipboard, let normal paste happen
             import base64
+            import io
             from ..messages import ImageBlock
+            # Ensure PNG format (Windows clipboard often gives BMP/DIB)
+            try:
+                from PIL import Image
+                img = Image.open(io.BytesIO(img_bytes))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+            except Exception:
+                pass  # If PIL unavailable, send as-is
             b64 = base64.b64encode(img_bytes).decode()
             if not hasattr(self, "_pending_media"):
                 self._pending_media = []
