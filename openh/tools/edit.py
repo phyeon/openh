@@ -1,7 +1,6 @@
 """Edit tool — exact-string replacement in an existing file."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
@@ -50,16 +49,14 @@ class EditTool(Tool):
         if old == new:
             return "error: old_string and new_string are identical"
 
-        path = Path(file_path)
-        if not path.is_absolute():
-            return f"error: file_path must be absolute, got: {file_path}"
+        path = ctx.resolve_path(str(file_path))
         if not path.exists():
-            return f"error: file does not exist: {file_path}"
+            return f"error: file does not exist: {path}"
 
         resolved = str(path.resolve())
         if resolved not in ctx.session.read_files:
             return (
-                f"error: file {file_path} must be Read in this session before Edit. "
+                f"error: file {path} must be Read in this session before Edit. "
                 "Use Read first."
             )
 
@@ -70,10 +67,10 @@ class EditTool(Tool):
 
         count = current.count(old)
         if count == 0:
-            return f"error: old_string not found in {file_path}"
+            return f"error: old_string not found in {path}"
         if count > 1 and not replace_all:
             return (
-                f"error: old_string appears {count} times in {file_path}. "
+                f"error: old_string appears {count} times in {path}. "
                 "Provide more surrounding context to make it unique, or set replace_all=True."
             )
 

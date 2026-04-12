@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
@@ -13,10 +12,11 @@ class NotebookEditTool(Tool):
     name: ClassVar[str] = "NotebookEdit"
     permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
-        "Completely replaces the contents of a specific cell in a Jupyter notebook (.ipynb file). "
-        "The notebook_path must be absolute. The cell_number is 0-indexed. "
-        "Use edit_mode=insert to add a new cell at the index. "
-        "Use edit_mode=delete to delete the cell at the index."
+        "Edit cells in a Jupyter notebook (.ipynb file). Supports three edit modes:\n"
+        "- replace: modify an existing cell's source\n"
+        "- insert: add a new cell after a given cell (or at the start)\n"
+        "- delete: remove a cell\n"
+        "You MUST read the notebook file before editing."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -61,19 +61,17 @@ class NotebookEditTool(Tool):
         path_str = input.get("notebook_path")
         if not path_str:
             return "error: notebook_path is required"
-        path = Path(path_str)
-        if not path.is_absolute():
-            return f"error: notebook_path must be absolute, got: {path_str}"
+        path = ctx.resolve_path(str(path_str))
         if not path.exists():
-            return f"error: notebook does not exist: {path_str}"
+            return f"error: notebook does not exist: {path}"
         if path.suffix != ".ipynb":
-            return f"error: not a .ipynb file: {path_str}"
+            return f"error: not a .ipynb file: {path}"
 
         # Read-before-write enforcement
         resolved = str(path.resolve())
         if resolved not in ctx.session.read_files:
             return (
-                f"error: notebook {path_str} must be Read in this session before editing."
+                f"error: notebook {path} must be Read in this session before editing."
             )
 
         try:

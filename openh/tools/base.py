@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Literal
 
 if TYPE_CHECKING:
@@ -30,6 +31,12 @@ class PermissionDecision:
 class ToolContext:
     session: "AgentSession"
     request_permission: Callable[[str, dict[str, Any]], Awaitable[bool]]
+
+    def resolve_path(self, path: str) -> Path:
+        target = Path(path)
+        if target.is_absolute():
+            return target
+        return Path(self.session.cwd) / target
 
 
 class Tool(ABC):

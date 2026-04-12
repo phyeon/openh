@@ -40,7 +40,8 @@ class GlobTool(Tool):
         pattern = input.get("pattern")
         if not pattern:
             return "error: pattern is required"
-        base = Path(input.get("path") or ctx.session.cwd)
+        raw_path = str(input.get("path") or "").strip()
+        base = ctx.resolve_path(raw_path) if raw_path else Path(ctx.session.cwd)
         if not base.exists():
             return f"error: path does not exist: {base}"
         if not base.is_dir():

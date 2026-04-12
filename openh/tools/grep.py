@@ -105,7 +105,8 @@ class GrepTool(Tool):
         pattern = input.get("pattern")
         if not pattern:
             return "error: pattern is required"
-        path = input.get("path") or ctx.session.cwd
+        raw_path = str(input.get("path") or "").strip()
+        search_path = ctx.resolve_path(raw_path) if raw_path else Path(ctx.session.cwd)
         glob_pattern = input.get("glob")
         file_type = input.get("type")
         output_mode = input.get("output_mode") or "files_with_matches"
@@ -120,7 +121,7 @@ class GrepTool(Tool):
         if shutil.which("rg"):
             return await self._run_rg(
                 pattern,
-                path,
+                str(search_path),
                 glob_pattern,
                 output_mode,
                 case_insensitive,
@@ -132,7 +133,7 @@ class GrepTool(Tool):
             )
         return self._run_python(
             pattern,
-            path,
+            search_path,
             glob_pattern,
             output_mode,
             case_insensitive,
@@ -207,7 +208,7 @@ class GrepTool(Tool):
     @staticmethod
     def _run_python(
         pattern: str,
-        path: str,
+        path: Path,
         glob_pattern: str | None,
         output_mode: str,
         case_insensitive: bool,
@@ -225,7 +226,7 @@ class GrepTool(Tool):
         except re.error as exc:
             return f"error: invalid regex: {exc}"
 
-        base = Path(path)
+        base = path
         if base.is_file():
             files = [base]
         elif base.is_dir():

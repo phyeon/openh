@@ -1,7 +1,6 @@
 """LS tool — list directory contents."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
@@ -12,8 +11,7 @@ class LSTool(Tool):
     permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "List the contents of a directory (files and subdirectories). "
-        "Returns up to 200 entries sorted alphabetically, with a trailing / on directories. "
-        "The `path` must be absolute."
+        "Returns up to 200 entries sorted alphabetically, with a trailing / on directories."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -41,13 +39,11 @@ class LSTool(Tool):
         raw = input.get("path")
         if not raw:
             return "error: path is required"
-        path = Path(raw)
-        if not path.is_absolute():
-            return f"error: path must be absolute, got: {raw}"
+        path = ctx.resolve_path(str(raw))
         if not path.exists():
-            return f"error: path does not exist: {raw}"
+            return f"error: path does not exist: {path}"
         if not path.is_dir():
-            return f"error: path is not a directory: {raw}"
+            return f"error: path is not a directory: {path}"
 
         ignore = input.get("ignore") or []
         import fnmatch

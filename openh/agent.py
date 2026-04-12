@@ -254,9 +254,11 @@ class Agent:
         while True:
             turns += 1
             if turns > effective_max_turns:
-                await self._emit(TextDelta(
-                    text=f"\n\n[agent: reached maximum turn limit ({effective_max_turns})]"
-                ))
+                if not any(
+                    getattr(message, "role", "") == "assistant"
+                    for message in getattr(self.session, "messages", [])
+                ):
+                    self.session.append_assistant_message([TextBlock(text="Max turns reached.")])
                 return
 
             for text in list(getattr(self.session, "pending_messages", [])):

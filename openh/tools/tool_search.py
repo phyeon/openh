@@ -18,7 +18,6 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Glob": ("glob", "pattern", "files", "find", "path", "filename"),
     "Grep": ("grep", "regex", "search", "content", "pattern", "match"),
     "KillShell": ("shell", "background", "stop", "kill"),
-    "LS": ("list", "directory", "tree", "files", "folders"),
     "MemoryDelete": ("memory", "delete", "remove"),
     "MemoryList": ("memory", "list", "recall"),
     "MemorySave": ("memory", "save", "note", "remember"),

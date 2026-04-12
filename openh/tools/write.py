@@ -1,7 +1,6 @@
 """Write tool — create or fully overwrite a file."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
@@ -38,15 +37,13 @@ class WriteTool(Tool):
             return "error: file_path is required"
         if content is None:
             return "error: content is required"
-        path = Path(file_path)
-        if not path.is_absolute():
-            return f"error: file_path must be absolute, got: {file_path}"
+        path = ctx.resolve_path(str(file_path))
 
         if path.exists():
             resolved = str(path.resolve())
             if resolved not in ctx.session.read_files:
                 return (
-                    f"error: file already exists at {file_path} but was not Read in this session. "
+                    f"error: file already exists at {path} but was not Read in this session. "
                     "Use Read first, then Write."
                 )
 

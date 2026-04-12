@@ -18,7 +18,7 @@ from ..system_prompt import build_runtime_system_prompt
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _COORDINATOR_ONLY_TOOLS = set(INTERNAL_COORDINATOR_TOOLS)
-_SEARCH_ONLY_TOOLS = {"LS", "Read", "Glob", "Grep", "ToolSearch", "WebFetch", "WebSearch", "Skill"}
+_SEARCH_ONLY_TOOLS = {"Read", "Glob", "Grep", "ToolSearch", "WebFetch", "WebSearch", "Skill"}
 _MODE_PROMPTS = {
     "build": "You are the build agent. You have full tool access. Focus on implementing the requested changes completely and correctly.",
     "plan": "You are the plan agent. You can read files and analyze code but cannot write files or execute commands. Focus on understanding the codebase and describing what changes should be made.",

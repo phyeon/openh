@@ -8,7 +8,6 @@ from .bash import BashOutputTool, BashTool, KillShellTool, MonitorTool
 from .edit import EditTool
 from .glob import GlobTool
 from .grep import GrepTool
-from .ls import LSTool
 from .memory_tools import MemoryDeleteTool, MemoryListTool, MemorySaveTool
 from .notebook_edit import NotebookEditTool
 from .planmode import EnterPlanModeTool, ExitPlanModeTool
@@ -45,7 +44,6 @@ __all__ = [
     "MonitorTool",
     "GlobTool",
     "GrepTool",
-    "LSTool",
     "TodoWriteTool",
     "WebFetchTool",
     "WebSearchTool",
@@ -81,7 +79,6 @@ def fnd_extra_tools() -> list[Tool]:
 def default_tools() -> list[Tool]:
     return [
         ReadTool(),
-        LSTool(),
         GlobTool(),
         GrepTool(),
         EditTool(),

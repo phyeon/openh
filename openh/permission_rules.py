@@ -227,7 +227,7 @@ def derive_rule_pattern(tool_name: str, input_dict: dict[str, Any]) -> str:
         ).strip()
         if path:
             return path
-    if tool_name in ("Glob", "Grep", "LS"):
+    if tool_name in ("Glob", "Grep"):
         path = str(input_dict.get("path") or input_dict.get("pattern") or "").strip()
         if path:
             return path
@@ -351,7 +351,7 @@ def _match_rule(rule: str, tool_name: str, input_dict: dict[str, Any]) -> bool:
     if tool_name in ("Read", "Write", "Edit", "NotebookEdit"):
         path = (input_dict.get("file_path") or input_dict.get("notebook_path") or "")
         return fnmatch.fnmatchcase(path, rule_pattern)
-    if tool_name in ("Glob", "Grep", "LS"):
+    if tool_name in ("Glob", "Grep"):
         path = (input_dict.get("path") or input_dict.get("pattern") or "")
         return fnmatch.fnmatchcase(path, rule_pattern)
     return False

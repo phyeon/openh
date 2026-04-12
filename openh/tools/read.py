@@ -1,8 +1,6 @@
 """Read tool — read text from a file with line numbers."""
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
@@ -16,11 +14,10 @@ class ReadTool(Tool):
     name: ClassVar[str] = "Read"
     permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
-        "Reads a file from the local filesystem. The file_path must be absolute. "
-        "By default, it reads up to 2000 lines starting from the beginning of the file. "
-        "When you already know which part of the file you need, only read that part — "
-        "this can be important for larger files. Results are returned with line numbers "
-        "starting at 1. Always read a file before editing it."
+        "Reads a file from the local filesystem. You can access any file directly. "
+        "By default reads up to 2000 lines from the beginning. Results are returned "
+        "with line numbers starting at 1. This tool can read images (PNG, JPG) and "
+        "PDF files."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -48,13 +45,11 @@ class ReadTool(Tool):
         file_path = input.get("file_path")
         if not file_path:
             return "error: file_path is required"
-        path = Path(file_path)
-        if not path.is_absolute():
-            return f"error: file_path must be absolute, got: {file_path}"
+        path = ctx.resolve_path(str(file_path))
         if not path.exists():
-            return f"error: file does not exist: {file_path}"
+            return f"error: file does not exist: {path}"
         if path.is_dir():
-            return f"error: path is a directory, not a file: {file_path}"
+            return f"error: path is a directory, not a file: {path}"
 
         try:
             size = path.stat().st_size
