@@ -16,6 +16,8 @@ Layout:
 """
 from __future__ import annotations
 
+import asyncio
+
 from pathlib import Path
 from typing import Any
 
@@ -219,6 +221,8 @@ class OpenHApp:
         self._pending_scroll_animated = False
         self._jsonl_written_count = 0
         self._busy_note_active = False
+        self._top_status_text = ""
+        self._top_status_token = 0
         self._session_memory_inflight: set[str] = set()
         # FnD ambient effects
         self._fnd_particles: list[ft.Container] = []
@@ -422,9 +426,7 @@ class OpenHApp:
             tools = await build_mcp_tools()
             if tools:
                 self.session.tools.extend(tools)
-                self._append_to_messages(
-                    widgets.system_note(f"loaded {len(tools)} MCP tool(s)")
-                )
+                self._set_status_note(f"Loaded {len(tools)} MCP tool(s)")
         except Exception:
             pass
 
@@ -701,14 +703,47 @@ class OpenHApp:
             coordinator_mode=is_coordinator_mode(),
         )
 
+    def _set_status_note(self, text: str, timeout_s: float = 2.8) -> None:
+        note = (text or "").strip()
+        self._top_status_token += 1
+        token = self._top_status_token
+        self._top_status_text = note
+        self._refresh_top_bar(note="thinking…" if self._busy else "")
+        if not note or timeout_s <= 0:
+            return
+        try:
+            self.page.run_task(self._clear_status_note_after, token, timeout_s)
+        except Exception:
+            pass
+
+    async def _clear_status_note_after(self, token: int, timeout_s: float) -> None:
+        await asyncio.sleep(timeout_s)
+        if token != self._top_status_token or not self._top_status_text:
+            return
+        self._top_status_text = ""
+        self._refresh_top_bar(note="thinking…" if self._busy else "")
+
     def _refresh_top_bar(self, note: str = "") -> None:
         # Determine prompt label for the pill
         p_label = self.session.prompt_preset or self.settings.active_prompt or "default"
         if self.session.prompt_override:
             p_label = f"{p_label} (edited)"
-        self._busy_note_active = bool(note)
-        busy_indicator = self._ensure_busy_indicator() if note else None
-        if note and busy_indicator is not None and self._queued_turns:
+        busy_note = (note or "").strip()
+        top_status = (self._top_status_text or "").strip() if not busy_note else ""
+        self._busy_note_active = bool(busy_note)
+        busy_indicator: ft.Control | None = None
+        if busy_note:
+            busy_indicator = self._ensure_busy_indicator()
+        elif top_status:
+            busy_indicator = ft.Text(
+                top_status,
+                color=theme.TEXT_TERTIARY,
+                size=11,
+                font_family=theme.FONT_MONO if theme.is_dark() else theme.FONT_SANS,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        if busy_note and busy_indicator is not None and self._queued_turns:
             busy_indicator = ft.Row(
                 [
                     busy_indicator,
@@ -723,7 +758,7 @@ class OpenHApp:
                 tight=True,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
-        if note:
+        if busy_note:
             self._start_busy_indicator_animation()
         else:
             self._stop_busy_indicator_animation()
@@ -1324,10 +1359,7 @@ class OpenHApp:
         save_settings(self.settings)
         self._refresh_top_bar()
         self._refresh_input()
-        self._append_to_messages(
-            widgets.system_note(f"switched to {provider_name}:{model}")
-        )
-        self._scroll_to_end(force=True)
+        self._set_status_note(f"Model: {provider_name}/{model}")
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(
@@ -1421,11 +1453,7 @@ class OpenHApp:
             self._current_task.cancel()
             self._current_task = None
         self._finalize_streaming_message()
-        # Add interruption marker
-        from ..messages import TextBlock
-        self._append_to_messages(
-            widgets.system_note("[Request interrupted by user]")
-        )
+        self._set_status_note("Cancelled.")
         self._busy = False
         self._refresh_input()
         self._refresh_top_bar()
@@ -1447,6 +1475,7 @@ class OpenHApp:
         self.page.bgcolor = theme.BG_PAGE
         # Re-render everything that reads theme tokens
         self._rebuild_ui_after_theme_change()
+        self._set_status_note(f"Theme set to: {'Dark' if theme.is_dark() else 'Light'}")
 
     def _rebuild_ui_after_theme_change(self) -> None:
         """Full page rebuild after toggling the theme."""
@@ -2011,17 +2040,13 @@ class OpenHApp:
         from pathlib import Path
         target = Path(self.session.cwd) / "AGENTS.md"
         if target.exists():
-            self._append_to_messages(
-                widgets.system_note(f"{target} already exists")
-            )
+            self._set_status_note("AGENTS.md already exists")
             return
         template = _STARTER_CLAUDE_MD
         try:
             target.write_text(template, encoding="utf-8")
             self.session.read_files.add(str(target.resolve()))
-            self._append_to_messages(
-                widgets.system_note(f"created {target}")
-            )
+            self._set_status_note("Created AGENTS.md")
         except OSError as exc:
             self._append_to_messages(
                 widgets.error_panel(f"failed: {exc}")
@@ -2496,10 +2521,7 @@ class OpenHApp:
         self.session.switch_provider(new_provider)
         self._refresh_top_bar()
         self._refresh_input()
-        self._append_to_messages(
-            widgets.system_note(f"switched to {target}:{new_provider.model}")
-        )
-        self._scroll_to_end()
+        self._set_status_note(f"Model: {target}/{new_provider.model}")
 
     def _new_chat(self, _skip_toggle: bool = False) -> None:
         if self._busy:
@@ -2985,7 +3007,7 @@ class OpenHApp:
         self._refresh_sidebar()
         self._full_update()
         if mode_warning:
-            self._append_to_messages(widgets.system_note(mode_warning))
+            self._set_status_note(mode_warning, timeout_s=5.0)
         self._stick_to_bottom = True
         self._remember_current_session()
         self._scroll_to_end(force=True)

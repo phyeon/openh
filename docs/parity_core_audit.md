@@ -36,7 +36,7 @@ Status legend:
 | `[~]` | `openh/system_prompt.py` | `crates/core/src/system_prompt.rs` | Reviewed heavily. Dynamic boundary, output-style, coordinator prompt added. Still not guaranteed exact section-cache matrix everywhere. |
 | `[~]` | `openh/config.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Reviewed for dotenv/model/system prompt loading. Still not a full parity pass. |
 | `[~]` | `openh/messages.py` | `crates/core/src/lib.rs` | Reviewed. Message UUID added. Broader message type parity still needs continued audit. |
-| `[~]` | `openh/memory.py` | `crates/core/src/claudemd.rs`, `crates/core/src/memdir.rs` | Reviewed around AGENTS/CLAUDE memory loading. Still lighter than reference memory stack. |
+| `[~]` | `openh/memory.py` | `crates/core/src/claudemd.rs`, `crates/core/src/memdir.rs` | Reviewed again this pass. AGENTS/CLAUDE loading now follows the public scope order more closely (`managed -> user -> project -> local`), strips frontmatter, and expands `@include` directives with recursion/size guards. Still no mtime cache or richer metadata surface. |
 | `[~]` | `openh/memdir.py` | `crates/core/src/memdir.rs` | Reviewed this pass. Recursive memory scanning, quick frontmatter parsing, MEMORY.md truncation, and index-only prompt injection now track the public memdir flow much more closely. Still does not expose the full public relevance-search helper surface. |
 | `[~]` | `openh/output_styles.py` | `crates/core/src/output_styles.rs` | Reviewed for runtime style resolution. Plugin discovery path still incomplete. |
 | `[~]` | `openh/prompts.py` | `crates/core/src/output_styles.rs` and command/prompt surfaces | Reviewed this pass. Preset storage now separates stable slug from display label, writes explicit name metadata, and resolves old slug-based presets without breaking existing settings. Still an OpenH-local preset system, not a direct public prompt-history port. |
@@ -93,7 +93,7 @@ These are not strict engine parity targets, but they still matter for behavior a
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed this pass for UI hot paths: top bar refresh, welcome/profile welcome flow, busy/input state, session switching, and theme rebuild. FnD welcome wordmark was simplified to remove oversized decorative layers. Still not a full file-wide audit. |
+| `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed again this pass for hot-path UX parity. Transient actions like model/theme/init/mode-switch feedback now use a top-bar status surface instead of polluting the transcript, closer to the public TUI `status_message` flow. Still not a full file-wide audit. |
 | `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, and the sidebar new-chat button no longer swaps into a decorative emoji object. Still not a full file-wide audit. |
 | `[ ]` | `openh/flet_app/theme.py` | none | Local design system, not a direct public parity target. |
 | `[~]` | `openh/flet_app/settings_dialog.py` | `crates/tui/src/settings_screen.rs` and related settings surfaces | Reviewed this pass. Output-style picker now uses style labels, custom model values stay selectable instead of disappearing from the dropdown, and prompt preset UI follows stable slug/display-name separation. Still a desktop/Flet-specific UI, not a literal port of the TUI settings screen. |
@@ -113,8 +113,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep
-2. `memory.py`
-3. `tools/memory_tools.py`
-4. `output_styles.py` plugin discovery follow-up
-5. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
+1. `tools/memory_tools.py`
+2. `output_styles.py` plugin discovery follow-up
+3. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
+4. `flet_app/main.py`, `flet_app/widgets.py` final regression sweep
+5. `flet_app/permission_dialog.py`
