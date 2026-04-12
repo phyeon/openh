@@ -174,7 +174,6 @@ class OpenHApp:
         except Exception as exc:  # noqa: BLE001
             page.add(widgets.error_panel(f"Failed to start provider {initial}: {exc}"))
             return
-        self._apply_provider_runtime_options(provider)
 
         import time
         sid = new_session_uuid()
@@ -186,6 +185,7 @@ class OpenHApp:
             title="",
             created_at=time.time(),
         )
+        self._apply_provider_runtime_options(provider)
         self._sync_session_managed_agent_config()
         self._sync_session_output_style()
         ensure_project_dirs(self.config.cwd)
@@ -620,13 +620,16 @@ class OpenHApp:
         self.session.output_style_prompt = resolve_style_prompt(style_name, self.session.cwd)
 
     def _apply_provider_runtime_options(self, provider: Any) -> None:
+        session = getattr(self, "session", None)
         if str(getattr(provider, "name", "") or "").strip() != "gemini":
-            self.session.thinking_budget = None
+            if session is not None:
+                session.thinking_budget = None
             return
         budget = self._thinking_budget_for_effort(
             getattr(self.settings, "gemini_thinking_effort", "low")
         )
-        self.session.thinking_budget = budget
+        if session is not None:
+            session.thinking_budget = budget
         setattr(provider, "thinking_budget", budget)
 
     def _set_session_output_style(self, style_name: str, *, persist: bool = True) -> None:
