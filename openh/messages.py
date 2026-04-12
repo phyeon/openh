@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, Union
+import uuid as uuid_lib
 
 
 # ---------- Content blocks ----------
@@ -83,10 +84,15 @@ class DocumentBlock:
 Block = Union[TextBlock, ToolUseBlock, ToolResultBlock, ImageBlock, DocumentBlock]
 
 
+def new_message_uuid() -> str:
+    return str(uuid_lib.uuid4())
+
+
 @dataclass
 class Message:
     role: Literal["user", "assistant"]
     content: list[Block]
+    uuid: str | None = field(default_factory=new_message_uuid)
 
     def to_anthropic_dict(self) -> dict[str, Any]:
         return {

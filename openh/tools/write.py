@@ -29,9 +29,7 @@ class WriteTool(Tool):
     async def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
     ) -> PermissionDecision:
-        if ("Write", "*") in ctx.session.always_allow:
-            return PermissionDecision(behavior="allow")
-        return PermissionDecision(behavior="ask")
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
         file_path = input.get("file_path")

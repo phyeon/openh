@@ -549,7 +549,7 @@ def _messages_to_transcript(messages: list[Message]) -> str:
 
 
 def _copy_message(message: Message) -> Message:
-    return Message(role=message.role, content=list(message.content))
+    return Message(role=message.role, content=list(message.content), uuid=message.uuid)
 
 
 def _strip_images(messages: list[Message]) -> list[Message]:
@@ -558,7 +558,7 @@ def _strip_images(messages: list[Message]) -> list[Message]:
         blocks = [block for block in message.content if not isinstance(block, ImageBlock)]
         if not blocks:
             blocks = [TextBlock(text="[image removed for compaction]")]
-        stripped.append(Message(role=message.role, content=blocks))
+        stripped.append(Message(role=message.role, content=blocks, uuid=message.uuid))
     return stripped
 
 

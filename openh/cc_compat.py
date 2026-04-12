@@ -249,10 +249,12 @@ class JsonlSessionWriter:
 
     def append_user(self, message: Message) -> str:
         """Append a user-role message. Returns its uuid."""
+        msg_uuid = message.uuid or str(uuid.uuid4())
+        message.uuid = msg_uuid
         envelope = self._base_envelope()
         envelope.update({
             "type": "user",
-            "uuid": str(uuid.uuid4()),
+            "uuid": msg_uuid,
             "promptId": str(uuid.uuid4()),
             "message": {
                 "role": "user",
@@ -265,10 +267,12 @@ class JsonlSessionWriter:
 
     def append_assistant(self, message: Message) -> str:
         """Append an assistant-role message. Returns its uuid."""
+        msg_uuid = message.uuid or str(uuid.uuid4())
+        message.uuid = msg_uuid
         envelope = self._base_envelope()
         envelope.update({
             "type": "assistant",
-            "uuid": str(uuid.uuid4()),
+            "uuid": msg_uuid,
             "message": {
                 "role": "assistant",
                 "content": [_block_to_cc_dict(b) for b in message.content],
@@ -346,7 +350,13 @@ def read_session_jsonl(path: Path) -> tuple[list[Message], dict[str, Any]]:
                         elif isinstance(bd, str):
                             blocks.append(TextBlock(text=bd))
                 if blocks:
-                    messages.append(Message(role=role, content=blocks))
+                    messages.append(
+                        Message(
+                            role=role,
+                            content=blocks,
+                            uuid=obj.get("uuid") or msg_field.get("uuid"),
+                        )
+                    )
 
     return messages, metadata
 
@@ -600,6 +610,7 @@ def save_session_meta(
     session_cwd: str | None = None,
     prompt_override: str | None = None,
     profile_id: str | None = None,
+    session_memory_last_extracted_message_uuid: str | None = None,
     session_memory_last_extracted_message_count: int | None = None,
     session_memory_last_extracted_tool_call_count: int | None = None,
 ) -> None:
@@ -660,6 +671,10 @@ def save_session_meta(
         meta["prompt_override"] = prompt_override
     if profile_id is not None and profile_id != "default":
         meta["profile_id"] = profile_id
+    if session_memory_last_extracted_message_uuid is not None:
+        meta["session_memory_last_extracted_message_uuid"] = (
+            session_memory_last_extracted_message_uuid
+        )
     if session_memory_last_extracted_message_count is not None:
         meta["session_memory_last_extracted_message_count"] = (
             session_memory_last_extracted_message_count

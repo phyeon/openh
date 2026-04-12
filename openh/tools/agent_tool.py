@@ -278,7 +278,7 @@ async def _create_isolated_worktree(parent_cwd: str, agent_id: str) -> tuple[str
 
 class AgentTool(Tool):
     name: ClassVar[str] = "Agent"
-    permission_level = PermissionLevel.WRITE
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Launch a new agent to handle complex, multi-step tasks autonomously. "
         "The agent runs its own agentic loop with access to tools and returns its final result. "
@@ -381,6 +381,7 @@ class AgentTool(Tool):
         sub.always_allow = set(parent.always_allow)
         sub.always_deny = set(parent.always_deny)
         sub.permission_mode = parent.permission_mode
+        sub.permission_handler_kind = parent.permission_handler_kind
         sub.prompt_override = parent.prompt_override
         sub.prompt_preset = parent.prompt_preset
         sub.profile_id = parent.profile_id

@@ -65,6 +65,7 @@ from ..session_memory import (
     count_tool_calls,
     count_visible_messages,
     extract_memories,
+    latest_visible_message_uuid,
     persist_memories,
     project_agents_path,
     should_extract as should_extract_session_memory,
@@ -2278,6 +2279,7 @@ class OpenHApp:
             "total_estimated_cost_usd": self.session.total_estimated_cost_usd,
             "subagent_total_estimated_cost_usd": self.session.subagent_total_estimated_cost_usd,
             "usage_by_model": normalize_usage_by_model(self.session.usage_by_model),
+            "session_memory_last_extracted_message_uuid": self.session.session_memory_last_extracted_message_uuid,
             "session_memory_last_extracted_message_count": self.session.session_memory_last_extracted_message_count,
             "session_memory_last_extracted_tool_call_count": self.session.session_memory_last_extracted_tool_call_count,
         }
@@ -2419,6 +2421,7 @@ class OpenHApp:
         self.session.total_estimated_cost_usd = 0.0
         self.session.subagent_total_estimated_cost_usd = 0.0
         self.session.usage_by_model = {}
+        self.session.session_memory_last_extracted_message_uuid = ""
         self.session.session_memory_last_extracted_message_count = 0
         self.session.session_memory_last_extracted_tool_call_count = 0
         self.session.session_id = new_session_uuid()
@@ -2831,6 +2834,9 @@ class OpenHApp:
             metadata.get("subagent_total_cache_read_input_tokens", 0) or 0
         )
         self.session.last_input_tokens = int(metadata.get("last_input_tokens", 0) or 0)
+        self.session.session_memory_last_extracted_message_uuid = str(
+            metadata.get("session_memory_last_extracted_message_uuid", "") or ""
+        )
         self.session.session_memory_last_extracted_message_count = int(
             metadata.get("session_memory_last_extracted_message_count", 0) or 0
         )
@@ -3007,6 +3013,7 @@ class OpenHApp:
             session_cwd=self.session.cwd,
             prompt_override=self.session.prompt_override or None,
             profile_id=self.session.profile_id if self.session.profile_id != "default" else None,
+            session_memory_last_extracted_message_uuid=self.session.session_memory_last_extracted_message_uuid,
             session_memory_last_extracted_message_count=self.session.session_memory_last_extracted_message_count,
             session_memory_last_extracted_tool_call_count=self.session.session_memory_last_extracted_tool_call_count,
         )
@@ -3068,6 +3075,7 @@ class OpenHApp:
         snapshot = list(self.session.messages)
         if not should_extract_session_memory(
             snapshot,
+            last_extracted_message_uuid=self.session.session_memory_last_extracted_message_uuid,
             last_extracted_message_count=self.session.session_memory_last_extracted_message_count,
             last_extracted_tool_call_count=self.session.session_memory_last_extracted_tool_call_count,
             force=force,
@@ -3083,6 +3091,8 @@ class OpenHApp:
             cwd,
             snapshot,
             provider,
+            self.session.session_memory_last_extracted_message_uuid,
+            self.session.session_memory_last_extracted_message_count,
         )
 
     async def _extract_session_memory_async(
@@ -3091,12 +3101,21 @@ class OpenHApp:
         cwd: str,
         snapshot: list[Any],
         provider: Any,
+        last_extracted_message_uuid: str,
+        last_extracted_message_count: int,
     ) -> None:
         try:
-            memories, usage = await extract_memories(snapshot, provider, cwd)
+            memories, usage = await extract_memories(
+                snapshot,
+                provider,
+                cwd,
+                last_extracted_message_uuid=last_extracted_message_uuid,
+                last_extracted_message_count=last_extracted_message_count,
+            )
             if memories:
                 await persist_memories(memories, project_agents_path(cwd))
 
+            last_visible_uuid = latest_visible_message_uuid(snapshot)
             visible_count = count_visible_messages(snapshot)
             tool_call_count = count_tool_calls(snapshot)
             meta_path = session_jsonl_path(cwd, session_id)
@@ -3126,6 +3145,7 @@ class OpenHApp:
                         model=getattr(provider, "model", ""),
                         update_last_input=False,
                     )
+                self.session.session_memory_last_extracted_message_uuid = last_visible_uuid
                 self.session.session_memory_last_extracted_message_count = visible_count
                 self.session.session_memory_last_extracted_tool_call_count = tool_call_count
                 save_session_meta(
@@ -3142,6 +3162,7 @@ class OpenHApp:
                     total_estimated_cost_usd=self.session.total_estimated_cost_usd,
                     subagent_total_estimated_cost_usd=self.session.subagent_total_estimated_cost_usd,
                     usage_by_model=self.session.usage_by_model,
+                    session_memory_last_extracted_message_uuid=last_visible_uuid,
                     session_memory_last_extracted_message_count=visible_count,
                     session_memory_last_extracted_tool_call_count=tool_call_count,
                 )
@@ -3186,6 +3207,7 @@ class OpenHApp:
                     total_cache_read_input_tokens=total_cache_read_input_tokens,
                     total_estimated_cost_usd=total_estimated_cost_usd,
                     usage_by_model=usage_by_model,
+                    session_memory_last_extracted_message_uuid=last_visible_uuid,
                     session_memory_last_extracted_message_count=visible_count,
                     session_memory_last_extracted_tool_call_count=tool_call_count,
                 )

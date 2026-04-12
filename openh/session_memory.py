@@ -45,6 +45,13 @@ def count_visible_messages(messages: list[Message]) -> int:
     return count
 
 
+def latest_visible_message_uuid(messages: list[Message]) -> str:
+    for message in reversed(messages):
+        if _message_text(message) and message.uuid:
+            return message.uuid
+    return ""
+
+
 def count_tool_calls(messages: list[Message]) -> int:
     total = 0
     for message in messages:
@@ -57,6 +64,7 @@ def count_tool_calls(messages: list[Message]) -> int:
 def should_extract(
     messages: list[Message],
     *,
+    last_extracted_message_uuid: str = "",
     last_extracted_message_count: int = 0,
     last_extracted_tool_call_count: int = 0,
     force: bool = False,
@@ -72,7 +80,12 @@ def should_extract(
         return False
 
     total_tool_calls = count_tool_calls(messages)
-    new_visible = visible_count - max(0, last_extracted_message_count)
+    delta_messages = _messages_since_cursor(
+        messages,
+        last_extracted_message_uuid=last_extracted_message_uuid,
+        last_extracted_message_count=last_extracted_message_count,
+    )
+    new_visible = count_visible_messages(delta_messages)
     new_tool_calls = total_tool_calls - max(0, last_extracted_tool_call_count)
 
     if new_visible <= 0 and new_tool_calls <= 0:
@@ -86,8 +99,16 @@ async def extract_memories(
     messages: list[Message],
     provider: Provider,
     cwd: str,
+    *,
+    last_extracted_message_uuid: str = "",
+    last_extracted_message_count: int = 0,
 ) -> tuple[list[ExtractedMemory], Usage]:
-    transcript = _build_transcript(messages)
+    delta_messages = _messages_since_cursor(
+        messages,
+        last_extracted_message_uuid=last_extracted_message_uuid,
+        last_extracted_message_count=last_extracted_message_count,
+    )
+    transcript = _build_transcript(delta_messages)
     if not transcript.strip():
         return [], Usage(input_tokens=0, output_tokens=0)
 
@@ -166,6 +187,45 @@ def _build_transcript(messages: list[Message]) -> str:
         role_label = "Human" if message.role == "user" else "Assistant"
         parts.append(f"{role_label}: {text}")
     return "\n\n".join(parts)
+
+
+def _messages_since_cursor(
+    messages: list[Message],
+    *,
+    last_extracted_message_uuid: str = "",
+    last_extracted_message_count: int = 0,
+) -> list[Message]:
+    if last_extracted_message_uuid:
+        index = _find_message_index_by_uuid(messages, last_extracted_message_uuid)
+        if index is not None:
+            return messages[index + 1 :]
+
+    if last_extracted_message_count > 0:
+        start = _find_index_after_visible_count(messages, last_extracted_message_count)
+        return messages[start:]
+
+    return messages
+
+
+def _find_message_index_by_uuid(messages: list[Message], target_uuid: str) -> int | None:
+    target = (target_uuid or "").strip()
+    if not target:
+        return None
+    for idx, message in enumerate(messages):
+        if message.uuid == target:
+            return idx
+    return None
+
+
+def _find_index_after_visible_count(messages: list[Message], visible_count: int) -> int:
+    seen = 0
+    for idx, message in enumerate(messages):
+        if not _message_text(message):
+            continue
+        seen += 1
+        if seen >= visible_count:
+            return idx + 1
+    return len(messages)
 
 
 def _message_text(message: Message) -> str:

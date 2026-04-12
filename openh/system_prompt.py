@@ -13,7 +13,7 @@ from pathlib import Path
 from . import memdir
 from .memory import load_memory
 
-SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__OPENH_SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
+SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 
 
 def merge_base_prompt(default_prompt: str, custom_prompt: str) -> str:

@@ -72,14 +72,146 @@ class PermissionRules:
         return "none"
 
 
+@dataclass(frozen=True)
+class PermissionRequest:
+    tool_name: str
+    input_dict: dict[str, Any]
+    level: PermissionLevel
+    is_read_only: bool
+
+
+class PermissionHandler:
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        raise NotImplementedError
+
+    def request_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        return self.check_permission(request)
+
+
+class AutoPermissionHandler(PermissionHandler):
+    def __init__(self, mode: PermissionMode) -> None:
+        self.mode = mode
+
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        if self.mode == PermissionMode.BYPASS_PERMISSIONS:
+            return "allow", ""
+        if self.mode == PermissionMode.ACCEPT_EDITS:
+            return "allow", ""
+        if request.level == PermissionLevel.FORBIDDEN:
+            return "deny", "this action is unconditionally forbidden"
+        if self.mode == PermissionMode.PLAN:
+            if request.is_read_only:
+                return "allow", ""
+            return "deny", "plan mode only allows read-only tools"
+        if request.is_read_only:
+            return "allow", ""
+        return "deny", format_permission_reason(
+            request.tool_name,
+            request.input_dict,
+            request.level,
+        )
+
+
+class InteractivePermissionHandler(PermissionHandler):
+    def __init__(self, mode: PermissionMode) -> None:
+        self.mode = mode
+
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        if self.mode == PermissionMode.BYPASS_PERMISSIONS:
+            return "allow", ""
+        if request.level == PermissionLevel.FORBIDDEN:
+            return "deny", "this action is unconditionally forbidden"
+        if self.mode == PermissionMode.PLAN:
+            if request.is_read_only:
+                return "allow", ""
+            return "deny", "plan mode only allows read-only tools"
+        return "allow", ""
+
+
+class _ManagedPermissionHandler(PermissionHandler):
+    def __init__(
+        self,
+        session: Any,
+        rules: PermissionRules,
+        fallback: PermissionHandler,
+    ) -> None:
+        self.session = session
+        self.rules = rules
+        self.fallback = fallback
+
+    def _evaluate_rules(self, request: PermissionRequest) -> tuple[Decision, str]:
+        always_deny = getattr(self.session, "always_deny", set())
+        if isinstance(always_deny, set) and session_override_matches(
+            always_deny,
+            request.tool_name,
+            request.input_dict,
+        ):
+            return "deny", "permission denied by remembered user preference"
+
+        rule_decision = self.rules.evaluate(request.tool_name, request.input_dict)
+        if rule_decision == "deny":
+            return "deny", f"permission denied by rule in {PermissionRules.__module__}"
+
+        always_allow = getattr(self.session, "always_allow", set())
+        if isinstance(always_allow, set) and session_override_matches(
+            always_allow,
+            request.tool_name,
+            request.input_dict,
+        ):
+            return "allow", ""
+
+        if rule_decision == "allow":
+            return "allow", ""
+        if rule_decision == "ask":
+            return "ask", format_permission_reason(
+                request.tool_name,
+                request.input_dict,
+                request.level,
+            )
+        return "none", ""
+
+
+class ManagedAutoPermissionHandler(_ManagedPermissionHandler):
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        rule_decision, reason = self._evaluate_rules(request)
+        if rule_decision == "ask":
+            return "deny", reason
+        if rule_decision != "none":
+            return rule_decision, reason
+        return self.fallback.check_permission(request)
+
+
+class ManagedInteractivePermissionHandler(_ManagedPermissionHandler):
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        rule_decision, reason = self._evaluate_rules(request)
+        if rule_decision != "none":
+            return rule_decision, reason
+        return self.fallback.check_permission(request)
+
+
 def effective_permission_mode(session: Any) -> PermissionMode:
+    if bool(getattr(session, "plan_mode", False)):
+        return PermissionMode.PLAN
     raw = str(getattr(session, "permission_mode", "") or "").strip().lower()
     for mode in PermissionMode:
         if raw == mode.value:
             return mode
-    if bool(getattr(session, "plan_mode", False)):
-        return PermissionMode.PLAN
     return PermissionMode.DEFAULT
+
+
+def build_permission_handler(
+    session: Any,
+    rules: PermissionRules,
+) -> PermissionHandler:
+    mode = effective_permission_mode(session)
+    kind = str(getattr(session, "permission_handler_kind", "interactive") or "interactive")
+    if kind.strip().lower() == "auto":
+        return ManagedAutoPermissionHandler(session, rules, AutoPermissionHandler(mode))
+    return ManagedInteractivePermissionHandler(
+        session,
+        rules,
+        InteractivePermissionHandler(mode),
+    )
 
 
 def derive_rule_pattern(tool_name: str, input_dict: dict[str, Any]) -> str:
@@ -162,43 +294,14 @@ def evaluate_permission(
     input_dict: dict[str, Any],
     level: PermissionLevel,
 ) -> tuple[Decision, str]:
-    mode = effective_permission_mode(session)
-
-    if mode == PermissionMode.BYPASS_PERMISSIONS:
-        return "allow", ""
-
-    always_deny = getattr(session, "always_deny", set())
-    if isinstance(always_deny, set) and session_override_matches(always_deny, tool_name, input_dict):
-        return "deny", "permission denied by remembered user preference"
-
-    rule_decision = rules.evaluate(tool_name, input_dict)
-    if rule_decision == "deny":
-        return "deny", f"permission denied by rule in {PermissionRules.__module__}"
-
-    always_allow = getattr(session, "always_allow", set())
-    if isinstance(always_allow, set) and session_override_matches(always_allow, tool_name, input_dict):
-        return "allow", ""
-
-    if rule_decision == "allow":
-        return "allow", ""
-    if rule_decision == "ask":
-        return "ask", format_permission_reason(tool_name, input_dict, level)
-
-    if mode == PermissionMode.ACCEPT_EDITS:
-        return "allow", ""
-
-    if level == PermissionLevel.FORBIDDEN:
-        return "deny", "this action is unconditionally forbidden"
-
-    if mode == PermissionMode.PLAN:
-        if level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY):
-            return "allow", ""
-        return "deny", "plan mode only allows read-only tools"
-
-    if level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY):
-        return "allow", ""
-
-    return "ask", format_permission_reason(tool_name, input_dict, level)
+    request = PermissionRequest(
+        tool_name=tool_name,
+        input_dict=input_dict,
+        level=level,
+        is_read_only=level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY),
+    )
+    handler = build_permission_handler(session, rules)
+    return handler.request_permission(request)
 
 
 def remember_persistent_rule(action: Literal["allow", "deny"], rule: str) -> None:

@@ -86,6 +86,7 @@ def message_to_dict(msg: Message) -> dict[str, Any]:
     return {
         "role": msg.role,
         "content": [_block_to_dict(b) for b in msg.content],
+        "uuid": msg.uuid,
     }
 
 
@@ -98,7 +99,7 @@ def dict_to_message(d: dict[str, Any]) -> Message | None:
         b = _dict_to_block(bd)
         if b is not None:
             blocks.append(b)
-    return Message(role=role, content=blocks)
+    return Message(role=role, content=blocks, uuid=d.get("uuid"))
 
 
 def save_session(

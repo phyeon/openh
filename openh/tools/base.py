@@ -52,10 +52,7 @@ class Tool(ABC):
     async def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
     ) -> PermissionDecision:
-        level = self.get_permission_level()
-        if level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY):
-            return PermissionDecision(behavior="allow")
-        return PermissionDecision(behavior="ask")
+        return PermissionDecision(behavior="allow")
 
     @abstractmethod
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:

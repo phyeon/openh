@@ -342,7 +342,13 @@ class Agent:
         new_messages: list[Message] = []
         for message in messages:
             if message.role != "user":
-                new_messages.append(Message(role=message.role, content=list(message.content)))
+                new_messages.append(
+                    Message(
+                        role=message.role,
+                        content=list(message.content),
+                        uuid=message.uuid,
+                    )
+                )
                 continue
 
             new_blocks: list[Block] = []
@@ -361,7 +367,13 @@ class Agent:
                         to_shed = max(0, to_shed - size)
                         continue
                 new_blocks.append(block)
-            new_messages.append(Message(role=message.role, content=new_blocks))
+            new_messages.append(
+                Message(
+                    role=message.role,
+                    content=new_blocks,
+                    uuid=message.uuid,
+                )
+            )
         return new_messages, truncated
 
     async def _stream_with_liveness(self, stream):

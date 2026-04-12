@@ -223,15 +223,7 @@ class BashTool(Tool):
                 behavior="deny",
                 reason=f"BLOCKED: critical-risk command detected",
             )
-
-        # Always-allow only covers Safe + Low
-        if ("Bash", "*") in ctx.session.always_allow:
-            if level <= RiskLevel.LOW:
-                return PermissionDecision(behavior="allow")
-            # Medium/High still need explicit permission even with always_allow
-            return PermissionDecision(behavior="ask")
-
-        return PermissionDecision(behavior="ask")
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
         command = input.get("command")
@@ -577,9 +569,7 @@ class KillShellTool(Tool):
     async def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
     ) -> PermissionDecision:
-        if ("KillShell", "*") in ctx.session.always_allow:
-            return PermissionDecision(behavior="allow")
-        return PermissionDecision(behavior="ask")
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
         shell_id = input.get("shell_id", "")

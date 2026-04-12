@@ -45,6 +45,7 @@ class AgentSession:
     profile_id: str = "default"   # session profile ("default", "fnd", ...)
     shell_env: dict[str, str] = field(default_factory=dict)  # persisted env vars (CC pattern)
     permission_mode: str = "default"
+    permission_handler_kind: str = "interactive"
     max_turns: int = 10
     tool_result_budget: int = 50_000
     max_budget_usd: float | None = None
@@ -54,6 +55,7 @@ class AgentSession:
     managed_executor_max_turns: int = 10
     managed_max_concurrent_executors: int = 1
     managed_executor_isolation: bool = True
+    session_memory_last_extracted_message_uuid: str = ""
     session_memory_last_extracted_message_count: int = 0
     session_memory_last_extracted_tool_call_count: int = 0
     _cwd: str = ""
@@ -81,7 +83,11 @@ class AgentSession:
             setattr(self, "auto_compact_state", AutoCompactState())
 
     def _copy_message(self, message: Message) -> Message:
-        return Message(role=message.role, content=list(message.content))
+        return Message(
+            role=message.role,
+            content=list(message.content),
+            uuid=message.uuid,
+        )
 
     def _is_compaction_marker(self, message: Message) -> bool:
         if len(message.content) != 1:
@@ -108,12 +114,13 @@ class AgentSession:
         role: str,
         blocks: list[Block],
         *,
+        message_uuid: str | None = None,
         include_in_transcript: bool = True,
         include_in_model: bool = True,
     ) -> None:
         if not blocks:
             return
-        message = Message(role=role, content=list(blocks))
+        message = Message(role=role, content=list(blocks), uuid=message_uuid)
         if include_in_transcript:
             self.messages.append(message)
         if include_in_model:
