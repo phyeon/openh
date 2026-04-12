@@ -5,6 +5,7 @@ a Context object (session, ui hooks) and returns a CommandResult.
 """
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 class CommandResult:
     handled: bool
     output: str = ""          # Text to display as a system note (if any)
+    user_message: str = ""    # Synthetic user message to send to the model
     clear_log: bool = False   # Whether the UI should clear the log
     refresh_status: bool = False
     quit: bool = False
@@ -26,6 +28,7 @@ class CommandContext:
     session: "AgentSession"
     on_clear: Callable[[], None]
     on_switch_model: Callable[[str], None]  # arg: provider name
+    on_set_model: Callable[[str], None]     # arg: provider/model or bare model
     on_toggle_theme: Callable[[], None]
     on_compact_now: Callable[[], None]
     on_init: Callable[[], None]
@@ -51,7 +54,10 @@ class CommandDispatcher:
     def dispatch(self, text: str, ctx: CommandContext) -> Optional[CommandResult]:
         if not text.startswith("/"):
             return None
-        parts = text[1:].split()
+        try:
+            parts = shlex.split(text[1:])
+        except ValueError:
+            parts = text[1:].split()
         if not parts:
             return None
         cmd = parts[0].lower()
@@ -65,11 +71,11 @@ class CommandDispatcher:
         self.register("help", _cmd_help(self), "Show available slash commands")
         self.register("clear", _cmd_clear, "Clear the current conversation")
         self.register("new", _cmd_clear, "Alias for /clear")
-        self.register("model", _cmd_model, "Switch model: /model anthropic | gemini")
+        self.register("model", _cmd_model, "Show or switch the current model")
         self.register("switch", _cmd_model, "Alias for /model")
         self.register("tokens", _cmd_tokens, "Show current token usage")
         self.register("status", _cmd_status, "Show session status")
-        self.register("compact", _cmd_compact, "Force summarize + compact the conversation")
+        self.register("compact", _cmd_compact, "Request a manual conversation compact")
         self.register("rename", _cmd_rename, "Rename the current conversation: /rename new title")
         self.register("theme", _cmd_theme, "Toggle light/dark theme")
         self.register("init", _cmd_init, "Generate a starter AGENTS.md in the current directory")
@@ -87,29 +93,40 @@ class CommandDispatcher:
 
 def _cmd_help(dispatcher: "CommandDispatcher"):
     def handler(args: list[str], ctx: CommandContext) -> CommandResult:
+        if args:
+            target = args[0].lower()
+            for name, text in dispatcher._help_lines:
+                if name == target:
+                    return CommandResult(handled=True, output=f"/{name}\n\n{text}")
+            return CommandResult(handled=True, output=f"unknown command: /{target}")
         lines = ["# Slash commands", ""]
         for name, text in sorted(dispatcher._help_lines):
             lines.append(f"  /{name:<12s}  {text}")
+        lines.extend(["", "Use /help <command> for more detail."])
         return CommandResult(handled=True, output="\n".join(lines))
     return handler
 
 
 def _cmd_clear(args: list[str], ctx: CommandContext) -> CommandResult:
     ctx.on_clear()
-    return CommandResult(handled=True, output="conversation cleared", clear_log=True)
+    return CommandResult(handled=True, clear_log=True)
 
 
 def _cmd_model(args: list[str], ctx: CommandContext) -> CommandResult:
     if not args:
-        current = ctx.session.provider.name
-        target = "gemini" if current == "anthropic" else "anthropic"
-    else:
-        target = args[0].lower()
-        if target not in ("anthropic", "gemini"):
-            return CommandResult(handled=True, output=f"unknown provider: {target}")
+        return CommandResult(
+            handled=True,
+            output=f"current model: {ctx.session.provider.name}/{ctx.session.provider.model}",
+        )
+    target = args[0].strip()
     try:
-        ctx.on_switch_model(target)
-        return CommandResult(handled=True, output=f"switched to {target}")
+        ctx.on_set_model(target)
+        if "/" in target:
+            provider, model = target.split("/", 1)
+            shown = model if provider == "anthropic" else f"{provider}/{model}"
+        else:
+            shown = f"{ctx.session.provider.name}/{target}"
+        return CommandResult(handled=True, output=f"switched to {shown}")
     except Exception as exc:  # noqa: BLE001
         return CommandResult(handled=True, output=f"error: {exc}")
 
@@ -158,6 +175,7 @@ def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
     )
     lines = [
         f"provider: {s.provider.name}:{s.provider.model}",
+        f"permission_mode: {getattr(s, 'permission_mode', 'default')}",
         f"cwd: {s.cwd}",
         f"messages: {len(s.messages)}",
         (
@@ -172,19 +190,51 @@ def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
         f"cost: ${s.total_estimated_cost_usd:.4f}",
         f"tools: {len(s.tools)}",
         f"session_id: {s.session_id}",
+        f"title: {s.title or '(untitled)'}",
         f"output_style: {getattr(s, 'output_style', 'default')}",
     ]
     return CommandResult(handled=True, output="\n".join(lines))
 
 
 def _cmd_compact(args: list[str], ctx: CommandContext) -> CommandResult:
-    ctx.on_compact_now()
-    return CommandResult(handled=True, output="compaction scheduled")
+    instruction = (
+        "Please create a detailed summary of our conversation so far, preserving "
+        "key technical details, decisions, file paths, and current task status."
+    )
+    if args:
+        instruction = " ".join(args).strip() or instruction
+    return CommandResult(
+        handled=True,
+        user_message=(
+            f"[Compact requested ({len(ctx.session.messages)} messages). "
+            f"Instruction: {instruction}]"
+        ),
+    )
 
 
 def _cmd_rename(args: list[str], ctx: CommandContext) -> CommandResult:
     if not args:
-        return CommandResult(handled=True, output="usage: /rename <new title>")
+        title = (ctx.session.title or "").strip()
+        if not title:
+            for msg in ctx.session.messages:
+                if msg.role != "user":
+                    continue
+                for block in msg.content:
+                    if getattr(block, "type", "") != "text":
+                        continue
+                    text = getattr(block, "text", "").strip()
+                    if text:
+                        title = text.splitlines()[0][:60].strip()
+                        break
+                if title:
+                    break
+        if not title:
+            return CommandResult(handled=True, output="usage: /rename <new title>")
+        slug = _slugify_title(title)
+        if not slug:
+            return CommandResult(handled=True, output="usage: /rename <new title>")
+        ctx.set_title(slug)
+        return CommandResult(handled=True, output=f"renamed to: {slug}")
     title = " ".join(args)
     ctx.set_title(title)
     return CommandResult(handled=True, output=f"renamed to: {title}")
@@ -274,7 +324,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         SYSTEM_PROMPT_FILE,
     )
     from .output_styles import available_style_names
-    from .persistence import SESSIONS_DIR
+    from .persistence import sessions_dir
 
     s = ctx.session
     has_openai = bool(s.config.openai_api_key)
@@ -305,7 +355,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         "## Runtime parameters",
         f"  max_output_tokens:    {MAX_OUTPUT_TOKENS}",
         f"  auto_compact_thresh:  {AUTO_COMPACT_THRESHOLD:,} tokens",
-        f"  sessions_dir:         {SESSIONS_DIR}",
+        f"  sessions_dir:         {sessions_dir()}",
         f"  system_prompt_file:   {SYSTEM_PROMPT_FILE}  {'(exists)' if SYSTEM_PROMPT_FILE.exists() else '(missing)'}",
         f"  mcp_config:           {mcp_path}  {'(exists)' if mcp_path.exists() else '(missing)'}",
         f"  hooks_config:         {hooks_path}  {'(exists)' if hooks_path.exists() else '(missing)'}",
@@ -347,3 +397,17 @@ def _cmd_output_style(args: list[str], ctx: CommandContext) -> CommandResult:
     ctx.on_set_output_style(style.name)
     desc = f" — {style.description}" if style.description else ""
     return CommandResult(handled=True, output=f"output style set to {style.name}{desc}")
+
+
+def _slugify_title(text: str) -> str:
+    out: list[str] = []
+    prev_dash = False
+    for ch in text.lower():
+        if ch.isalnum():
+            out.append(ch)
+            prev_dash = False
+            continue
+        if ch in {" ", "_", "-", "/", ":"} and not prev_dash:
+            out.append("-")
+            prev_dash = True
+    return "".join(out).strip("-")[:60]

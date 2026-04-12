@@ -1913,6 +1913,50 @@ class OpenHApp:
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(str(exc))
 
+        def set_model(target: str) -> None:
+            provider_name = self.session.provider.name
+            model_name = target.strip()
+            if not model_name:
+                raise RuntimeError("missing model name")
+            if "/" in model_name:
+                provider_name, model_name = model_name.split("/", 1)
+                provider_name = provider_name.strip().lower()
+                model_name = model_name.strip()
+            if provider_name not in ("openai", "anthropic", "gemini"):
+                raise RuntimeError(f"unknown provider: {provider_name}")
+            if not model_name:
+                raise RuntimeError("missing model name")
+
+            if provider_name == "openai":
+                self.settings.openai_model = model_name
+            elif provider_name == "anthropic":
+                self.settings.anthropic_model = model_name
+            else:
+                self.settings.gemini_model = model_name
+            self.settings.active_provider = provider_name
+
+            env_config = load_config()
+            new_config = type(self.config)(
+                openai_api_key=env_config.openai_api_key,
+                anthropic_api_key=env_config.anthropic_api_key,
+                gemini_api_key=env_config.gemini_api_key,
+                openai_model=self.settings.openai_model,
+                anthropic_model=self.settings.anthropic_model,
+                gemini_model=self.settings.gemini_model,
+                cwd=self.config.cwd,
+            )
+            self.config = new_config
+            self.session.config = new_config
+            try:
+                new_provider = get_provider(provider_name, self.config)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(str(exc))
+            self.session.switch_provider(new_provider)
+            self._sync_session_managed_agent_config()
+            save_settings(self.settings)
+            self._refresh_top_bar()
+            self._refresh_input()
+
         def set_title(new_title: str) -> None:
             self._current_title = new_title
             self.session.title = new_title
@@ -1931,6 +1975,7 @@ class OpenHApp:
             session=self.session,
             on_clear=self._new_chat,
             on_switch_model=switch_to,
+            on_set_model=set_model,
             on_toggle_theme=self._toggle_theme,
             on_compact_now=compact_now,
             on_init=init_claude_md,
@@ -2014,6 +2059,9 @@ class OpenHApp:
                         widgets.system_note(result.output)
                     )
                     self._scroll_to_end()
+                if result.user_message:
+                    self._submit_turn(result.user_message, [])
+                    return
                 self._drain_queued_turns()
                 return
 
