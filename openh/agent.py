@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from .messages import (
     Block,
+    Message,
     MessageStop,
     StreamEvent,
     TextBlock,
@@ -69,22 +70,6 @@ class Agent:
             except Exception:
                 pass
 
-        from .compaction import compact_messages, should_compact
-        if should_compact(
-            self.session.model_messages,
-            model=getattr(self.session.provider, "model", ""),
-            usage_tokens=self.session.last_input_tokens,
-        ):
-            try:
-                compacted = await compact_messages(
-                    self.session.model_messages,
-                    self.session.provider,
-                    session=self.session,
-                )
-                self.session.model_messages = compacted
-            except Exception:
-                pass
-
         self.session.append_user_text(user_text)
         await self._drive_loop()
 
@@ -115,20 +100,116 @@ class Agent:
     MAX_TOOL_LOOP_ITERATIONS = 40
     STREAM_LIVENESS_TIMEOUT = 45  # seconds — no event for this long → dead
     STREAM_TOTAL_TIMEOUT = 300    # seconds — max total time per model call
+    MAX_TOKENS_RECOVERY_LIMIT = 3
+    MAX_TOKENS_RECOVERY_MSG = (
+        "Output token limit hit. Resume directly — no apology, no recap of what "
+        "you were doing. Pick up mid-thought if that is where the cut happened. "
+        "Break remaining work into smaller pieces."
+    )
+
+    @staticmethod
+    def _reactive_compact_enabled() -> bool:
+        import os
+
+        value = os.getenv("CLAURST_FEATURE_REACTIVE_COMPACT", "")
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    async def _post_usage_compaction(self, stop_reason: str) -> None:
+        from .compaction import (
+            AutoCompactState,
+            auto_compact_if_needed,
+            context_collapse,
+            context_window_for_model,
+            reactive_compact,
+            should_compact,
+            should_context_collapse,
+        )
+
+        if not self.session.model_messages:
+            return
+        tokens_used = int(getattr(self.session, "last_input_tokens", 0) or 0)
+        if tokens_used <= 0:
+            return
+        model = str(getattr(self.session.provider, "model", "") or "")
+
+        if self._reactive_compact_enabled():
+            context_limit = context_window_for_model(model)
+            if should_context_collapse(tokens_used, context_limit):
+                try:
+                    result = await context_collapse(
+                        self.session.model_messages,
+                        self.session.provider,
+                        model,
+                        session=self.session,
+                    )
+                except Exception:
+                    return
+                self.session.model_messages = result.messages
+                return
+
+            if should_compact(tokens_used, context_limit):
+                try:
+                    result = await reactive_compact(
+                        self.session.model_messages,
+                        self.session.provider,
+                        model,
+                        session=self.session,
+                    )
+                except Exception:
+                    return
+                self.session.model_messages = result.messages
+                return
+            return
+
+        if stop_reason not in ("end_turn", "tool_use"):
+            return
+
+        state = getattr(self.session, "auto_compact_state", None)
+        if not isinstance(state, AutoCompactState):
+            state = AutoCompactState()
+            setattr(self.session, "auto_compact_state", state)
+        new_messages = await auto_compact_if_needed(
+            self.session.provider,
+            self.session.model_messages,
+            tokens_used,
+            model,
+            state,
+            session=self.session,
+        )
+        if new_messages is not None:
+            self.session.model_messages = new_messages
 
     async def _drive_loop(self) -> None:
         """Drive the provider ↔ tool loop using whatever is already in session.messages."""
         import asyncio
         from .tools.agent_tool import drain_coordinator_messages, get_coordination_root
 
-        iterations = 0
+        turns = 0
+        max_tokens_recovery_count = 0
+        stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
+        effective_max_turns = max(
+            1,
+            int(getattr(self.session, "max_turns", self.MAX_TOOL_LOOP_ITERATIONS) or self.MAX_TOOL_LOOP_ITERATIONS),
+        )
         while True:
-            iterations += 1
-            if iterations > self.MAX_TOOL_LOOP_ITERATIONS:
+            turns += 1
+            if turns > effective_max_turns:
                 await self._emit(TextDelta(
-                    text=f"\n\n[agent: tool loop hit {self.MAX_TOOL_LOOP_ITERATIONS} iterations — stopping]"
+                    text=f"\n\n[agent: reached maximum turn limit ({effective_max_turns})]"
                 ))
                 return
+
+            for text in list(getattr(self.session, "pending_messages", [])):
+                content = (text or "").strip()
+                if content:
+                    self.session.append_user_text(content)
+            getattr(self.session, "pending_messages", []).clear()
+
+            command_queue = getattr(self.session, "command_queue", None)
+            if command_queue is not None and not command_queue.is_empty():
+                injected_messages = command_queue.drain_to_messages()
+                if injected_messages:
+                    self.session.model_messages = injected_messages + list(self.session.model_messages)
 
             if get_coordination_root(self.session) is self.session:
                 injected_messages = drain_coordinator_messages(self.session)
@@ -141,6 +222,13 @@ class Agent:
                         self.session.append_user_text(
                             f"[Agent message from {sender}{suffix}]\n{content}"
                         )
+
+            budget = max(0, int(getattr(self.session, "tool_result_budget", 0) or 0))
+            if budget > 0:
+                self.session.model_messages, _ = self._apply_tool_result_budget(
+                    self.session.model_messages,
+                    budget,
+                )
 
             assistant_blocks: list[Block] = []
             current_text: list[str] = []
@@ -174,6 +262,7 @@ class Agent:
                             event.output_tokens,
                             event.cache_creation_input_tokens,
                             event.cache_read_input_tokens,
+                            model=getattr(self.session.provider, "model", ""),
                         )
                     elif isinstance(event, MessageStop):
                         stop_reason = event.stop_reason
@@ -185,22 +274,95 @@ class Agent:
                 assistant_blocks.append(TextBlock(text="".join(current_text)))
 
             if timed_out:
+                if stall_retries_left > 0:
+                    stall_retries_left -= 1
+                    turns -= 1
+                    await self._emit(
+                        TextDelta(
+                            text=(
+                                f"\n\n[agent: no stream event for {self.STREAM_LIVENESS_TIMEOUT}s "
+                                f"— retrying ({stall_retries_left + 1} left)]"
+                            )
+                        )
+                    )
+                    continue
                 msg = f"\n\n[agent: {timeout_reason}]"
                 assistant_blocks.append(TextBlock(text=msg))
                 await self._emit(TextDelta(text=msg))
                 self.session.append_assistant_message(assistant_blocks)
                 return
+            stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
 
             self.session.append_assistant_message(assistant_blocks)
+            await self._post_usage_compaction(stop_reason)
 
             if not tool_uses:
+                if stop_reason == "max_tokens":
+                    if max_tokens_recovery_count < self.MAX_TOKENS_RECOVERY_LIMIT:
+                        max_tokens_recovery_count += 1
+                        turns -= 1
+                        self.session.append_message(
+                            "user",
+                            [TextBlock(text=self.MAX_TOKENS_RECOVERY_MSG)],
+                            include_in_transcript=False,
+                            include_in_model=True,
+                        )
+                        continue
                 return
 
+            max_tokens_recovery_count = 0
             tool_results = await self._run_tool_uses(tool_uses)
             self.session.append_tool_results(tool_results)
 
             if stop_reason not in ("tool_use", "end_turn"):
                 return
+
+    @staticmethod
+    def _tool_result_chars(block: Block) -> int:
+        if isinstance(block, ToolResultBlock):
+            return len(block.content or "")
+        return 0
+
+    def _apply_tool_result_budget(
+        self,
+        messages: list[Message],
+        budget: int,
+    ) -> tuple[list[Message], int]:
+        total_chars = sum(
+            self._tool_result_chars(block)
+            for message in messages
+            if message.role == "user"
+            for block in message.content
+        )
+        if total_chars <= budget:
+            return messages, 0
+
+        to_shed = total_chars - budget
+        truncated = 0
+        new_messages: list[Message] = []
+        for message in messages:
+            if message.role != "user":
+                new_messages.append(Message(role=message.role, content=list(message.content)))
+                continue
+
+            new_blocks: list[Block] = []
+            for block in message.content:
+                if isinstance(block, ToolResultBlock) and to_shed > 0:
+                    size = len(block.content or "")
+                    if size > 0:
+                        new_blocks.append(
+                            ToolResultBlock(
+                                tool_use_id=block.tool_use_id,
+                                content="[tool result truncated to save context]",
+                                is_error=block.is_error,
+                            )
+                        )
+                        truncated += 1
+                        to_shed = max(0, to_shed - size)
+                        continue
+                new_blocks.append(block)
+            new_messages.append(Message(role=message.role, content=new_blocks))
+        return new_messages, truncated
 
     async def _stream_with_liveness(self, stream):
         """Wrap an async stream with liveness + total timeout (CC pattern).
@@ -322,31 +484,67 @@ class Agent:
                 pass
 
         # Check user permission rules first (~/.claude/settings.json)
-        rule_decision = self._perm_rules.evaluate(use.name, use.input)
-        if rule_decision == "deny":
+        from .permission_rules import evaluate_permission
+
+        level = tool.get_permission_level()
+        perm_decision, perm_reason = evaluate_permission(
+            self.session,
+            self._perm_rules,
+            use.name,
+            use.input,
+            level,
+        )
+        if perm_decision == "deny":
+            denial_log = getattr(self.session, "permission_denials", None)
+            if isinstance(denial_log, list):
+                denial_log.append(
+                    {
+                        "tool_name": use.name,
+                        "reason": perm_reason or "permission denied",
+                    }
+                )
             return ToolResultBlock(
                 tool_use_id=use.id,
-                content=f"permission denied by rule in {self._perm_rules.__class__.__module__}",
+                content=perm_reason or "permission denied",
                 is_error=True,
             )
-        if rule_decision == "allow":
-            pass  # skip to execution
-        else:
-            decision = await tool.check_permissions(use.input, ctx)
-            if decision.behavior == "deny":
+
+        decision = await tool.check_permissions(use.input, ctx)
+        if decision.behavior == "deny":
+            denial_log = getattr(self.session, "permission_denials", None)
+            if isinstance(denial_log, list):
+                denial_log.append(
+                    {
+                        "tool_name": use.name,
+                        "reason": decision.reason or "permission denied",
+                    }
+                )
+            return ToolResultBlock(
+                tool_use_id=use.id,
+                content=f"permission denied: {decision.reason or 'no reason given'}",
+                is_error=True,
+            )
+
+        ask_needed = perm_decision == "ask" or decision.behavior == "ask"
+        if perm_decision != "allow" and decision.behavior == "allow":
+            ask_needed = False
+
+        if ask_needed:
+            allowed = await self.permission_cb(use.name, use.input)
+            if not allowed:
+                denial_log = getattr(self.session, "permission_denials", None)
+                if isinstance(denial_log, list):
+                    denial_log.append(
+                        {
+                            "tool_name": use.name,
+                            "reason": perm_reason or "user denied permission",
+                        }
+                    )
                 return ToolResultBlock(
                     tool_use_id=use.id,
-                    content=f"permission denied: {decision.reason or 'no reason given'}",
+                    content="user denied permission",
                     is_error=True,
                 )
-            if decision.behavior == "ask" or rule_decision == "ask":
-                allowed = await self.permission_cb(use.name, use.input)
-                if not allowed:
-                    return ToolResultBlock(
-                        tool_use_id=use.id,
-                        content="user denied permission",
-                        is_error=True,
-                    )
 
         try:
             output = await tool.run(use.input, ctx)

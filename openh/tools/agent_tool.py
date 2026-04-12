@@ -378,6 +378,8 @@ class AgentTool(Tool):
         sub.cwd = sub_cwd
         sub.read_files = set(parent.read_files)
         sub.always_allow = set(parent.always_allow)
+        sub.always_deny = set(parent.always_deny)
+        sub.permission_mode = parent.permission_mode
         sub.prompt_override = parent.prompt_override
         sub.prompt_preset = parent.prompt_preset
         sub.profile_id = parent.profile_id
@@ -416,7 +418,7 @@ class AgentTool(Tool):
         )
         max_turns = int(input.get("max_turns") or default_turns)
         if max_turns > 0:
-            sub_agent.MAX_TOOL_LOOP_ITERATIONS = max_turns
+            sub.max_turns = max_turns
 
         registry = get_subagent_registry(parent)
         entry = {

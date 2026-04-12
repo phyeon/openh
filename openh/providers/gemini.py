@@ -119,12 +119,15 @@ class GeminiProvider:
         messages: list[Message],
         system: str,
         tools: list[ToolSchema],
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
         contents = self._to_gemini_contents(messages)
         config_kwargs: dict[str, Any] = {"system_instruction": system}
         gemini_tools = self._to_gemini_tools(tools)
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
+        if max_tokens is not None:
+            config_kwargs["max_output_tokens"] = int(max_tokens)
 
         config = gtypes.GenerateContentConfig(**config_kwargs)
 

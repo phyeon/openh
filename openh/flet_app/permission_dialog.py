@@ -13,7 +13,7 @@ from . import theme
 class PermissionDialog:
     """A dialog that asks the user to allow / always-allow / deny a tool call.
 
-    Returns one of: 'allow', 'always', 'deny'.
+    Returns one of: 'allow', 'always', 'deny', 'deny_always'.
     """
 
     def __init__(self, page: ft.Page) -> None:
@@ -86,6 +86,10 @@ class PermissionDialog:
                 ft.TextButton(
                     content=ft.Text("Deny", color=theme.TEXT_SECONDARY, size=13),
                     on_click=make_handler("deny"),
+                ),
+                ft.TextButton(
+                    content=ft.Text("Deny always", color=theme.WARN, size=13),
+                    on_click=make_handler("deny_always"),
                 ),
                 ft.TextButton(
                     content=ft.Text("Allow always", color=theme.ACCENT, size=13),

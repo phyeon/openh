@@ -26,6 +26,7 @@ from ..commands import CommandContext, CommandDispatcher
 from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
+from ..permission_rules import derive_rule_pattern, remember_persistent_rule
 from .settings_dialog import SettingsDialog
 from ..system_prompt import (
     build_managed_agent_prompt,
@@ -169,6 +170,9 @@ class OpenHApp:
         self._busy = False
         self._current_task: "asyncio.Task | None" = None
         self._skip_permissions = self.settings.skip_permissions
+        self.session.permission_mode = (
+            "bypass_permissions" if self._skip_permissions else "default"
+        )
         self._file_picker = ft.FilePicker()
         self._dispatcher = CommandDispatcher()
         self._window_initialized = False
@@ -1225,6 +1229,9 @@ class OpenHApp:
 
         self.settings = new_settings
         self._skip_permissions = new_settings.skip_permissions
+        self.session.permission_mode = (
+            "bypass_permissions" if self._skip_permissions else "default"
+        )
 
         # Update Config + reload provider if model changed
         new_config = type(self.config)(
@@ -1301,6 +1308,9 @@ class OpenHApp:
 
     def _toggle_permissions(self) -> None:
         self._skip_permissions = not self._skip_permissions
+        self.session.permission_mode = (
+            "bypass_permissions" if self._skip_permissions else "default"
+        )
         self._refresh_input()
 
     def _toggle_theme(self) -> None:
@@ -1523,19 +1533,12 @@ class OpenHApp:
         self._refresh_input()
         try:
             from ..agent import Agent
-            from ..compaction import compact_messages, should_compact
             agent = Agent(
                 session=self.session,
                 system_prompt=self._get_system_prompt(),
                 event_sink=self._handle_stream_event,
                 permission_cb=self._ask_permission,
             )
-            if should_compact(self.session.model_messages):
-                self.session.model_messages = await compact_messages(
-                    self.session.model_messages,
-                    self.session.provider,
-                    session=self.session,
-                )
             await agent._drive_loop()
         except Exception as exc:
             self._append_to_messages(
@@ -1933,18 +1936,7 @@ class OpenHApp:
 
     async def _run_turn_with_media_async(self, user_text: str, media_blocks: list) -> None:
         """Like _run_turn_async but first injects image/document blocks on the user message."""
-        from ..compaction import compact_messages, should_compact
         from ..messages import TextBlock
-        if should_compact(
-            self.session.model_messages,
-            model=getattr(self.session.provider, "model", ""),
-            usage_tokens=self.session.last_input_tokens,
-        ):
-            self.session.model_messages = await compact_messages(
-                self.session.model_messages,
-                self.session.provider,
-                session=self.session,
-            )
         # Append user message with media + text
         content = list(media_blocks) + [TextBlock(text=user_text)]
         self.session.append_message("user", content)
@@ -2271,12 +2263,30 @@ class OpenHApp:
     async def _ask_permission(self, tool_name: str, input_dict: dict[str, Any]) -> bool:
         if self._skip_permissions:
             return True
-        if (tool_name, "*") in self.session.always_allow:
+        rule_pattern = derive_rule_pattern(tool_name, input_dict)
+        if (tool_name, "*") in self.session.always_allow or (
+            tool_name, rule_pattern
+        ) in self.session.always_allow:
             return True
+        if (tool_name, "*") in self.session.always_deny or (
+            tool_name, rule_pattern
+        ) in self.session.always_deny:
+            return False
         decision = await self.permission_dialog.ask(tool_name, input_dict)
         if decision == "always":
-            self.session.always_allow.add((tool_name, "*"))
+            self.session.always_allow.add((tool_name, rule_pattern))
+            remember_persistent_rule(
+                "allow",
+                tool_name if rule_pattern == "*" else f"{tool_name}({rule_pattern})",
+            )
             return True
+        if decision == "deny_always":
+            self.session.always_deny.add((tool_name, rule_pattern))
+            remember_persistent_rule(
+                "deny",
+                tool_name if rule_pattern == "*" else f"{tool_name}({rule_pattern})",
+            )
+            return False
         return decision == "allow"
 
     def _switch_model(self) -> None:
@@ -2335,6 +2345,8 @@ class OpenHApp:
         self.session.model_messages.clear()
         self.session.read_files.clear()
         self.session.always_allow.clear()
+        self.session.always_deny.clear()
+        self.session.permission_denials.clear()
         self.session.total_input_tokens = 0
         self.session.total_output_tokens = 0
         self.session.total_cache_creation_input_tokens = 0
@@ -2588,6 +2600,8 @@ class OpenHApp:
         self.session.reset_model_messages()
         self.session.read_files.clear()
         self.session.always_allow.clear()
+        self.session.always_deny.clear()
+        self.session.permission_denials.clear()
         # Restore persisted state from metadata (includes __meta__ fields)
         self.session.total_input_tokens = metadata.get("total_input_tokens", 0)
         self.session.total_output_tokens = metadata.get("total_output_tokens", 0)

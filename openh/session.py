@@ -22,6 +22,9 @@ class AgentSession:
     tools: list["Tool"] = field(default_factory=list)
     read_files: set[str] = field(default_factory=set)
     always_allow: set[tuple[str, str]] = field(default_factory=set)
+    always_deny: set[tuple[str, str]] = field(default_factory=set)
+    pending_messages: list[str] = field(default_factory=list)
+    permission_denials: list[dict[str, str]] = field(default_factory=list)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cache_creation_input_tokens: int = 0
@@ -41,6 +44,11 @@ class AgentSession:
     prompt_override: str = ""     # per-session custom prompt text (empty = use preset)
     profile_id: str = "default"   # session profile ("default", "fnd", ...)
     shell_env: dict[str, str] = field(default_factory=dict)  # persisted env vars (CC pattern)
+    permission_mode: str = "default"
+    max_turns: int = 10
+    tool_result_budget: int = 50_000
+    max_budget_usd: float | None = None
+    stream_stall_retries: int = 2
     managed_agent_enabled: bool = False
     managed_executor_model: str = ""
     managed_executor_max_turns: int = 10
@@ -62,8 +70,15 @@ class AgentSession:
         self.provider = provider
 
     def __post_init__(self) -> None:
+        from .command_queue import CommandQueue
+        from .compaction import AutoCompactState
+
         if not self.model_messages:
             self.reset_model_messages()
+        if getattr(self, "command_queue", None) is None:
+            setattr(self, "command_queue", CommandQueue())
+        if getattr(self, "auto_compact_state", None) is None:
+            setattr(self, "auto_compact_state", AutoCompactState())
 
     def _copy_message(self, message: Message) -> Message:
         return Message(role=message.role, content=list(message.content))

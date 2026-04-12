@@ -21,5 +21,6 @@ class Provider(Protocol):
         messages: list[Message],
         system: str,
         tools: list[ToolSchema],
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
         ...

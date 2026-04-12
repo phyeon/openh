@@ -33,12 +33,13 @@ class AnthropicProvider:
         messages: list[Message],
         system: str,
         tools: list[ToolSchema],
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
         msg_dicts = [m.to_anthropic_dict() for m in messages]
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": msg_dicts,
-            "max_tokens": MAX_OUTPUT_TOKENS,
+            "max_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
         }
         kwargs["system"] = self._build_system_blocks(system)
         if tools:

@@ -15,14 +15,23 @@ import fnmatch
 import json
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
 from .cc_compat import OPENH_DIR
+from .tools.base import PermissionLevel
 
 SETTINGS_PATH = OPENH_DIR / "settings.json"
 
 Decision = Literal["allow", "ask", "deny", "none"]
+
+
+class PermissionMode(str, Enum):
+    DEFAULT = "default"
+    ACCEPT_EDITS = "accept_edits"
+    BYPASS_PERMISSIONS = "bypass_permissions"
+    PLAN = "plan"
 
 
 @dataclass
@@ -61,6 +70,159 @@ class PermissionRules:
             if _match_rule(pattern, tool_name, input_dict):
                 return "ask"
         return "none"
+
+
+def effective_permission_mode(session: Any) -> PermissionMode:
+    raw = str(getattr(session, "permission_mode", "") or "").strip().lower()
+    for mode in PermissionMode:
+        if raw == mode.value:
+            return mode
+    if bool(getattr(session, "plan_mode", False)):
+        return PermissionMode.PLAN
+    return PermissionMode.DEFAULT
+
+
+def derive_rule_pattern(tool_name: str, input_dict: dict[str, Any]) -> str:
+    if tool_name == "Bash":
+        command = str(input_dict.get("command") or "").strip()
+        if command:
+            return command + "*"
+    if tool_name in ("Read", "Write", "Edit", "NotebookEdit"):
+        path = str(
+            input_dict.get("file_path")
+            or input_dict.get("notebook_path")
+            or ""
+        ).strip()
+        if path:
+            return path
+    if tool_name in ("Glob", "Grep", "LS"):
+        path = str(input_dict.get("path") or input_dict.get("pattern") or "").strip()
+        if path:
+            return path
+    if tool_name in ("WebFetch", "WebSearch"):
+        value = str(input_dict.get("url") or input_dict.get("query") or "").strip()
+        if value:
+            return value
+    return "*"
+
+
+def session_override_matches(
+    overrides: set[tuple[str, str]],
+    tool_name: str,
+    input_dict: dict[str, Any],
+) -> bool:
+    for override_tool, override_pattern in overrides:
+        if override_tool != tool_name:
+            continue
+        if override_pattern == "*":
+            return True
+        rule = f"{tool_name}({override_pattern})"
+        if _match_rule(rule, tool_name, input_dict):
+            return True
+    return False
+
+
+def format_permission_reason(
+    tool_name: str,
+    input_dict: dict[str, Any],
+    level: PermissionLevel,
+) -> str:
+    if level == PermissionLevel.EXECUTE:
+        command = str(input_dict.get("command") or "").strip() or tool_name
+        return f"{tool_name} wants to run: `{command}`\nThis will execute a shell command."
+    if level == PermissionLevel.WRITE:
+        target = str(
+            input_dict.get("file_path")
+            or input_dict.get("notebook_path")
+            or input_dict.get("path")
+            or input_dict.get("name")
+            or tool_name
+        ).strip()
+        return f"{tool_name} wants to write to `{target}`\nThis will modify local state."
+    if level == PermissionLevel.DANGEROUS:
+        target = str(input_dict.get("command") or input_dict.get("path") or tool_name).strip()
+        return f"{tool_name} wants dangerous access: `{target}`\nThis may affect the system outside the workspace."
+    if level == PermissionLevel.READ_ONLY:
+        target = str(
+            input_dict.get("file_path")
+            or input_dict.get("path")
+            or input_dict.get("pattern")
+            or input_dict.get("url")
+            or input_dict.get("query")
+            or tool_name
+        ).strip()
+        return f"{tool_name} wants to read: `{target}`"
+    return ""
+
+
+def evaluate_permission(
+    session: Any,
+    rules: PermissionRules,
+    tool_name: str,
+    input_dict: dict[str, Any],
+    level: PermissionLevel,
+) -> tuple[Decision, str]:
+    mode = effective_permission_mode(session)
+
+    if mode == PermissionMode.BYPASS_PERMISSIONS:
+        return "allow", ""
+
+    always_deny = getattr(session, "always_deny", set())
+    if isinstance(always_deny, set) and session_override_matches(always_deny, tool_name, input_dict):
+        return "deny", "permission denied by remembered user preference"
+
+    rule_decision = rules.evaluate(tool_name, input_dict)
+    if rule_decision == "deny":
+        return "deny", f"permission denied by rule in {PermissionRules.__module__}"
+
+    always_allow = getattr(session, "always_allow", set())
+    if isinstance(always_allow, set) and session_override_matches(always_allow, tool_name, input_dict):
+        return "allow", ""
+
+    if rule_decision == "allow":
+        return "allow", ""
+    if rule_decision == "ask":
+        return "ask", format_permission_reason(tool_name, input_dict, level)
+
+    if mode == PermissionMode.ACCEPT_EDITS:
+        return "allow", ""
+
+    if level == PermissionLevel.FORBIDDEN:
+        return "deny", "this action is unconditionally forbidden"
+
+    if mode == PermissionMode.PLAN:
+        if level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY):
+            return "allow", ""
+        return "deny", "plan mode only allows read-only tools"
+
+    if level in (PermissionLevel.NONE, PermissionLevel.READ_ONLY):
+        return "allow", ""
+
+    return "ask", format_permission_reason(tool_name, input_dict, level)
+
+
+def remember_persistent_rule(action: Literal["allow", "deny"], rule: str) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    perms = data.get("permissions")
+    if not isinstance(perms, dict):
+        perms = {}
+        data["permissions"] = perms
+    bucket = perms.get(action)
+    if not isinstance(bucket, list):
+        bucket = []
+        perms[action] = bucket
+    if rule not in bucket:
+        bucket.append(rule)
+    SETTINGS_PATH.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 _RULE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)(?:\((.+)\))?$")

@@ -147,13 +147,14 @@ class OpenAIProvider:
         messages: list[Message],
         system: str,
         tools: list[ToolSchema],
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._to_openai_messages(messages, system),
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_completion_tokens": MAX_OUTPUT_TOKENS,
+            "max_completion_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
         }
         openai_tools = self._to_openai_tools(tools)
         if openai_tools is not None:
