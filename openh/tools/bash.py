@@ -168,10 +168,51 @@ async def _drain(shell: BackgroundShell) -> None:
         shell.done = True
 
 
+import re
+
+# ANSI escape sequences: CSI (ESC[...), OSC (ESC]...), and single ESC+char
+_ANSI_RE = re.compile(r"""
+    \x1b       # ESC
+    (?:
+        \[     # CSI
+        [0-9;?]*  # params
+        [A-Za-z]  # final byte
+    |
+        \]     # OSC
+        .*?    # payload
+        (?:\x07|\x1b\\)  # ST
+    |
+        [()][AB012]  # charset select
+    |
+        [=>Nno|~}]   # misc single-char
+    )
+""", re.VERBOSE)
+
+# Cursor movement / screen control that produce no visible content
+_JUNK_RE = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences and control chars (like Claude Code does)."""
+    text = _ANSI_RE.sub("", text)
+    text = _JUNK_RE.sub("", text)
+    # Collapse runs of blank lines
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text
+
+
 def _truncate(text: str) -> str:
+    text = _strip_ansi(text)
     if len(text) <= MAX_OUTPUT_BYTES:
         return text
-    return text[:MAX_OUTPUT_BYTES] + f"\n… (truncated, +{len(text) - MAX_OUTPUT_BYTES} bytes)"
+    # Keep first and last portions for context
+    head = MAX_OUTPUT_BYTES * 3 // 4
+    tail = MAX_OUTPUT_BYTES // 4
+    return (
+        text[:head]
+        + f"\n\n… ({len(text) - MAX_OUTPUT_BYTES:,} chars truncated) …\n\n"
+        + text[-tail:]
+    )
 
 
 class BashOutputTool(Tool):
