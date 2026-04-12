@@ -1,9 +1,11 @@
-"""Coordinator mode helpers mirrored from the public PB query layer."""
+"""Coordinator mode helpers mirrored from the public query layer."""
 from __future__ import annotations
 
 import os
 
-COORDINATOR_ENV_VAR = "CLAUDE_CODE_COORDINATOR_MODE"
+PRIMARY_COORDINATOR_ENV_VAR = "CLAUDE_CODE_COORDINATOR_MODE"
+LEGACY_COORDINATOR_ENV_VAR = "CLAURST_COORDINATOR_MODE"
+COORDINATOR_ENV_VAR = PRIMARY_COORDINATOR_ENV_VAR
 
 INTERNAL_COORDINATOR_TOOLS = (
     "Agent",
@@ -11,10 +13,27 @@ INTERNAL_COORDINATOR_TOOLS = (
     "TaskStop",
 )
 
+COORDINATOR_ONLY_TOOLS = INTERNAL_COORDINATOR_TOOLS
+
+
+def _truthy_env(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return bool(value and value not in {"0", "false"})
+
 
 def is_coordinator_mode() -> bool:
-    value = os.environ.get(COORDINATOR_ENV_VAR, "")
-    return bool(value and value not in {"0", "false"})
+    return _truthy_env(PRIMARY_COORDINATOR_ENV_VAR) or _truthy_env(
+        LEGACY_COORDINATOR_ENV_VAR
+    )
+
+
+def set_coordinator_mode(enabled: bool) -> None:
+    if enabled:
+        os.environ[PRIMARY_COORDINATOR_ENV_VAR] = "1"
+        os.environ[LEGACY_COORDINATOR_ENV_VAR] = "1"
+        return
+    os.environ.pop(PRIMARY_COORDINATOR_ENV_VAR, None)
+    os.environ.pop(LEGACY_COORDINATOR_ENV_VAR, None)
 
 
 def coordinator_system_prompt() -> str:
@@ -47,18 +66,29 @@ You are operating as an orchestrator for parallel worker agents.
 """.strip()
 
 
+def filter_worker_tool_names(available_tools: list[str]) -> list[str]:
+    seen: set[str] = set()
+    filtered: list[str] = []
+    for tool in available_tools:
+        name = str(tool or "").strip()
+        if not name or name in INTERNAL_COORDINATOR_TOOLS or name in seen:
+            continue
+        seen.add(name)
+        filtered.append(name)
+    return filtered
+
+
 def coordinator_user_context(
     available_tools: list[str],
     mcp_servers: list[str] | None = None,
 ) -> str:
-    tool_list = ", ".join(
-        tool
-        for tool in available_tools
-        if tool not in INTERNAL_COORDINATOR_TOOLS
-    )
-    mcp_servers = list(mcp_servers or [])
+    tool_list = ", ".join(filter_worker_tool_names(available_tools))
+    mcp_servers = sorted({str(name).strip() for name in (mcp_servers or []) if str(name).strip()})
     if mcp_servers:
-        return f"Available worker tools: {tool_list}\nConnected MCP servers: {', '.join(mcp_servers)}\n"
+        return (
+            f"Available worker tools: {tool_list}\n"
+            f"Connected MCP servers: {', '.join(mcp_servers)}\n"
+        )
     return f"Available worker tools: {tool_list}\n"
 
 
@@ -66,9 +96,7 @@ def match_session_mode(stored_coordinator: bool) -> str | None:
     current = is_coordinator_mode()
     if stored_coordinator == current:
         return None
+    set_coordinator_mode(stored_coordinator)
     if stored_coordinator:
-        os.environ[COORDINATOR_ENV_VAR] = "1"
         return "Entered coordinator mode to match resumed session."
-    else:
-        os.environ.pop(COORDINATOR_ENV_VAR, None)
-        return "Exited coordinator mode to match resumed session."
+    return "Exited coordinator mode to match resumed session."

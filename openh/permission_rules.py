@@ -133,11 +133,9 @@ class _ManagedPermissionHandler(PermissionHandler):
         self,
         session: Any,
         rules: PermissionRules,
-        fallback: PermissionHandler,
     ) -> None:
         self.session = session
         self.rules = rules
-        self.fallback = fallback
 
     def _evaluate_rules(self, request: PermissionRequest) -> tuple[Decision, str]:
         deny_patterns = list(self.rules.deny)
@@ -262,14 +260,20 @@ def build_permission_handler(
     rules: PermissionRules,
 ) -> PermissionHandler:
     mode = effective_permission_mode(session)
-    kind = str(getattr(session, "permission_handler_kind", "interactive") or "interactive")
+    forced_non_interactive = bool(getattr(session, "is_non_interactive", False))
+    kind = str(
+        getattr(
+            session,
+            "permission_handler_kind",
+            "auto" if forced_non_interactive else "interactive",
+        )
+        or ("auto" if forced_non_interactive else "interactive")
+    ).strip().lower()
+    if forced_non_interactive and kind == "interactive":
+        kind = "auto"
     if kind.strip().lower() == "auto":
-        return ManagedAutoPermissionHandler(session, rules, AutoPermissionHandler(mode))
-    return ManagedInteractivePermissionHandler(
-        session,
-        rules,
-        InteractivePermissionHandler(mode),
-    )
+        return ManagedAutoPermissionHandler(session, rules)
+    return ManagedInteractivePermissionHandler(session, rules)
 
 
 def derive_rule_pattern(tool_name: str, input_dict: dict[str, Any]) -> str:
@@ -429,4 +433,7 @@ def _match_rule(rule: str, tool_name: str, input_dict: dict[str, Any]) -> bool:
     if tool_name in ("Glob", "Grep"):
         path = (input_dict.get("path") or input_dict.get("pattern") or "")
         return fnmatch.fnmatchcase(path, rule_pattern)
+    if tool_name in ("WebFetch", "WebSearch"):
+        value = (input_dict.get("url") or input_dict.get("query") or "")
+        return fnmatch.fnmatchcase(value, rule_pattern)
     return False

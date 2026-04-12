@@ -23,7 +23,7 @@ Status legend:
 | `[~]` | `openh/compaction.py` | `crates/query/src/compact.rs` | Reviewed and ported major compact paths. Still needs continuous re-check for exact prompt text and failure semantics. |
 | `[~]` | `openh/auto_dream.py` | `crates/query/src/auto_dream.rs` | Reviewed and wired into turn-end flow. Layout/storage assumptions still differ from reference. |
 | `[~]` | `openh/command_queue.py` | `crates/query/src/command_queue.rs` | Reviewed. Core behavior exists, but full surrounding runtime surface still simpler. |
-| `[~]` | `openh/coordinator.py` | `crates/query/src/coordinator.rs`, `crates/query/src/managed_orchestrator.rs` | Reviewed. Prompt/runtime split improved, but coordinator surface is still not fully exact. |
+| `[~]` | `openh/coordinator.py` | `crates/query/src/coordinator.rs`, `crates/query/src/managed_orchestrator.rs` | Reviewed again this pass. Coordinator-mode env handling now accepts both the PB-style and fresh-style environment flags, and worker context generation now de-dupes/filter coordinator-only tools before building the prompt surface. Still not a full managed-orchestrator runtime port. |
 | `[~]` | `openh/session_memory.py` | `crates/query/src/session_memory.rs` | Reviewed. UUID cursor added. Extraction/storage logic still lighter than reference. |
 | `[~]` | `openh/cc_compat.py` | `crates/core/src/session_storage.rs`, `crates/core/src/sqlite_storage.rs` | Reviewed this pass. Transcript root now prefers public-style `projects/<base64url(cwd)>`, last-prompt/custom-title/tombstone entries are understood, tail metadata + writer parent-UUID recovery were added, and legacy `sessions/` paths still resolve for backwards compatibility. Still no SQLite parity, no typed transcript union, and local `__meta__` append-only state remains OpenH-specific. |
 | `[~]` | `openh/persistence.py` | `crates/core/src/lib.rs` persistent session helpers | Reviewed this pass. The legacy JSON session helpers now follow the public `sessions/*.json` shape more closely: UUID session IDs, `sessions_dir()/session_path()`, load/delete by ID, rename/tag/untag/search helpers, and broader message-content decoding. Still not the primary runtime path, and the stored session payload is much lighter than the public `ConversationSession` struct. |
@@ -46,7 +46,7 @@ Status legend:
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed again line-by-line. Manager-backed default behavior now matches public flow more closely: explicit deny/allow first, then mode fallback (`read -> allow`, `write/exec/network -> ask or deny`). Still not a literal `PermissionManager` port. |
+| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed again line-by-line. Manager-backed default behavior now matches public flow more closely: explicit deny/allow first, then mode fallback (`read -> allow`, `write/exec/network -> ask or deny`). Non-interactive sessions now force the auto handler even if they inherit `interactive`, and WebFetch/WebSearch rules now actually match URL/query patterns. Still not a literal `PermissionManager` port. |
 | `[~]` | `openh/tools/bash_classifier.py` | `crates/core/src/bash_classifier.rs` | Reviewed. Safety logic exists, but parity needs more detailed rule-by-rule pass. |
 | `[~]` | `openh/tools/bash.py` | `crates/tools/src/bash.rs`, `crates/tools/src/monitor_tool.rs` | Reviewed multiple times. Background monitor/notify paths added. Still not exact global registry architecture. |
 
@@ -106,15 +106,14 @@ These are the main open deltas after the reviewed files above:
 1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
 2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges and model-capability gating.
 3. Permission handler model is much closer, but still not a literal `PermissionManager` port.
-4. Plugin-discovered output styles are still incomplete.
-5. File-by-file audit is still missing for most of `flet_app/*`, plus a deeper follow-up on some provider and memory edges.
+4. File-by-file audit is still missing for parts of `flet_app/*`, plus a deeper follow-up on some provider and memory edges.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `providers/gemini.py` final capability-gating / thinking-config follow-up
-2. `permission_rules.py` exact-manager follow-up
-3. `coordinator.py` / managed runtime exact pass
-4. `flet_app/main.py`, `flet_app/widgets.py` one last visual/UX regression sweep
-5. `flet_app/permission_dialog.py` semantics follow-up
+1. `flet_app/main.py`, `flet_app/widgets.py` one last visual/UX regression sweep
+2. `flet_app/permission_dialog.py` semantics follow-up
+3. `providers/gemini.py` final capability-gating / thinking-config follow-up
+4. `permission_rules.py` literal `PermissionManager` follow-up if needed
+5. `coordinator.py` managed runtime exact pass
