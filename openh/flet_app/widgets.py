@@ -1588,10 +1588,19 @@ def input_area(
     )
 
     if busy and on_stop:
-        if has_text:
-            right_buttons.extend([send_btn, ft.Container(width=6), stop_btn])
-        else:
-            right_buttons.append(stop_btn)
+        dim_send = ft.Container(
+            content=ft.Icon(ft.Icons.ARROW_UPWARD, color=theme.TEXT_ON_ACCENT, size=18),
+            width=36,
+            height=36,
+            alignment=ft.Alignment(0, 0),
+            bgcolor=theme.ACCENT,
+            border_radius=12,
+            ink=True,
+            on_click=lambda e: on_send(),
+            tooltip="Send / queue steering (Enter)",
+            opacity=1.0 if has_text else 0.3,
+        )
+        right_buttons.extend([dim_send, ft.Container(width=6), stop_btn])
     else:
         right_buttons.append(send_btn)
 
@@ -1615,7 +1624,6 @@ def input_area(
             if len(preview) > 48:
                 preview = preview[:48].rstrip() + "..."
             chip_children: list[ft.Control] = [
-                ft.Icon(ft.Icons.SCHEDULE, color=theme.ACCENT, size=14),
                 ft.Text(
                     preview or "(queued)",
                     color=theme.TEXT_SECONDARY,
@@ -1646,10 +1654,9 @@ def input_area(
                         tight=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    bgcolor=theme.BG_ELEVATED,
-                    border=ft.border.all(1, theme.BORDER_SUBTLE),
-                    border_radius=theme.RADIUS_SM,
-                    padding=ft.padding.only(left=8, right=4, top=4, bottom=4),
+                    bgcolor=theme.ACCENT_FAINT,
+                    border_radius=12,
+                    padding=ft.padding.only(left=10, right=6, top=5, bottom=5),
                 )
             )
         box_children.append(
