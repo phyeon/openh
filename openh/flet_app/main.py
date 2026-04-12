@@ -1642,11 +1642,11 @@ class OpenHApp:
     def _on_key(self, e: ft.KeyboardEvent) -> None:
         if e.key == "Escape" and self._busy:
             self._stop_generation()
-        elif e.meta and e.key == "M":
+        elif (e.meta or e.ctrl) and e.key == "M":
             self._switch_model()
-        elif e.meta and e.key == "L":
+        elif (e.meta or e.ctrl) and e.key == "L":
             self._new_chat()
-        elif e.meta and e.key == "V":
+        elif (e.meta or e.ctrl) and e.key == "V":
             self.page.run_task(self._paste_image_async)
 
     async def _paste_image_async(self) -> None:
