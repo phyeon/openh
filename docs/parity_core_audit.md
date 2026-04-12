@@ -37,7 +37,7 @@ Status legend:
 | `[~]` | `openh/config.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Reviewed for dotenv/model/system prompt loading. Still not a full parity pass. |
 | `[~]` | `openh/messages.py` | `crates/core/src/lib.rs` | Reviewed. Message UUID added. Broader message type parity still needs continued audit. |
 | `[~]` | `openh/memory.py` | `crates/core/src/claudemd.rs`, `crates/core/src/memdir.rs` | Reviewed around AGENTS/CLAUDE memory loading. Still lighter than reference memory stack. |
-| `[ ]` | `openh/memdir.py` | `crates/core/src/memdir.rs` | Partial checks only. |
+| `[~]` | `openh/memdir.py` | `crates/core/src/memdir.rs` | Reviewed this pass. Recursive memory scanning, quick frontmatter parsing, MEMORY.md truncation, and index-only prompt injection now track the public memdir flow much more closely. Still does not expose the full public relevance-search helper surface. |
 | `[~]` | `openh/output_styles.py` | `crates/core/src/output_styles.rs` | Reviewed for runtime style resolution. Plugin discovery path still incomplete. |
 | `[ ]` | `openh/prompts.py` | `crates/core/src/prompt_history.rs` and command surfaces | Partial checks only. |
 | `[ ]` | `openh/settings.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Partial checks only. |
@@ -85,7 +85,7 @@ Status legend:
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
 | `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed around tool-call reconstruction, stop-reason handling, and error surface. Request failures now bubble as errors instead of transcript text, and assistant tool-call messages now use `content=null` plus a closer finish-reason map. |
 | `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed around tool-call reconstruction, usage, and error surface. Request failures/retries no longer emit transcript text, finish-reason mapping is closer to the public Google adapter, and tool-result name lookup now falls back from `call_*` ids. Runtime smoke still depends on local `google.genai` availability. |
-| `[ ]` | `openh/providers/__init__.py` | provider registry surfaces | Not yet fully audited. |
+| `[~]` | `openh/providers/__init__.py` | provider registry surfaces | Reviewed this pass. Provider imports are now consistently lazy and missing-SDK failures surface as stable runtime errors instead of import crashes. Still a much smaller registry than the public provider module tree. |
 
 ## 6. UI / Desktop Runtime
 
@@ -113,8 +113,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `memdir.py`
-2. `providers/__init__.py`
-3. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
-4. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
-5. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep
+1. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
+2. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
+3. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep
+4. `memory.py`
+5. `tools/memory_tools.py`
