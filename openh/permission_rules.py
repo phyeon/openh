@@ -1,13 +1,9 @@
-"""Permission rules — auto-allow / auto-deny based on tool name + input pattern.
+"""Permission rules and manager-backed evaluation.
 
-Stored in `~/.claude/settings.json` under the `permissions` key, same shape as
-Claude Code. Three lists: `allow`, `ask`, `deny`. Each rule is either:
-  - A bare tool name: `"Read"` → matches all Read calls
-  - `"Tool(pattern)"`: `"Bash(git diff:*)"` → matches Bash calls where the
-    command starts with `git diff`
-
-Deny wins over allow (deny checked first). If nothing matches, fall back to
-the tool's own `check_permissions()` decision.
+Public refs store persistent rules under `permission_rules` as serialized
+objects (`tool_name`, `path_pattern`, `action`). Older local builds also wrote
+legacy `permissions.allow/ask/deny` buckets. We read both, prefer the public
+shape, and keep legacy `ask` compatibility only as a fallback.
 """
 from __future__ import annotations
 
@@ -49,11 +45,32 @@ class PermissionRules:
             data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         except Exception:
             return cls(allow=[], ask=[], deny=[])
+        allow: list[str] = []
+        ask: list[str] = []
+        deny: list[str] = []
+
+        serialized_rules = data.get("permission_rules") or []
+        if isinstance(serialized_rules, list):
+            for entry in serialized_rules:
+                rule = _legacy_rule_from_serialized(entry)
+                if rule is None:
+                    continue
+                action, pattern = rule
+                if action == "allow":
+                    allow.append(pattern)
+                elif action == "deny":
+                    deny.append(pattern)
+
         perms = data.get("permissions") or {}
+        if not isinstance(perms, dict):
+            perms = {}
+        allow.extend(str(item) for item in (perms.get("allow") or []) if str(item).strip())
+        ask.extend(str(item) for item in (perms.get("ask") or []) if str(item).strip())
+        deny.extend(str(item) for item in (perms.get("deny") or []) if str(item).strip())
         return cls(
-            allow=list(perms.get("allow") or []),
-            ask=list(perms.get("ask") or []),
-            deny=list(perms.get("deny") or []),
+            allow=_dedupe_rules(allow),
+            ask=_dedupe_rules(ask),
+            deny=_dedupe_rules(deny),
         )
 
     def evaluate(self, tool_name: str, input_dict: dict[str, Any]) -> Decision:
@@ -414,16 +431,13 @@ def remember_persistent_rule(action: Literal["allow", "deny"], rule: str) -> Non
         data = {}
     if not isinstance(data, dict):
         data = {}
-    perms = data.get("permissions")
-    if not isinstance(perms, dict):
-        perms = {}
-        data["permissions"] = perms
-    bucket = perms.get(action)
-    if not isinstance(bucket, list):
-        bucket = []
-        perms[action] = bucket
-    if rule not in bucket:
-        bucket.append(rule)
+    serialized = data.get("permission_rules")
+    if not isinstance(serialized, list):
+        serialized = []
+        data["permission_rules"] = serialized
+    entry = _serialized_permission_rule(action, rule)
+    if entry is not None and entry not in serialized:
+        serialized.append(entry)
     SETTINGS_PATH.write_text(
         json.dumps(data, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -431,6 +445,63 @@ def remember_persistent_rule(action: Literal["allow", "deny"], rule: str) -> Non
 
 
 _RULE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)(?:\((.+)\))?$")
+
+
+def _dedupe_rules(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _legacy_rule_from_serialized(
+    entry: object,
+) -> tuple[Literal["allow", "deny"], str] | None:
+    if not isinstance(entry, dict):
+        return None
+    action = str(entry.get("action") or "").strip().lower()
+    if action not in {"allow", "deny"}:
+        return None
+    tool_name = str(entry.get("tool_name") or "").strip()
+    if not tool_name:
+        return None
+    path_pattern = str(entry.get("path_pattern") or "").strip()
+    if path_pattern:
+        return action, f"{tool_name}({path_pattern})"
+    return action, tool_name
+
+
+def _parse_rule_text(rule: str) -> tuple[str, str | None] | None:
+    matched = _RULE_RE.match(str(rule or "").strip())
+    if matched is None:
+        return None
+    tool_name = str(matched.group(1) or "").strip()
+    path_pattern = str(matched.group(2) or "").strip() or None
+    if not tool_name:
+        return None
+    return tool_name, path_pattern
+
+
+def _serialized_permission_rule(
+    action: Literal["allow", "deny"],
+    rule: str,
+) -> dict[str, str] | None:
+    parsed = _parse_rule_text(rule)
+    if parsed is None:
+        return None
+    tool_name, path_pattern = parsed
+    out = {
+        "tool_name": tool_name,
+        "action": action,
+    }
+    if path_pattern:
+        out["path_pattern"] = path_pattern
+    return out
 
 
 def _match_rule(rule: str, tool_name: str, input_dict: dict[str, Any]) -> bool:

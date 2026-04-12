@@ -17,6 +17,24 @@ MAX_MEMORY_FILES = 200
 FRONTMATTER_MAX_LINES = 30
 MAX_ENTRYPOINT_LINES = 200
 MAX_ENTRYPOINT_BYTES = 25_000
+def is_auto_memory_enabled(settings_enabled: bool | None = None) -> bool:
+    import os
+
+    disable_value = os.environ.get("CLAURST_DISABLE_AUTO_MEMORY")
+    if disable_value is not None:
+        if disable_value.strip().lower() in {"", "0", "false", "no", "off"}:
+            return True
+        return False
+
+    if os.environ.get("CLAURST_SIMPLE") is not None:
+        return False
+
+    if os.environ.get("CLAURST_REMOTE") is not None and os.environ.get(
+        "CLAURST_REMOTE_MEMORY_DIR"
+    ) is None:
+        return False
+
+    return True if settings_enabled is None else bool(settings_enabled)
 
 
 @dataclass
@@ -370,4 +388,6 @@ def build_memory_prompt_content(dir_path: Path) -> str:
 
 
 def build_context_block(cwd: str) -> str:
+    if not is_auto_memory_enabled():
+        return ""
     return build_memory_prompt_content(memory_dir(cwd))
