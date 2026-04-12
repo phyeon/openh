@@ -268,7 +268,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         ANTHROPIC_DEFAULT_MODEL,
         AUTO_COMPACT_THRESHOLD,
         OPENH_DIR,
-        DOTENV_PATH,
+        dotenv_paths,
         GEMINI_DEFAULT_MODEL,
         MAX_OUTPUT_TOKENS,
         SYSTEM_PROMPT_FILE,
@@ -296,7 +296,11 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         f"  OPENAI_API_KEY:    {'set' if has_openai else 'not set'}",
         f"  ANTHROPIC_API_KEY: {'set' if has_anth else 'not set'}",
         f"  GEMINI_API_KEY:    {'set' if has_gem else 'not set'}",
-        f"  .env file:         {DOTENV_PATH}  {'(exists)' if Path(DOTENV_PATH).exists() else '(missing)'}",
+        "  env files:         "
+        + ", ".join(
+            f"{path}  {'(exists)' if Path(path).exists() else '(missing)'}"
+            for path in dotenv_paths()
+        ),
         "",
         "## Runtime parameters",
         f"  max_output_tokens:    {MAX_OUTPUT_TOKENS}",

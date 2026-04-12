@@ -23,7 +23,7 @@ import flet as ft
 
 from ..agent import Agent
 from ..commands import CommandContext, CommandDispatcher
-from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
+from ..config import SYSTEM_PROMPT, dotenv_paths, load_config, load_system_prompt
 from ..coordinator import coordinator_user_context, is_coordinator_mode, match_session_mode
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
@@ -120,9 +120,11 @@ class OpenHApp:
             and not self.config.anthropic_api_key
             and not self.config.gemini_api_key
         ):
+            env_locations = ", ".join(str(path) for path in dotenv_paths())
             page.add(
                 widgets.error_panel(
-                    "No API keys found in .env. "
+                    "No API keys found. "
+                    f"Checked: {env_locations}. "
                     "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or GEMINI_API_KEY."
                 )
             )
@@ -1380,6 +1382,9 @@ class OpenHApp:
         old_openai = self.settings.openai_model
         old_anth = self.settings.anthropic_model
         old_gem = self.settings.gemini_model
+        old_openai_key = self.config.openai_api_key
+        old_anth_key = self.config.anthropic_api_key
+        old_gem_key = self.config.gemini_api_key
 
         self.settings = new_settings
         self._skip_permissions = new_settings.skip_permissions
@@ -1388,10 +1393,11 @@ class OpenHApp:
         )
 
         # Update Config + reload provider if model changed
+        env_config = load_config()
         new_config = type(self.config)(
-            openai_api_key=self.config.openai_api_key,
-            anthropic_api_key=self.config.anthropic_api_key,
-            gemini_api_key=self.config.gemini_api_key,
+            openai_api_key=env_config.openai_api_key,
+            anthropic_api_key=env_config.anthropic_api_key,
+            gemini_api_key=env_config.gemini_api_key,
             openai_model=new_settings.openai_model,
             anthropic_model=new_settings.anthropic_model,
             gemini_model=new_settings.gemini_model,
@@ -1405,6 +1411,9 @@ class OpenHApp:
             or (new_settings.active_provider == "openai" and new_settings.openai_model != old_openai)
             or (new_settings.active_provider == "anthropic" and new_settings.anthropic_model != old_anth)
             or (new_settings.active_provider == "gemini" and new_settings.gemini_model != old_gem)
+            or new_config.openai_api_key != old_openai_key
+            or new_config.anthropic_api_key != old_anth_key
+            or new_config.gemini_api_key != old_gem_key
         )
         if provider_needs_reload:
             try:

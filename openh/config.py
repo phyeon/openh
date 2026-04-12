@@ -8,8 +8,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from .system_prompt import DEFAULT_SYSTEM_PROMPT
 
-DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 OPENH_DIR = Path.home() / ".openh"
+REPO_DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+USER_DOTENV_PATH = OPENH_DIR / ".env"
+DOTENV_PATH = REPO_DOTENV_PATH
 SYSTEM_PROMPT_FILE = OPENH_DIR / "system_prompt.md"
 
 OPENAI_DEFAULT_MODEL = "gpt-5.4-mini"
@@ -39,9 +41,26 @@ def _get_nonempty(name: str) -> str | None:
     return value if value else None
 
 
+def dotenv_paths() -> tuple[Path, ...]:
+    ordered: list[Path] = []
+    for path in (USER_DOTENV_PATH, REPO_DOTENV_PATH):
+        if path not in ordered:
+            ordered.append(path)
+    return tuple(ordered)
+
+
+def load_env_files() -> tuple[Path, ...]:
+    loaded: list[Path] = []
+    for path in dotenv_paths():
+        if not path.exists():
+            continue
+        load_dotenv(path, override=True)
+        loaded.append(path)
+    return tuple(loaded)
+
+
 def load_config() -> Config:
-    if DOTENV_PATH.exists():
-        load_dotenv(DOTENV_PATH, override=True)
+    load_env_files()
     return Config(
         openai_api_key=_get_nonempty("OPENAI_API_KEY"),
         anthropic_api_key=_get_nonempty("ANTHROPIC_API_KEY"),

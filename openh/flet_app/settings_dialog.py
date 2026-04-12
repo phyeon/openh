@@ -2,7 +2,7 @@
 
 Sections:
   1. Models (dropdowns for OpenAI + Anthropic + Gemini)
-  2. API keys (masked fields; writes to /Users/hyeon/Projects/.env)
+  2. API keys (masked fields; reads repo .env + ~/.openh/.env)
   3. Tokens (max_output_tokens, auto_compact_threshold)
   4. Agents (subagent_parallel)
   5. System prompt (preset dropdown + editor + save-as)
@@ -14,6 +14,7 @@ from typing import Callable
 
 import flet as ft
 
+from ..config import DOTENV_PATH, USER_DOTENV_PATH, load_env_files
 from .. import output_styles, prompts, settings as settings_mod
 from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
 from ..session import normalize_usage_by_model
@@ -33,7 +34,8 @@ class SettingsDialog:
         self.on_save = on_save
         self._session = session
         self.dialog: ft.AlertDialog | None = None
-        self._env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+        self._env_path = DOTENV_PATH
+        self._env_read_paths = tuple(dict.fromkeys((DOTENV_PATH, USER_DOTENV_PATH)))
 
         # Prompt editor state
         self._presets = prompts.list_presets()
@@ -253,6 +255,7 @@ class SettingsDialog:
     def _tab_keys(self) -> ft.Control:
         import os
 
+        load_env_files()
         openai_key = os.environ.get("OPENAI_API_KEY", "")
         anth_key = os.environ.get("ANTHROPIC_API_KEY", "")
         gem_key = os.environ.get("GEMINI_API_KEY", "")
@@ -315,9 +318,11 @@ class SettingsDialog:
                 self._gem_key_field,
                 ft.Container(height=14),
                 _hint(
-                    f"Keys are written to {self._env_path}. "
-                    "Blank fields are ignored — only non-empty values overwrite. "
-                    "Restart the app after saving to pick up new keys."
+                    "Keys are read from "
+                    + ", ".join(str(path) for path in self._env_read_paths)
+                    + f". Saving writes to {self._env_path}. "
+                    + "Blank fields are ignored — only non-empty values overwrite, "
+                    + "and new keys apply right away."
                 ),
             ]
         )
@@ -1275,6 +1280,7 @@ class SettingsDialog:
         if not seen_gem and gem:
             out.append(f"GEMINI_API_KEY={gem}")
         self._env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        load_env_files()
 
 
 def _padded_column(children: list[ft.Control]) -> ft.Control:
