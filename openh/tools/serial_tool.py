@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 # Connection pool: port_path -> (serial.Serial, last_used_timestamp)
 _connection_pool: dict[str, tuple[Any, float]] = {}
@@ -47,6 +47,7 @@ def _is_esp32(port: str) -> bool:
 
 class SerialTool(Tool):
     name: ClassVar[str] = "Serial"
+    permission_level = PermissionLevel.DANGEROUS
     description: ClassVar[str] = (
         "Send a command to a serial device (ESP32, nRF52840) and capture the response. "
         "Auto-detects nRF CDC ports (slow write) vs ESP32 (normal write). "

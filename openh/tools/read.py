@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 MAX_BYTES = 1024 * 1024  # 1 MiB cap for safety
 DEFAULT_LIMIT = 2000
@@ -14,6 +14,7 @@ MAX_RESULT_CHARS = 40_000  # ~10K tokens, matches Claude Code harness truncation
 
 class ReadTool(Tool):
     name: ClassVar[str] = "Read"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Reads a file from the local filesystem. The file_path must be absolute. "
         "By default, it reads up to 2000 lines starting from the beginning of the file. "

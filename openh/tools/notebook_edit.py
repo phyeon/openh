@@ -6,11 +6,12 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class NotebookEditTool(Tool):
     name: ClassVar[str] = "NotebookEdit"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Completely replaces the contents of a specific cell in a Jupyter notebook (.ipynb file). "
         "The notebook_path must be absolute. The cell_number is 0-indexed. "

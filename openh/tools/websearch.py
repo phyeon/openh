@@ -4,13 +4,14 @@ from __future__ import annotations
 import re
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 MAX_RESULTS = 10
 
 
 class WebSearchTool(Tool):
     name: ClassVar[str] = "WebSearch"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Allows searching the web and using the results to inform responses. "
         "Provides up-to-date information for current events and recent data. "

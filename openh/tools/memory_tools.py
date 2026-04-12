@@ -5,11 +5,12 @@ from typing import Any, ClassVar
 
 from .. import memdir
 from ..memdir import VALID_TYPES, Memory
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class MemorySaveTool(Tool):
     name: ClassVar[str] = "MemorySave"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Store a long-term memory that will be auto-loaded at the start of "
         "every future session in this workspace. Use this when the user "
@@ -58,6 +59,7 @@ class MemorySaveTool(Tool):
 
 class MemoryListTool(Tool):
     name: ClassVar[str] = "MemoryList"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "List all stored memories for the current workspace with their names, "
         "types, and descriptions."
@@ -82,6 +84,7 @@ class MemoryListTool(Tool):
 
 class MemoryDeleteTool(Tool):
     name: ClassVar[str] = "MemoryDelete"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Delete a stored memory by name. Use when a memory is outdated or wrong."
     )

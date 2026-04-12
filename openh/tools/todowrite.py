@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..cc_compat import TODOS_DIR
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _VALID_STATUSES = {"pending", "in_progress", "completed"}
 
@@ -64,6 +64,7 @@ def _validate_transition(todo_id: str, old: str, new: str) -> str | None:
 
 class TodoWriteTool(Tool):
     name: ClassVar[str] = "TodoWrite"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Write and manage a structured todo list for the current session. "
         "Provide the complete list of todos each time; this replaces the prior list. "

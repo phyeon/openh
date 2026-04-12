@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600  # 10 minutes hard cap (CC pattern)
@@ -118,10 +118,13 @@ _SKIP_ENV = frozenset({
 
 class BashTool(Tool):
     name: ClassVar[str] = "Bash"
+    permission_level = PermissionLevel.EXECUTE
     description: ClassVar[str] = (
         "Executes a given bash command and returns its output. "
         "IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, grep, or find "
         "— use the dedicated Read, Edit, Glob, and Grep tools instead. "
+        "Never use it for destructive git commands, skipping hooks, or bypassing safety checks "
+        "unless the user explicitly asks. "
         "The working directory and environment variables persist between commands. "
         "Default timeout 2 minutes (max 10 minutes). "
         "Set run_in_background=true to start the command in the background. "
@@ -446,6 +449,7 @@ def register_completion_callback(shell_id: str, callback) -> None:
 
 class BashOutputTool(Tool):
     name: ClassVar[str] = "BashOutput"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Retrieve the latest stdout/stderr from a background shell started with "
         "`Bash(run_in_background=true)`. Returns only the new output since the "
@@ -501,6 +505,7 @@ class BashOutputTool(Tool):
 
 class KillShellTool(Tool):
     name: ClassVar[str] = "KillShell"
+    permission_level = PermissionLevel.EXECUTE
     description: ClassVar[str] = (
         "Terminate a background shell started by Bash. Kills the process "
         "and removes the shell from the registry."

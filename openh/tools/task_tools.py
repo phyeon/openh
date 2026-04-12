@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, ClassVar
 
 from .agent_tool import get_coordination_root
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _VALID_STATUSES = {
     "pending",
@@ -105,6 +105,7 @@ def _merge_unique(existing: list[str], new_items: Any) -> list[str]:
 
 class TaskCreateTool(Tool):
     name: ClassVar[str] = "TaskCreate"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Create a new task in the shared task board for delegated or multi-step work. "
         "Returns the new task ID."
@@ -153,6 +154,7 @@ class TaskCreateTool(Tool):
 
 class TaskGetTool(Tool):
     name: ClassVar[str] = "TaskGet"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = "Get full details of a task by ID."
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -181,6 +183,7 @@ class TaskGetTool(Tool):
 
 class TaskUpdateTool(Tool):
     name: ClassVar[str] = "TaskUpdate"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Update a task's properties such as status, owner, description, dependencies, or output."
     )
@@ -271,6 +274,7 @@ class TaskUpdateTool(Tool):
 
 class TaskListTool(Tool):
     name: ClassVar[str] = "TaskList"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = "List active tasks in the shared task board."
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -305,6 +309,7 @@ class TaskListTool(Tool):
 
 class TaskStopTool(Tool):
     name: ClassVar[str] = "TaskStop"
+    permission_level = PermissionLevel.EXECUTE
     description: ClassVar[str] = "Stop a running or in-progress task."
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -340,6 +345,7 @@ class TaskStopTool(Tool):
 
 class TaskOutputTool(Tool):
     name: ClassVar[str] = "TaskOutput"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = "Get the current output of a task."
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",

@@ -14,11 +14,12 @@ from .agent_tool import (
     queue_subagent_message,
     run_subagent_prompt,
 )
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class SendMessageTool(Tool):
     name = "SendMessage"
+    permission_level = PermissionLevel.NONE
     description = (
         "Send a message to another agent by name, or broadcast to all active agents with to='*'. "
         "Messages are queued for running agents and delivered in order. "

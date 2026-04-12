@@ -4,11 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class LSTool(Tool):
     name: ClassVar[str] = "LS"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "List the contents of a directory (files and subdirectories). "
         "Returns up to 200 entries sorted alphabetically, with a trailing / on directories. "

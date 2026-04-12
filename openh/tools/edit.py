@@ -4,11 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class EditTool(Tool):
     name: ClassVar[str] = "Edit"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Performs exact string replacements in files. "
         "You must use your Read tool at least once on a file before editing it. "

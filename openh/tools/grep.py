@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 MAX_OUTPUT_BYTES = 50_000
 DEFAULT_HEAD_LIMIT = 250
@@ -44,6 +44,7 @@ def _extensions_for_type(file_type: str) -> list[str]:
 
 class GrepTool(Tool):
     name: ClassVar[str] = "Grep"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "A powerful search tool built on ripgrep. Supports full regex syntax. "
         "Filter files with the glob parameter or the type parameter. "

@@ -14,7 +14,7 @@ from ..config import load_system_prompt
 from ..providers import get_provider
 from ..session import AgentSession
 from ..system_prompt import build_runtime_system_prompt, merge_base_prompt
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _COORDINATOR_ONLY_TOOLS = {"Agent"}
 _SEARCH_ONLY_TOOLS = {"LS", "Read", "Glob", "Grep", "ToolSearch", "WebFetch", "WebSearch", "Skill"}
@@ -278,6 +278,7 @@ async def _create_isolated_worktree(parent_cwd: str, agent_id: str) -> tuple[str
 
 class AgentTool(Tool):
     name: ClassVar[str] = "Agent"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Launch a new agent to handle complex, multi-step tasks autonomously. "
         "The agent runs its own agentic loop with access to tools and returns its final result. "

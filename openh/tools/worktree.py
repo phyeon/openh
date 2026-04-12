@@ -7,11 +7,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class EnterWorktreeTool(Tool):
     name = "EnterWorktree"
+    permission_level = PermissionLevel.WRITE
     description = (
         "Create an isolated git worktree so the agent works on a separate "
         "copy of the repo. Useful for parallel work or risky experiments."
@@ -56,6 +57,7 @@ class EnterWorktreeTool(Tool):
 
 class ExitWorktreeTool(Tool):
     name = "ExitWorktree"
+    permission_level = PermissionLevel.WRITE
     description = (
         "Exit the current worktree and optionally remove it."
     )

@@ -4,11 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class WriteTool(Tool):
     name: ClassVar[str] = "Write"
+    permission_level = PermissionLevel.WRITE
     description: ClassVar[str] = (
         "Writes a file to the local filesystem. This tool will overwrite the existing "
         "file if there is one at the provided path. If this is an existing file, you MUST "

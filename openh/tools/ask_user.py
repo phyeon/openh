@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class AskUserQuestionTool(Tool):
     name = "AskUserQuestion"
+    permission_level = PermissionLevel.NONE
     description = (
         "Ask the user a question with optional choices. Use this to gather "
         "preferences, clarify requirements, or get decisions on implementation "

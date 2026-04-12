@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class EnterPlanModeTool(Tool):
     name: ClassVar[str] = "EnterPlanMode"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Use this tool proactively when you're about to start a non-trivial implementation task. "
         "Getting user sign-off on your approach before writing code prevents wasted effort. "
@@ -35,6 +36,7 @@ class EnterPlanModeTool(Tool):
 
 class ExitPlanModeTool(Tool):
     name: ClassVar[str] = "ExitPlanMode"
+    permission_level = PermissionLevel.NONE
     description: ClassVar[str] = (
         "Exit plan mode and present your finalized plan to the user for approval. "
         "The plan is saved to ~/.claude/plans/<name>.md for future reference."
@@ -59,7 +61,7 @@ class ExitPlanModeTool(Tool):
     async def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
     ) -> PermissionDecision:
-        return PermissionDecision(behavior="ask")
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
         plan = (input.get("plan") or "").strip()

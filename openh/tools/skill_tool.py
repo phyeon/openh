@@ -4,11 +4,12 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from .. import skills
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
 class SkillTool(Tool):
     name: ClassVar[str] = "Skill"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Execute a skill by name. Use skill='list' to discover available skills. "
         "The expanded skill instructions are returned inline for you to follow."

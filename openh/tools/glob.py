@@ -4,13 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 MAX_RESULTS = 250
 
 
 class GlobTool(Tool):
     name: ClassVar[str] = "Glob"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Fast file pattern matching tool that works with any codebase size. "
         "Supports glob patterns like '**/*.js' or 'src/**/*.ts'. "

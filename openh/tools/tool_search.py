@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Agent": ("agent", "subagent", "delegate", "parallel", "worker", "background", "worktree"),
@@ -42,6 +42,7 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 class ToolSearchTool(Tool):
     name = "ToolSearch"
+    permission_level = PermissionLevel.NONE
     description = (
         "Search for available tools by name or keyword. "
         "Use 'select:ToolName' for direct lookup or provide keywords for fuzzy search. "

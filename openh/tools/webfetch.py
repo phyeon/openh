@@ -5,7 +5,7 @@ import asyncio
 import re
 from typing import Any, ClassVar
 
-from .base import PermissionDecision, Tool, ToolContext
+from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 MAX_BYTES = 1_000_000
 MAX_RESPONSE_CHARS = 60_000
@@ -13,6 +13,7 @@ MAX_RESPONSE_CHARS = 60_000
 
 class WebFetchTool(Tool):
     name: ClassVar[str] = "WebFetch"
+    permission_level = PermissionLevel.READ_ONLY
     description: ClassVar[str] = (
         "Fetches content from a specified URL. The URL must be fully-formed and valid. "
         "Fetches the URL content, converts HTML to markdown. "
