@@ -23,7 +23,7 @@ Status legend:
 | `[~]` | `openh/compaction.py` | `crates/query/src/compact.rs` | Reviewed and ported major compact paths. Still needs continuous re-check for exact prompt text and failure semantics. |
 | `[~]` | `openh/auto_dream.py` | `crates/query/src/auto_dream.rs` | Reviewed and wired into turn-end flow. Layout/storage assumptions still differ from reference. |
 | `[~]` | `openh/command_queue.py` | `crates/query/src/command_queue.rs` | Reviewed. Core behavior exists, but full surrounding runtime surface still simpler. |
-| `[~]` | `openh/coordinator.py` | `crates/query/src/coordinator.rs`, `crates/query/src/managed_orchestrator.rs` | Reviewed again this pass. Coordinator-mode env handling now accepts both the PB-style and fresh-style environment flags, worker context generation de-dupes/filter coordinator-only tools, and the local helper surface now includes public-style `AgentMode`, worker-tool filtering, and coordinator-only/banned tool constants. Still not a full managed-orchestrator runtime port. |
+| `[~]` | `openh/coordinator.py` | `crates/query/src/coordinator.rs`, `crates/query/src/managed_orchestrator.rs` | Reviewed again this pass. Coordinator-mode env handling now accepts both the PB-style and fresh-style environment flags, worker filtering now also honors `CLAURST_SIMPLE`, and the local helper surface now includes the public-style `ScratchpadGate`. Still not a full managed-orchestrator runtime port. |
 | `[~]` | `openh/session_memory.py` | `crates/query/src/session_memory.rs` | Reviewed. UUID cursor added. Extraction/storage logic still lighter than reference. |
 | `[~]` | `openh/cc_compat.py` | `crates/core/src/session_storage.rs`, `crates/core/src/sqlite_storage.rs` | Reviewed this pass. Transcript root now prefers public-style `projects/<base64url(cwd)>`, last-prompt/custom-title/tombstone entries are understood, tail metadata + writer parent-UUID recovery were added, and legacy `sessions/` paths still resolve for backwards compatibility. Still no SQLite parity, no typed transcript union, and local `__meta__` append-only state remains OpenH-specific. |
 | `[~]` | `openh/persistence.py` | `crates/core/src/lib.rs` persistent session helpers | Reviewed this pass. The legacy JSON session helpers now follow the public `sessions/*.json` shape more closely: UUID session IDs, `sessions_dir()/session_path()`, load/delete by ID, rename/tag/untag/search helpers, and broader message-content decoding. Still not the primary runtime path, and the stored session payload is much lighter than the public `ConversationSession` struct. |
@@ -46,7 +46,7 @@ Status legend:
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed again line-by-line. Manager-backed default behavior now matches public flow more closely: explicit deny/allow first, then mode fallback (`read -> allow`, `write/exec/network -> ask or deny`). Non-interactive sessions now force the auto handler even if they inherit `interactive`, WebFetch/WebSearch rules now actually match URL/query patterns, and the rule/default split now lives in an explicit local `PermissionManager` object instead of being scattered across handlers. Still not a literal Rust port. |
+| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed again line-by-line. Manager-backed default behavior now matches public flow more closely: explicit deny/allow first, then mode fallback (`read -> allow`, `write/exec/network -> ask or deny`). Non-interactive sessions now force the auto handler even if they inherit `interactive`, WebFetch/WebSearch rules now actually match URL/query patterns, coordinator-banned tools are denied at runtime for the manager session, and the rule/default split now lives in an explicit local `PermissionManager` object instead of being scattered across handlers. Still not a literal Rust port. |
 | `[~]` | `openh/tools/bash_classifier.py` | `crates/core/src/bash_classifier.rs` | Reviewed. Safety logic exists, but parity needs more detailed rule-by-rule pass. |
 | `[~]` | `openh/tools/bash.py` | `crates/tools/src/bash.rs`, `crates/tools/src/monitor_tool.rs` | Reviewed multiple times. Background monitor/notify paths added. Still not exact global registry architecture. |
 
@@ -56,7 +56,7 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/tools/base.py` | `crates/tools/src/lib.rs` | Reviewed. `resolve_path()` added to match public relative-path behavior. |
 | `[~]` | `openh/tools/__init__.py` | `crates/tools/src/lib.rs` | Reviewed. Legacy `LS` removed from default built-ins because public built-ins do not expose it. |
-| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, and worktree behavior checked. Background agents now use a one-shot poll helper surface, isolated worktrees are removed after both sync and background runs, and Gemini sub-agents now inherit the parent's resolved thinking budget/runtime option. Still not an exact Rust structure port. |
+| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, and worktree behavior checked. Background agents now use a one-shot poll helper surface, isolated worktrees are removed after both sync and background runs, Gemini sub-agents now inherit the parent's resolved thinking budget/runtime option, and worker tool selection now respects the coordinator/simple-mode filtering helpers instead of only dropping coordinator-only tools. Still not an exact Rust structure port. |
 | `[~]` | `openh/tools/send_message.py` | `crates/tools/src/send_message.rs` | Reviewed. Mailbox/broadcast/status surface exists, and `__status__` now consumes finished background-agent results through the helper flow instead of reusing stale task state. |
 | `[~]` | `openh/tools/task_tools.py` | `crates/tools/src/tasks.rs` | Reviewed. Task board added, but still lighter than public task model. |
 | `[~]` | `openh/tools/todowrite.py` | `crates/tools/src/todo_write.rs` | Reviewed. Input/status parity partially matched. |
@@ -103,7 +103,7 @@ These are not strict engine parity targets, but they still matter for behavior a
 
 These are the main open deltas after the reviewed files above:
 
-1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
+1. Coordinator / managed-orchestrator runtime still needs another exact pass beyond the current env/tool-filter parity helpers.
 2. Permission handler model is much closer, but still not a literal Rust `PermissionManager` port.
 3. Provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges and broader effort/thinking controls outside the current Gemini path.
 4. File-by-file audit is still missing for parts of `flet_app/*`, plus a deeper follow-up on some provider and memory edges.

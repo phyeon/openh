@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .cc_compat import OPENH_DIR
+from .coordinator import COORDINATOR_BANNED_TOOLS, is_coordinator_mode
 from .tools.base import PermissionLevel
 
 SETTINGS_PATH = OPENH_DIR / "settings.json"
@@ -133,6 +134,18 @@ class PermissionManager:
         self.session = session
         self.rules = rules
 
+    def _coordinator_ban(self, request: PermissionRequest) -> tuple[Decision, str]:
+        if not is_coordinator_mode():
+            return "none", ""
+        if bool(getattr(self.session, "is_non_interactive", False)):
+            return "none", ""
+        if request.tool_name not in COORDINATOR_BANNED_TOOLS:
+            return "none", ""
+        return (
+            "deny",
+            f"{request.tool_name} is disabled in coordinator mode; delegate this to a worker agent instead.",
+        )
+
     def _evaluate_rules(self, request: PermissionRequest) -> tuple[Decision, str]:
         deny_patterns = list(self.rules.deny)
         allow_patterns = list(self.rules.allow)
@@ -214,6 +227,9 @@ class PermissionManager:
     ) -> tuple[Decision, str]:
         if request.level == PermissionLevel.FORBIDDEN:
             return "deny", "this action is unconditionally forbidden"
+        coordinator_decision, coordinator_reason = self._coordinator_ban(request)
+        if coordinator_decision != "none":
+            return coordinator_decision, coordinator_reason
         rule_decision, reason = self._evaluate_rules(request)
         if rule_decision != "none":
             if rule_decision == "ask" and not interactive:

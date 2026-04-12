@@ -7,6 +7,7 @@ from enum import Enum
 PRIMARY_COORDINATOR_ENV_VAR = "CLAUDE_CODE_COORDINATOR_MODE"
 LEGACY_COORDINATOR_ENV_VAR = "CLAURST_COORDINATOR_MODE"
 COORDINATOR_ENV_VAR = PRIMARY_COORDINATOR_ENV_VAR
+SIMPLE_MODE_ENV_VAR = "CLAURST_SIMPLE"
 
 INTERNAL_COORDINATOR_TOOLS = (
     "Agent",
@@ -34,6 +35,10 @@ class AgentMode(str, Enum):
 def _truthy_env(name: str) -> bool:
     value = os.environ.get(name, "")
     return bool(value and value not in {"0", "false"})
+
+
+def is_simple_mode() -> bool:
+    return _truthy_env(SIMPLE_MODE_ENV_VAR)
 
 
 def is_coordinator_mode() -> bool:
@@ -91,11 +96,40 @@ def filter_tool_names_for_mode(
         name = str(tool or "").strip()
         if not name or name in seen:
             continue
-        if mode == AgentMode.WORKER and name in COORDINATOR_ONLY_TOOLS:
-            continue
+        if mode == AgentMode.WORKER:
+            if name in COORDINATOR_ONLY_TOOLS:
+                continue
+            if is_simple_mode() and name not in WORKER_SIMPLE_TOOLS:
+                continue
         seen.add(name)
         filtered.append(name)
     return filtered
+
+
+class ScratchpadGate:
+    def __init__(self, unlock_signal: str | None = None) -> None:
+        self.unlocked = False
+        self.unlock_signal = (unlock_signal or "").strip() or None
+
+    @classmethod
+    def with_signal(cls, signal: str) -> "ScratchpadGate":
+        return cls(signal)
+
+    def check(self, tool_name: str) -> bool:
+        if tool_name in {"Write", "FileWrite", "Edit", "FileEdit"}:
+            return self.unlocked
+        return True
+
+    def try_unlock(self, content: str) -> bool:
+        if self.unlocked:
+            return True
+        if self.unlock_signal and self.unlock_signal in (content or ""):
+            self.unlocked = True
+            return True
+        return False
+
+    def is_unlocked(self) -> bool:
+        return self.unlocked
 
 
 def filter_worker_tool_names(available_tools: list[str]) -> list[str]:

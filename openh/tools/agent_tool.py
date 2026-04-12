@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 
 from .. import prompts as prompts_mod
 from ..config import load_system_prompt
-from ..coordinator import INTERNAL_COORDINATOR_TOOLS
+from ..coordinator import AgentMode, INTERNAL_COORDINATOR_TOOLS, filter_tool_names_for_mode
 from ..providers import get_provider
 from ..session import AgentSession
 from ..system_prompt import build_runtime_system_prompt
@@ -568,7 +568,15 @@ class AgentTool(Tool):
             if not requested and mode == "explore" and tool.name not in _SEARCH_ONLY_TOOLS:
                 continue
             selected.append(tool)
-        return selected
+        if not selected:
+            return selected
+        filtered_names = set(
+            filter_tool_names_for_mode(
+                [tool.name for tool in selected],
+                AgentMode.WORKER,
+            )
+        )
+        return [tool for tool in selected if tool.name in filtered_names]
 
     @staticmethod
     def _resolve_provider(parent: AgentSession, model_spec: str) -> tuple[Any, Any]:
