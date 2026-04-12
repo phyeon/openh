@@ -163,10 +163,7 @@ class OpenAIProvider:
         try:
             stream = await self._client.chat.completions.create(**payload)
         except Exception as exc:  # noqa: BLE001
-            yield TextDelta(text=f"[openai error: {exc}]")
-            yield Usage(input_tokens=0, output_tokens=0)
-            yield MessageStop(stop_reason="error")
-            return
+            raise RuntimeError(f"OpenAI request failed: {exc}") from exc
 
         tool_buffers: dict[int, dict[str, Any]] = {}
         in_tokens = 0

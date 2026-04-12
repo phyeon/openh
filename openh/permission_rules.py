@@ -140,53 +140,111 @@ class _ManagedPermissionHandler(PermissionHandler):
         self.fallback = fallback
 
     def _evaluate_rules(self, request: PermissionRequest) -> tuple[Decision, str]:
-        always_deny = getattr(self.session, "always_deny", set())
-        if isinstance(always_deny, set) and session_override_matches(
-            always_deny,
-            request.tool_name,
-            request.input_dict,
-        ):
-            return "deny", "permission denied by remembered user preference"
+        deny_patterns = list(self.rules.deny)
+        allow_patterns = list(self.rules.allow)
+        ask_patterns = list(self.rules.ask)
 
-        rule_decision = self.rules.evaluate(request.tool_name, request.input_dict)
-        if rule_decision == "deny":
-            return "deny", f"permission denied by rule in {PermissionRules.__module__}"
+        always_deny = getattr(self.session, "always_deny", set())
+        if isinstance(always_deny, set):
+            for tool_name, pattern in always_deny:
+                deny_patterns.append(
+                    tool_name if pattern == "*" else f"{tool_name}({pattern})"
+                )
 
         always_allow = getattr(self.session, "always_allow", set())
-        if isinstance(always_allow, set) and session_override_matches(
-            always_allow,
-            request.tool_name,
-            request.input_dict,
-        ):
+        if isinstance(always_allow, set):
+            for tool_name, pattern in always_allow:
+                allow_patterns.append(
+                    tool_name if pattern == "*" else f"{tool_name}({pattern})"
+                )
+
+        deny_matched = any(
+            _match_rule(pattern, request.tool_name, request.input_dict)
+            for pattern in deny_patterns
+        )
+        if deny_matched:
+            return "deny", "permission denied by rule"
+
+        allow_matched = any(
+            _match_rule(pattern, request.tool_name, request.input_dict)
+            for pattern in allow_patterns
+        )
+        if allow_matched:
             return "allow", ""
 
-        if rule_decision == "allow":
-            return "allow", ""
-        if rule_decision == "ask":
+        ask_matched = any(
+            _match_rule(pattern, request.tool_name, request.input_dict)
+            for pattern in ask_patterns
+        )
+        if ask_matched:
             return "ask", format_permission_reason(
                 request.tool_name,
                 request.input_dict,
                 request.level,
             )
+
         return "none", ""
+
+    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
+        raise NotImplementedError
+
+    def _manager_default_decision(
+        self,
+        request: PermissionRequest,
+        *,
+        interactive: bool,
+    ) -> tuple[Decision, str]:
+        mode = effective_permission_mode(self.session)
+        if mode == PermissionMode.BYPASS_PERMISSIONS:
+            return "allow", ""
+        if mode == PermissionMode.ACCEPT_EDITS:
+            return "allow", ""
+        if mode == PermissionMode.PLAN:
+            if request.is_read_only:
+                return "allow", ""
+            return "deny", "plan mode only allows read-only tools"
+        if request.is_read_only:
+            return "allow", ""
+
+        reason = format_permission_reason(
+            request.tool_name,
+            request.input_dict,
+            request.level,
+        )
+        if interactive:
+            return "ask", reason
+        return "deny", reason
 
 
 class ManagedAutoPermissionHandler(_ManagedPermissionHandler):
     def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        if request.level == PermissionLevel.FORBIDDEN:
+            return "deny", "this action is unconditionally forbidden"
         rule_decision, reason = self._evaluate_rules(request)
-        if rule_decision == "ask":
-            return "deny", reason
         if rule_decision != "none":
+            if rule_decision == "ask":
+                return "deny", reason
             return rule_decision, reason
-        return self.fallback.check_permission(request)
+        default_decision, default_reason = self._default_decision(request)
+        if default_decision == "ask":
+            return "deny", default_reason
+        return default_decision, default_reason
+
+    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
+        return self._manager_default_decision(request, interactive=False)
 
 
 class ManagedInteractivePermissionHandler(_ManagedPermissionHandler):
     def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        if request.level == PermissionLevel.FORBIDDEN:
+            return "deny", "this action is unconditionally forbidden"
         rule_decision, reason = self._evaluate_rules(request)
         if rule_decision != "none":
             return rule_decision, reason
-        return self.fallback.check_permission(request)
+        return self._default_decision(request)
+
+    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
+        return self._manager_default_decision(request, interactive=True)
 
 
 def effective_permission_mode(session: Any) -> PermissionMode:
@@ -261,7 +319,7 @@ def format_permission_reason(
 ) -> str:
     if level == PermissionLevel.EXECUTE:
         command = str(input_dict.get("command") or "").strip() or tool_name
-        return f"{tool_name} wants to run: `{command}`\nThis will execute a shell command."
+        return f"Bash wants to run: `{command}`\nThis will execute a shell command."
     if level == PermissionLevel.WRITE:
         target = str(
             input_dict.get("file_path")
@@ -270,10 +328,27 @@ def format_permission_reason(
             or input_dict.get("name")
             or tool_name
         ).strip()
-        return f"{tool_name} wants to write to `{target}`\nThis will modify local state."
+        extra = "\nThis will write to the filesystem."
+        lowered = target.replace("\\", "/")
+        if "/etc/" in lowered:
+            extra = (
+                "\nModifying system files could affect network resolution and system configuration."
+            )
+        elif target.startswith("~/.") or "/." in lowered:
+            extra = "\nThis is a hidden/configuration file."
+        return f"{tool_name} wants to write to `{target}`{extra}"
     if level == PermissionLevel.DANGEROUS:
         target = str(input_dict.get("command") or input_dict.get("path") or tool_name).strip()
-        return f"{tool_name} wants dangerous access: `{target}`\nThis may affect the system outside the workspace."
+        return (
+            f"{tool_name} wants dangerous access: `{target}`\n"
+            "This may affect the system outside the workspace."
+        )
+    if tool_name == "WebFetch":
+        target = str(input_dict.get("url") or "").strip() or tool_name
+        return (
+            f"WebFetch wants to fetch: `{target}`\n"
+            "This will make an outbound HTTP request."
+        )
     if level == PermissionLevel.READ_ONLY:
         target = str(
             input_dict.get("file_path")

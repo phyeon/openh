@@ -151,17 +151,11 @@ class GeminiProvider:
             except Exception as exc:  # noqa: BLE001
                 err_str = str(exc)
                 if _attempt < 2 and ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "overloaded" in err_str.lower()):
-                    yield TextDelta(text=f"[retrying ({_attempt+1}/3)… {err_str[:80]}]\n")
                     await _aio.sleep(2 ** (_attempt + 1))
                     continue
-                yield TextDelta(text=f"[gemini error: {exc}]")
-                yield Usage(input_tokens=0, output_tokens=0)
-                yield MessageStop(stop_reason="error")
-                return
+                raise RuntimeError(f"Gemini request failed: {exc}") from exc
         if stream is None:
-            yield Usage(input_tokens=0, output_tokens=0)
-            yield MessageStop(stop_reason="error")
-            return
+            raise RuntimeError("Gemini request failed: stream could not be created")
 
         async for chunk in stream:
             usage = getattr(chunk, "usage_metadata", None)

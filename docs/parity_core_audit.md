@@ -46,7 +46,7 @@ Status legend:
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed. Interactive/auto/plan behavior moved closer to public handlers. Full handler-model parity still open. |
+| `[~]` | `openh/permission_rules.py` | `crates/core/src/lib.rs` | Reviewed again line-by-line. Manager-backed default behavior now matches public flow more closely: explicit deny/allow first, then mode fallback (`read -> allow`, `write/exec/network -> ask or deny`). Still not a literal `PermissionManager` port. |
 | `[~]` | `openh/tools/bash_classifier.py` | `crates/core/src/bash_classifier.rs` | Reviewed. Safety logic exists, but parity needs more detailed rule-by-rule pass. |
 | `[~]` | `openh/tools/bash.py` | `crates/tools/src/bash.rs`, `crates/tools/src/monitor_tool.rs` | Reviewed multiple times. Background monitor/notify paths added. Still not exact global registry architecture. |
 
@@ -83,8 +83,8 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
-| `[ ]` | `openh/providers/openai.py` | provider-specific runtime only | Partial checks only. |
-| `[ ]` | `openh/providers/gemini.py` | provider-specific runtime only | Partial checks only. |
+| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed around tool-call reconstruction, stop-reason handling, and error surface. Request failures now bubble as errors instead of transcript text. |
+| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed around tool-call reconstruction, usage, and error surface. Request failures/retries no longer emit transcript text. Runtime smoke still depends on local `google.genai` availability. |
 | `[ ]` | `openh/providers/__init__.py` | provider registry surfaces | Not yet fully audited. |
 
 ## 6. UI / Desktop Runtime
@@ -103,10 +103,10 @@ These are not strict engine parity targets, but they still matter for behavior a
 
 These are the main open deltas after the reviewed files above:
 
-1. Permission handler model still needs another exact pass against `crates/core/src/lib.rs`.
-2. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
-3. Background sub-agent surface is closer now, but still not identical to the public helper flow.
-4. OpenAI/Gemini provider behavior is still only partially audited.
+1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
+2. Background sub-agent surface is closer now, but still not identical to the public helper flow.
+3. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges.
+4. Permission handler model is much closer, but still not a literal `PermissionManager` port.
 5. Plugin-discovered output styles are still incomplete.
 6. File-by-file audit is still missing for `commands.py`, `cc_compat.py`, `persistence.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
 
@@ -114,8 +114,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `permission_rules.py` + public `crates/core/src/lib.rs` exact handler-model pass
-2. `tools/agent_tool.py` + `tools/send_message.py` + public background-helper flow
-3. `providers/openai.py`, `providers/gemini.py`
-4. `cc_compat.py` + `session_storage/sqlite_storage` public files
-5. `commands.py`, then `webfetch.py`, `websearch.py`, `worktree.py`
+1. `tools/agent_tool.py` + `tools/send_message.py` + public background-helper flow
+2. `cc_compat.py` + `session_storage/sqlite_storage` public files
+3. `commands.py`
+4. `webfetch.py`, `websearch.py`, `worktree.py`
+5. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
