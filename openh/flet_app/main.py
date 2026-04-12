@@ -1857,14 +1857,8 @@ class OpenHApp:
         pending_media = list(getattr(self, "_pending_media", None) or [])
         self._pending_media = []  # type: ignore[attr-defined]
         if self._busy:
-            # Queue steering turn + show faded bubble immediately
-            bubble = widgets.user_bubble(
-                text,
-                content_width=self._content_width,
-                queued=True,
-            )
-            self._append_to_messages(bubble)
-            self._queued_turns.append((text, pending_media, bubble))
+            # Queue steering turn (chip shown in input area only)
+            self._queued_turns.append((text, pending_media))
             self.input_field.value = ""
             self.input_field.update()
             self._refresh_top_bar(note="thinking…")
@@ -1924,13 +1918,6 @@ class OpenHApp:
             return
         queued_item = self._queued_turns.pop(0)
         text, media_blocks = queued_item[0], queued_item[1]
-        # Restore bubble opacity from faded to full
-        if len(queued_item) > 2 and queued_item[2] is not None:
-            queued_item[2].opacity = 1.0
-            try:
-                queued_item[2].update()
-            except Exception:
-                pass
         self._refresh_input()
         self._submit_turn(text, media_blocks)
 
