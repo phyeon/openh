@@ -13,6 +13,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import signal
+import subprocess as _subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar
@@ -51,13 +54,17 @@ class BackgroundShell:
     command: str
     description: str
     process: asyncio.subprocess.Process
+    timeout_secs: int = DEFAULT_TIMEOUT
+    started_at: float = field(default_factory=time.monotonic)
     stdout_buffer: list[str] = field(default_factory=list)
     stderr_buffer: list[str] = field(default_factory=list)
     stdout_offset: int = 0
     stderr_offset: int = 0
     done: bool = False
+    timed_out: bool = False
     exit_code: int | None = None
     _reader_task: "asyncio.Task | None" = None
+    _timeout_task: "asyncio.Task | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +107,53 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _subprocess_session_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        flags = getattr(_subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        return {"creationflags": flags} if flags else {}
+    return {"start_new_session": True}
+
+
+async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    if proc.returncode is not None:
+        return
+    try:
+        if os.name != "nt" and proc.pid:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                return
+            except Exception:
+                proc.kill()
+        else:
+            proc.kill()
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except Exception:
+        pass
+
+
+async def _enforce_background_timeout(shell: "BackgroundShell") -> None:
+    try:
+        await asyncio.sleep(shell.timeout_secs)
+    except asyncio.CancelledError:
+        return
+    if shell.done or shell.process.returncode is not None:
+        return
+    shell.timed_out = True
+    shell.stderr_buffer.append(
+        f"\n[openh] background shell timed out after {shell.timeout_secs}s\n"
+    )
+    await _kill_process_tree(shell.process)
+
+
 # Env vars to skip when persisting (CC pattern)
 _SKIP_ENV = frozenset({
     "SHLVL", "BASH_LINENO", "BASH_SOURCE", "FUNCNAME",
@@ -126,7 +180,7 @@ class BashTool(Tool):
         "Never use it for destructive git commands, skipping hooks, or bypassing safety checks "
         "unless the user explicitly asks. "
         "The working directory and environment variables persist between commands. "
-        "Default timeout 2 minutes (max 10 minutes). "
+        "Default timeout 2 minutes (max 10 minutes) for both foreground and background runs. "
         "Set run_in_background=true to start the command in the background. "
         "Always quote file paths that contain spaces."
     )
@@ -187,7 +241,7 @@ class BashTool(Tool):
         description = (input.get("description") or "").strip()
 
         if background:
-            return await self._run_background(command, description, ctx)
+            return await self._run_background(command, description, input, ctx)
         if bool(input.get("use_pty")):
             return await self._run_pty(command, input, ctx)
         return await self._run_foreground(command, input, ctx)
@@ -217,6 +271,7 @@ class BashTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
                 cwd=ctx.session.cwd,
+                **_subprocess_session_kwargs(),
             )
         except OSError as exc:
             return f"error: failed to start: {exc}"
@@ -226,11 +281,7 @@ class BashTool(Tool):
                 proc.communicate(), timeout=timeout
             )
         except asyncio.TimeoutError:
-            proc.kill()
-            try:
-                await proc.wait()
-            except Exception:
-                pass
+            await _kill_process_tree(proc)
             return f"error: command timed out after {timeout}s"
 
         raw_stdout = stdout_b.decode("utf-8", errors="replace")
@@ -311,6 +362,7 @@ class BashTool(Tool):
                 stdin=asyncio.subprocess.DEVNULL,
                 cwd=ctx.session.cwd,
                 close_fds=True,
+                **_subprocess_session_kwargs(),
             )
         except OSError as exc:
             os.close(master_fd)
@@ -342,11 +394,7 @@ class BashTool(Tool):
         try:
             await asyncio.wait_for(_read_pty(), timeout=timeout)
         except asyncio.TimeoutError:
-            proc.kill()
-            try:
-                await proc.wait()
-            except Exception:
-                pass
+            await _kill_process_tree(proc)
             os.close(master_fd)
             raw = b"".join(output_chunks).decode("utf-8", errors="replace")
             return f"error: command timed out after {timeout}s\n{_truncate(raw)}"
@@ -354,7 +402,7 @@ class BashTool(Tool):
         try:
             await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
-            proc.kill()
+            await _kill_process_tree(proc)
 
         os.close(master_fd)
         rc = proc.returncode or 0
@@ -371,8 +419,9 @@ class BashTool(Tool):
         return "\n".join(out_lines)
 
     async def _run_background(
-        self, command: str, description: str, ctx: ToolContext
+        self, command: str, description: str, input: dict[str, Any], ctx: ToolContext
     ) -> str:
+        timeout = min(int(input.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -380,6 +429,7 @@ class BashTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,
                 cwd=ctx.session.cwd,
+                **_subprocess_session_kwargs(),
             )
         except OSError as exc:
             return f"error: failed to start: {exc}"
@@ -390,12 +440,15 @@ class BashTool(Tool):
             command=command,
             description=description,
             process=proc,
+            timeout_secs=timeout,
         )
         _BG_SHELLS[shell_id] = shell
         shell._reader_task = asyncio.create_task(_drain(shell))
+        shell._timeout_task = asyncio.create_task(_enforce_background_timeout(shell))
         return (
             f"started background shell {shell_id}\n"
             f"command: {command}\n"
+            f"timeout: {timeout}s\n"
             "use BashOutput to poll, KillShell to stop."
         )
 
@@ -422,6 +475,8 @@ async def _drain(shell: BackgroundShell) -> None:
             _read_stream(proc.stderr, shell.stderr_buffer),
         )
     finally:
+        if shell._timeout_task is not None:
+            shell._timeout_task.cancel()
         shell.exit_code = await proc.wait()
         shell.done = True
         # notify_on_complete (CC pattern)
@@ -484,7 +539,7 @@ class BashOutputTool(Tool):
 
         parts = [
             f"shell_id: {shell_id}",
-            f"status: {'exited' if shell.done else 'running'}",
+            f"status: {'timed_out' if shell.timed_out else ('exited' if shell.done else 'running')}",
         ]
         if shell.done and shell.exit_code is not None:
             parts.append(f"exit_code: {shell.exit_code}")
@@ -532,8 +587,7 @@ class KillShellTool(Tool):
         if shell is None:
             return f"error: no shell with id {shell_id}"
         try:
-            shell.process.kill()
-            await shell.process.wait()
+            await _kill_process_tree(shell.process)
         except Exception as exc:  # noqa: BLE001
             return f"error: kill failed: {exc}"
         _BG_SHELLS.pop(shell_id, None)
