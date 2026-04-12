@@ -1020,7 +1020,7 @@ class OpenHApp:
     # ---- FnD ambient effects (particles + breathing gradient) ----
 
     def _build_fnd_ambient_layout(self, content: ft.Control) -> ft.Control:
-        """Wrap content in a restrained FnD ambient layout."""
+        """Wrap content in a quieter FnD ambient layout."""
         import random
 
         dark = theme.is_dark()
@@ -1028,55 +1028,55 @@ class OpenHApp:
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(-0.42, -0.62),
-                    radius=1.0 if dark else 0.88,
+                    center=ft.Alignment(-0.08, -0.72 if dark else -0.68),
+                    radius=0.94 if dark else 0.76,
                     colors=(
-                        ["#28ff6fa3", "#00000000"]
+                        ["#ff4f9c30", "#00000000"]
                         if dark
-                        else ["#2effb48a", "#00000000"]
+                        else ["#f8d7c580", "#00000000"]
                     ),
                 ),
-                opacity=0.24 if dark else 0.18,
+                opacity=0.32 if dark else 0.42,
                 animate_opacity=ft.Animation(4200, ft.AnimationCurve.EASE_IN_OUT),
             ),
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.46, -0.08),
-                    radius=0.86 if dark else 0.72,
+                    center=ft.Alignment(0.54, -0.06 if dark else 0.04),
+                    radius=0.78 if dark else 0.66,
                     colors=(
-                        ["#34ff4fa3", "#00000000"]
+                        ["#89d5ff22", "#00000000"]
                         if dark
-                        else ["#44ee6f97", "#00000000"]
+                        else ["#ffd7e288", "#00000000"]
                     ),
                 ),
-                opacity=0.28 if dark else 0.2,
+                opacity=0.28 if dark else 0.36,
                 animate_opacity=ft.Animation(5200, ft.AnimationCurve.EASE_IN_OUT),
             ),
             ft.Container(
                 expand=True,
-                gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.78, 0.52),
-                    radius=0.8 if dark else 0.68,
+                gradient=ft.LinearGradient(
+                    begin=ft.Alignment(-1, -1),
+                    end=ft.Alignment(1, 1),
                     colors=(
-                        ["#2479e8ff", "#00000000"]
+                        ["#00000000", "#20112f55", "#00000000"]
                         if dark
-                        else ["#28f4a261", "#00000000"]
+                        else ["#fff7ef", "#fff0ea", "#fbf5ef"]
                     ),
                 ),
-                opacity=0.22 if dark else 0.16,
+                opacity=0.22 if dark else 0.9,
                 animate_opacity=ft.Animation(6100, ft.AnimationCurve.EASE_IN_OUT),
             ),
         ]
 
         particle_colors = (
-            ["#ff4fa3", "#c48cff", "#79e8ff", "#6ff0b5"]
+            ["#ff4f9c", "#a18cff", "#8ed8ff"]
             if dark
-            else ["#ef7098", "#f7a56a", "#6ecaa8"]
+            else []
         )
         self._fnd_particles = []
         random.seed(42)
-        for _ in range(8 if dark else 5):
+        for _ in range(5 if dark else 0):
             sz = random.uniform(2, 4.2 if dark else 3.6)
             color = random.choice(particle_colors)
             p = ft.Container(
@@ -1084,7 +1084,7 @@ class OpenHApp:
                 height=sz,
                 border_radius=sz,
                 bgcolor=color,
-                opacity=random.uniform(0.08, 0.22 if dark else 0.16),
+                opacity=random.uniform(0.06, 0.14),
                 offset=ft.Offset(random.uniform(-0.9, 0.9), random.uniform(-0.9, 0.9)),
                 animate_opacity=ft.Animation(
                     int(random.uniform(2800, 6200)),
@@ -1096,29 +1096,33 @@ class OpenHApp:
                 ),
                 shadow=ft.BoxShadow(
                     color=color.replace("#", "#22"),
-                    blur_radius=sz * (3 if dark else 2),
+                    blur_radius=sz * 2.6,
                     spread_radius=1,
                 ),
             )
             self._fnd_particles.append(p)
 
-        particle_layer = ft.Container(content=ft.Stack(self._fnd_particles), expand=True)
+        particle_layer = ft.Container(
+            content=ft.Stack(self._fnd_particles),
+            expand=True,
+            visible=bool(self._fnd_particles),
+        )
         streak_layer = ft.Container(
             expand=True,
-            alignment=ft.Alignment(0.02 if dark else 0, -0.08 if dark else -0.02),
+            alignment=ft.Alignment(0.0, -0.18 if dark else -0.12),
             content=ft.Container(
-                width=420 if dark else 300,
-                height=1 if dark else 2,
+                width=260 if dark else 220,
+                height=1 if dark else 1,
                 gradient=ft.LinearGradient(
                     colors=(
-                        ["#00000000", "#80ff4fa3", "#8079e8ff", "#00000000"]
+                        ["#00000000", "#70ff5aa8", "#508ed8ff", "#00000000"]
                         if dark
-                        else ["#00000000", "#90ee6f97", "#70f7a56a", "#00000000"]
+                        else ["#00000000", "#90e9b9aa", "#70ef8aa8", "#00000000"]
                     ),
                     begin=ft.Alignment(-1, 0),
                     end=ft.Alignment(1, 0),
                 ),
-                opacity=0.48 if dark else 0.34,
+                opacity=0.42 if dark else 0.28,
             ),
         )
         grain_layer = ft.Container(
@@ -1126,7 +1130,7 @@ class OpenHApp:
             image=ft.DecorationImage(
                 src="grain.png",
                 repeat=ft.ImageRepeat.REPEAT,
-                opacity=0.03 if dark else 0.02,
+                opacity=0.018 if dark else 0.01,
             ),
         )
         content_layer = ft.Container(content=content, expand=True)
@@ -1162,9 +1166,13 @@ class OpenHApp:
                 for i, layer in enumerate(self._fnd_gradient_layers):
                     phase = (tick + i * 40) % 100
                     if phase < 50:
-                        layer.opacity = 0.28 + (phase / 50) * 0.45
+                        base = 0.18 if theme.is_dark() else 0.26
+                        spread = 0.18 if theme.is_dark() else 0.12
+                        layer.opacity = base + (phase / 50) * spread
                     else:
-                        layer.opacity = 0.73 - ((phase - 50) / 50) * 0.45
+                        base = 0.36 if theme.is_dark() else 0.38
+                        spread = 0.18 if theme.is_dark() else 0.12
+                        layer.opacity = base - ((phase - 50) / 50) * spread
                     try:
                         layer.update()
                     except Exception:
@@ -1176,14 +1184,14 @@ class OpenHApp:
                             rng.uniform(-0.9, 0.9),
                             rng.uniform(-0.9, 0.9),
                         )
-                        p.opacity = rng.uniform(0.1, 0.5 if theme.is_dark() else 0.34)
+                        p.opacity = rng.uniform(0.06, 0.18)
                         try:
                             p.update()
                         except Exception:
                             pass
 
                 tick += 1
-                await asyncio.sleep(1.35 if theme.is_dark() else 1.65)
+                await asyncio.sleep(1.7 if theme.is_dark() else 2.0)
         except Exception:
             pass
         finally:
@@ -2760,10 +2768,10 @@ class OpenHApp:
         if getattr(spec, "id", "") == "fnd":
             title_text = ft.Text(
                 spec.wordmark,
-                size=42 if _is_dark else 40,
+                size=48 if _is_dark else 44,
                 weight=ft.FontWeight.W_600,
                 font_family=theme.FONT_EM,
-                color="#ffffff" if _is_dark else color,
+                color="#f7f2ff" if _is_dark else "#e45b8f",
                 text_align=ft.TextAlign.CENTER,
             )
             title_display = (
@@ -2772,8 +2780,8 @@ class OpenHApp:
                     shader=ft.LinearGradient(
                         begin=ft.Alignment(-1, 0),
                         end=ft.Alignment(1, 0),
-                        colors=["#ff7abf", "#ff4fa3", "#c48cff", "#79e8ff"],
-                        stops=[0.0, 0.24, 0.62, 1.0],
+                        colors=["#ff82ba", "#ff4f9c", "#b28dff", "#8ed8ff"],
+                        stops=[0.0, 0.28, 0.7, 1.0],
                     ),
                     blend_mode=ft.BlendMode.SRC_IN,
                 )
@@ -2789,8 +2797,8 @@ class OpenHApp:
                 animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
                 shadow=(
                     ft.BoxShadow(
-                        color="#2cff4fa3",
-                        blur_radius=18,
+                        color="#ff4f9c30",
+                        blur_radius=12,
                         spread_radius=0,
                         offset=ft.Offset(0, 4),
                     )
