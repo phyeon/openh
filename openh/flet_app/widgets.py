@@ -284,6 +284,7 @@ def top_bar(
     busy_indicator: ft.Control | None = None,
 ) -> ft.Container:
     """Conversation title bar — claude.app style with sidebar toggle on the left."""
+    is_fnd = theme.is_fnd()
     toggle_btn = ft.IconButton(
         icon=ft.Icons.VIEW_SIDEBAR_OUTLINED,
         icon_color=theme.TEXT_SECONDARY,
@@ -347,6 +348,18 @@ def top_bar(
         ),
         padding=ft.padding.symmetric(horizontal=10, vertical=6),
         border_radius=theme.RADIUS_SM,
+        bgcolor=theme.BG_ELEVATED if is_fnd else None,
+        border=ft.border.all(1, theme.BORDER_FAINT) if is_fnd else None,
+        shadow=(
+            ft.BoxShadow(
+                color=(theme.ACCENT + "22") if not theme.is_dark() else "#2518ff55",
+                blur_radius=18 if theme.is_dark() else 12,
+                spread_radius=0,
+                offset=ft.Offset(0, 4),
+            )
+            if is_fnd
+            else None
+        ),
         ink=True,
         on_click=lambda e: on_rename(),
         tooltip="Click to rename conversation",
@@ -386,6 +399,7 @@ def top_bar(
                     width=120,
                     padding=ft.padding.symmetric(horizontal=8, vertical=4),
                     border_radius=theme.RADIUS_PILL,
+                    bgcolor=theme.BG_ELEVATED if is_fnd else None,
                     border=ft.border.all(1, theme.BORDER_FAINT),
                     on_click=lambda e: on_edit_prompt() if on_edit_prompt else None,
                     ink=True,
@@ -398,6 +412,16 @@ def top_bar(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         padding=ft.padding.symmetric(horizontal=14),
+        shadow=(
+            ft.BoxShadow(
+                color="#150f2d66" if theme.is_dark() else "#ffd7c966",
+                blur_radius=18,
+                spread_radius=0,
+                offset=ft.Offset(0, 6),
+            )
+            if is_fnd
+            else None
+        ),
         border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER_FAINT)),
     )
 
@@ -1346,6 +1370,125 @@ def welcome_screen(
 
     sub_text = subtitle or "What can I help you with?"
 
+    if theme.is_fnd():
+        dark = theme.is_dark()
+        badge_bg = "#151c2ccc" if dark else "#fff6f0"
+        badge_border = "#32405d" if dark else "#efc7bb"
+        badge_text = "AFTERGLOW TERMINAL" if dark else "JUICE LAB CONSOLE"
+        mood_text = (
+            "Neon spill, drifting dust, field notes after midnight."
+            if dark
+            else "Soft cream light, syrup glass, bright fruit sketches."
+        )
+        tag_defs = (
+            [("FIELD NOTES", theme.ACCENT), ("BLE / Wi-Fi", "#62e8ff"), ("LATE SHIFT", "#c491ff")]
+            if dark
+            else [("FRESH CUT", theme.ACCENT), ("CITRUS MILK", "#f4a261"), ("SOFT GLOW", "#67c7a5")]
+        )
+
+        tags: list[ft.Control] = []
+        for label, color in tag_defs:
+            tags.append(
+                ft.Container(
+                    content=ft.Text(
+                        label,
+                        color=color,
+                        size=10,
+                        weight=ft.FontWeight.W_600,
+                        font_family=theme.FONT_MONO,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=5),
+                    bgcolor=theme.BG_DEEPEST if dark else "#fffdfa",
+                    border=ft.border.all(1, color + ("44" if dark else "55")),
+                    border_radius=theme.RADIUS_PILL,
+                )
+            )
+
+        hero_card = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Text(
+                                    badge_text,
+                                    color=theme.TEXT_SECONDARY,
+                                    size=10,
+                                    weight=ft.FontWeight.W_700,
+                                    font_family=theme.FONT_MONO,
+                                ),
+                                ft.Container(expand=True),
+                                ft.Text(
+                                    "FND://ACTIVE",
+                                    color=theme.ACCENT,
+                                    size=10,
+                                    weight=ft.FontWeight.W_700,
+                                    font_family=theme.FONT_MONO,
+                                ),
+                            ],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=ft.padding.only(bottom=8),
+                    ),
+                    wordmark or ft.Text(
+                        "Fruits & Dessert",
+                        color=accent_color or theme.ACCENT,
+                        size=38,
+                        weight=ft.FontWeight.W_600,
+                        text_align=ft.TextAlign.CENTER,
+                        font_family=theme.FONT_EM,
+                    ),
+                    ft.Text(
+                        sub_text,
+                        color=theme.TEXT_PRIMARY,
+                        size=16,
+                        text_align=ft.TextAlign.CENTER,
+                        weight=ft.FontWeight.W_500,
+                    ),
+                    ft.Text(
+                        mood_text,
+                        color=theme.TEXT_SECONDARY,
+                        size=12,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(height=6),
+                    ft.Row(
+                        tags,
+                        wrap=True,
+                        spacing=8,
+                        run_spacing=8,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                    ),
+                    cwd_row,
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+                tight=True,
+            ),
+            padding=ft.padding.only(left=26, right=26, top=22, bottom=22),
+            bgcolor=badge_bg,
+            border=ft.border.all(1, badge_border),
+            border_radius=22,
+            shadow=ft.BoxShadow(
+                color="#1a153866" if dark else "#ffddcc88",
+                blur_radius=36 if dark else 24,
+                spread_radius=0,
+                offset=ft.Offset(0, 12),
+            ),
+        )
+
+        return ft.Container(
+            content=ft.Column(
+                [hero_card],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            alignment=ft.Alignment(0, 0),
+            padding=ft.padding.only(left=20, right=20, top=88, bottom=36),
+            expand=True,
+        )
+
     children: list[ft.Control] = [
         wordmark or ft.Text(
             "O p e n H",
@@ -1531,6 +1674,9 @@ def input_area(
       │ [+]  [⚠ perms v]        [model v]  [↑]      │
       └─────────────────────────────────────────────┘
     """
+    is_fnd = theme.is_fnd()
+    dark_fnd = is_fnd and theme.is_dark()
+
     attach_btn = ft.IconButton(
         icon=ft.Icons.ADD,
         icon_color=theme.TEXT_SECONDARY,
@@ -1569,6 +1715,16 @@ def input_area(
         alignment=ft.Alignment(0, 0),
         bgcolor=theme.ACCENT,
         border_radius=12,
+        shadow=(
+            ft.BoxShadow(
+                color="#ff4fa366" if dark_fnd else "#ffb2c266",
+                blur_radius=16,
+                spread_radius=1,
+                offset=ft.Offset(0, 4),
+            )
+            if is_fnd
+            else None
+        ),
         ink=True,
         on_click=lambda e: on_send(),
         tooltip="Send / queue steering (Enter)",
@@ -1596,6 +1752,16 @@ def input_area(
                 alignment=ft.Alignment(0, 0),
                 bgcolor=theme.ACCENT,
                 border_radius=12,
+                shadow=(
+                    ft.BoxShadow(
+                        color="#ff4fa366" if dark_fnd else "#ffb2c266",
+                        blur_radius=16,
+                        spread_radius=1,
+                        offset=ft.Offset(0, 4),
+                    )
+                    if is_fnd
+                    else None
+                ),
                 ink=True,
                 on_click=lambda e: on_send(),
                 tooltip="Send / queue steering (Enter)",
@@ -1746,10 +1912,20 @@ def input_area(
             spacing=0,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
-        bgcolor=theme.BG_DEEPEST,
+        bgcolor=("#0b0f19f2" if dark_fnd else ("#fff8f3" if is_fnd else theme.BG_DEEPEST)),
         border=ft.border.all(1, theme.BORDER_SUBTLE),
         border_radius=theme.RADIUS_LG,
         padding=ft.padding.only(left=14, right=10, top=10, bottom=10),
+        shadow=(
+            ft.BoxShadow(
+                color="#1a153e88" if dark_fnd else "#ffd9cb88",
+                blur_radius=28 if dark_fnd else 18,
+                spread_radius=0,
+                offset=ft.Offset(0, 8),
+            )
+            if is_fnd
+            else None
+        ),
     )
 
     return ft.Container(
