@@ -782,11 +782,13 @@ def user_bubble(
     msg_index: int = -1,
     content_width: int | None = None,
     queued: bool = False,
+    images: list | None = None,
 ) -> ft.Container:
     """User message: right-aligned, rounded warm box. Edit icon on hover.
 
     When queued=True, the bubble is rendered at reduced opacity (steering message
     waiting to be sent). Call set_queued_opacity(container, 1.0) to restore.
+    ``images`` is a list of (base64_data, media_type) tuples for inline previews.
     """
     edit_btn = ft.IconButton(
         icon=ft.Icons.EDIT_OUTLINED,
@@ -809,17 +811,41 @@ def user_bubble(
         edit_btn.opacity = 0
         edit_btn.update()
 
+    bubble_children: list[ft.Control] = []
+    # Image thumbnails
+    if images:
+        img_row: list[ft.Control] = []
+        for b64data, media_type in images:
+            mime = media_type or "image/png"
+            data_uri = f"data:{mime};base64,{b64data[:300000]}"
+            img_row.append(
+                ft.Container(
+                    content=ft.Image(src=data_uri, width=160, height=120, fit="cover"),
+                    width=160,
+                    height=120,
+                    border_radius=8,
+                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                )
+            )
+        bubble_children.append(
+            ft.Row(img_row, spacing=6, wrap=True, tight=True)
+        )
+    if text.strip():
+        bubble_children.append(
+            ft.Text(
+                text,
+                color=theme.TEXT_PRIMARY,
+                size=theme.FONT_SIZE,
+                selectable=True,
+                no_wrap=False,
+                overflow=ft.TextOverflow.VISIBLE,
+                font_family=theme.FONT_SANS,
+                font_family_fallback=getattr(theme, "FONT_SANS_FALLBACK", None),
+            )
+        )
+
     bubble = ft.Container(
-        content=ft.Text(
-            text,
-            color=theme.TEXT_PRIMARY,
-            size=theme.FONT_SIZE,
-            selectable=True,
-            no_wrap=False,
-            overflow=ft.TextOverflow.VISIBLE,
-            font_family=theme.FONT_SANS,
-            font_family_fallback=getattr(theme, "FONT_SANS_FALLBACK", None),
-        ),
+        content=ft.Column(bubble_children, spacing=8, tight=True) if len(bubble_children) > 1 else (bubble_children[0] if bubble_children else ft.Container()),
         bgcolor=theme.BG_ELEVATED,
         padding=ft.padding.symmetric(horizontal=16, vertical=12),
         border_radius=theme.RADIUS_LG,
