@@ -51,33 +51,22 @@ def sidebar(
 ) -> ft.Container:
     """Left navigation rail with [+ New chat], grouped session list."""
 
-    # Profile이 활성이면 아이콘을 프로필 이모지로 교체
-    if active_profile is not None:
-        _icon_content = ft.Text(
-            active_profile.icon,
-            size=18,
-        )
-        new_chat_btn = ft.Container(
-            content=_icon_content,
-            width=36, height=36,
-            border_radius=18,
-            alignment=ft.Alignment(0, 0),
-            tooltip=f"{active_profile.display_name} (click for new chat)",
-            on_click=lambda e: on_new_chat(),
-            ink=True,
-        )
-    else:
-        new_chat_btn = ft.IconButton(
-            icon=ft.Icons.EDIT_SQUARE,
-            icon_color=theme.TEXT_PRIMARY,
-            icon_size=18,
-            tooltip="New chat",
-            on_click=lambda e: on_new_chat(),
-            style=ft.ButtonStyle(
-                shape=ft.CircleBorder(),
-                padding=ft.padding.all(8),
-            ),
-        )
+    active_accent = getattr(active_profile, "accent_color", "") if active_profile is not None else ""
+    new_chat_btn = ft.IconButton(
+        icon=ft.Icons.EDIT_SQUARE,
+        icon_color=active_accent or theme.TEXT_PRIMARY,
+        icon_size=18,
+        tooltip=(
+            f"New chat ({active_profile.display_name})"
+            if active_profile is not None
+            else "New chat"
+        ),
+        on_click=lambda e: on_new_chat(),
+        style=ft.ButtonStyle(
+            shape=ft.CircleBorder(),
+            padding=ft.padding.all(8),
+        ),
+    )
 
     def group_label(text: str) -> ft.Container:
         return ft.Container(
@@ -209,39 +198,6 @@ def sidebar(
                 if hidden and not show_hidden:
                     continue
                 body_children.append(session_item(sid, title, project, starred, hidden))
-
-    # Profile buttons — each gets a distinct styled button
-    profile_buttons: list[ft.Control] = []
-    if profiles and on_new_profile:
-        for prof in profiles:
-            _ac = prof.accent_color or theme.ACCENT
-            profile_buttons.append(
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Text(prof.icon, size=16),
-                            ft.Text(
-                                prof.display_name,
-                                color=_ac,
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                                max_lines=1,
-                                expand=True,
-                            ),
-                        ],
-                        spacing=8,
-                        tight=True,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=ft.padding.only(left=14, right=14, top=7, bottom=7),
-                    border_radius=theme.RADIUS_SM,
-                    border=ft.border.all(1, _ac + "40"),
-                    on_click=lambda e, pid=prof.id: on_new_profile(pid),
-                    ink=True,
-                    margin=ft.margin.symmetric(horizontal=8, vertical=2),
-                )
-            )
 
     top_section = [
         ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
@@ -1426,62 +1382,105 @@ def welcome_screen(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=ft.padding.symmetric(horizontal=14, vertical=10),
-            border_radius=24,
+            border_radius=26 if dark else 18,
             border=ft.border.all(1, theme.BORDER_SUBTLE),
-            bgcolor="#0b1020c8" if dark else "#fffdfa",
+            bgcolor="#0b1020d6" if dark else "#fff6ef",
         ) if cwd else ft.Container()
 
-        return ft.Container(
+        if dark:
+            return ft.Container(
+                content=ft.Column(
+                    [
+                        wordmark or ft.Text(
+                            "Fruits & Dessert",
+                            color=accent_color or theme.ACCENT,
+                            size=42,
+                            weight=ft.FontWeight.W_600,
+                            text_align=ft.TextAlign.CENTER,
+                            font_family=theme.FONT_EM,
+                        ),
+                        ft.Text(
+                            "night shift notebook",
+                            color=theme.TEXT_TERTIARY,
+                            size=11,
+                            text_align=ft.TextAlign.CENTER,
+                            weight=ft.FontWeight.W_600,
+                            font_family=theme.FONT_MONO,
+                        ),
+                        ft.Text(
+                            sub_text,
+                            color=theme.TEXT_PRIMARY,
+                            size=15,
+                            text_align=ft.TextAlign.CENTER,
+                            weight=ft.FontWeight.W_600,
+                            font_family=theme.FONT_SANS,
+                        ),
+                        workspace,
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=16,
+                ),
+                alignment=ft.Alignment(0, 0),
+                padding=ft.padding.only(left=28, right=28, top=104, bottom=36),
+                expand=True,
+            )
+
+        editorial_card = ft.Container(
             content=ft.Column(
                 [
+                    ft.Text(
+                        "Patisserie Notebook",
+                        color=theme.TEXT_TERTIARY,
+                        size=11,
+                        weight=ft.FontWeight.W_700,
+                        text_align=ft.TextAlign.CENTER,
+                        font_family=theme.FONT_SANS,
+                    ),
                     wordmark or ft.Text(
                         "Fruits & Dessert",
                         color=accent_color or theme.ACCENT,
-                        size=40 if dark else 38,
+                        size=40,
                         weight=ft.FontWeight.W_600,
                         text_align=ft.TextAlign.CENTER,
                         font_family=theme.FONT_EM,
-                    ),
-                    ft.Text(
-                        (
-                            "ESP32 · nRF52840 · Pi5 · RTL8812BU"
-                            if dark
-                            else "strawberry cream · citrus peel · mint hush"
-                        ),
-                        color=theme.TEXT_TERTIARY if dark else theme.ACCENT,
-                        size=11 if dark else 12,
-                        text_align=ft.TextAlign.CENTER,
-                        weight=ft.FontWeight.W_600,
-                        font_family=theme.FONT_MONO if dark else theme.FONT_SANS,
                     ),
                     ft.Text(
                         sub_text,
                         color=theme.TEXT_PRIMARY,
                         size=15,
                         text_align=ft.TextAlign.CENTER,
-                        weight=ft.FontWeight.W_700 if dark else ft.FontWeight.W_600,
-                        font_family=theme.FONT_MONO if dark else theme.FONT_SANS,
+                        font_family=theme.FONT_EM,
+                        italic=True,
                     ),
-                    ft.Text(
-                        (
-                            "Neon hush, radio drift, and a cleaner kind of signal."
-                            if dark
-                            else "Soft fruit, cream paper, and a slower kind of signal."
-                        ),
-                        color=theme.TEXT_SECONDARY,
-                        size=13,
-                        text_align=ft.TextAlign.CENTER,
-                        italic=not dark,
-                        font_family=theme.FONT_EM if not dark else None,
-                    ),
+                ],
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.symmetric(horizontal=28, vertical=24),
+            border_radius=28,
+            bgcolor="#fffaf4",
+            border=ft.border.all(1, "#eedfd2"),
+            shadow=ft.BoxShadow(
+                color="#e4c5ad33",
+                blur_radius=18,
+                spread_radius=0,
+                offset=ft.Offset(0, 8),
+            ),
+        )
+
+        return ft.Container(
+            content=ft.Column(
+                [
+                    editorial_card,
                     workspace,
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 alignment=ft.MainAxisAlignment.CENTER,
-                spacing=16 if dark else 14,
+                spacing=18,
             ),
             alignment=ft.Alignment(0, 0),
-            padding=ft.padding.only(left=28, right=28, top=96 if dark else 86, bottom=36),
+            padding=ft.padding.only(left=32, right=32, top=92, bottom=36),
             expand=True,
         )
 

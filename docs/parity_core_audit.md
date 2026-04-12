@@ -93,8 +93,8 @@ These are not strict engine parity targets, but they still matter for behavior a
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[ ]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Many spot checks and fixes done, but no full line-by-line audit of the whole file yet. |
-| `[ ]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Many iterative fixes done, but still not fully audited line-by-line. |
+| `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed this pass for UI hot paths: top bar refresh, welcome/profile welcome flow, busy/input state, session switching, and theme rebuild. FnD welcome wordmark was simplified to remove oversized decorative layers. Still not a full file-wide audit. |
+| `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, and the sidebar new-chat button no longer swaps into a decorative emoji object. Still not a full file-wide audit. |
 | `[ ]` | `openh/flet_app/theme.py` | none | Local design system, not a direct public parity target. |
 | `[ ]` | `openh/flet_app/settings_dialog.py` | command/settings surfaces | Partial checks only. |
 | `[ ]` | `openh/flet_app/permission_dialog.py` | TUI permission dialog surfaces | Not fully audited. |
@@ -113,8 +113,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
-2. `memdir.py`
-3. `providers/__init__.py`
-4. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
-5. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
+1. `memdir.py`
+2. `providers/__init__.py`
+3. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
+4. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
+5. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep

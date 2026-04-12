@@ -2660,7 +2660,7 @@ class OpenHApp:
 
             title_text = ft.Text(
                 spec.wordmark,
-                size=46 if _is_dark else 44,
+                size=44 if _is_dark else 42,
                 weight=ft.FontWeight.W_600,
                 font_family=theme.FONT_EM,
                 color="#ffffff" if _is_dark else color,
@@ -2682,58 +2682,28 @@ class OpenHApp:
             )
 
             title_host = ft.Container(
-                content=ft.Stack(
-                    [
-                        ft.Container(
-                            width=380,
-                            height=96,
-                            gradient=ft.RadialGradient(
-                                center=ft.Alignment(0, 0),
-                                radius=0.86,
-                                colors=(
-                                    ["#24ff4fa3", "#1079e8ff", "#00000000"]
-                                    if _is_dark
-                                    else ["#26ee6f97", "#22f7a56a", "#00000000"]
-                                ),
-                            ),
-                            opacity=0.46 if _is_dark else 0.2,
-                            animate_opacity=ft.Animation(2600, ft.AnimationCurve.EASE_IN_OUT),
-                        ),
-                        ft.Container(content=title_display, alignment=ft.Alignment(0, 0)),
-                    ],
-                    width=380,
-                    height=96,
-                ),
+                content=title_display,
                 opacity=0.96,
                 offset=ft.Offset(0, 0),
                 animate_offset=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
                 animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
-            )
-
-            rule = ft.Container(
-                width=112 if _is_dark else 96,
-                height=2 if _is_dark else 3,
-                border_radius=999,
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment(-1, 0),
-                    end=ft.Alignment(1, 0),
-                    colors=(
-                        ["#00000000", "#80ff4fa3", "#8079e8ff", "#00000000"]
-                        if _is_dark
-                        else ["#00000000", "#90ee6f97", "#80f7a56a", "#00000000"]
-                    ),
+                shadow=(
+                    ft.BoxShadow(
+                        color="#2cff4fa3",
+                        blur_radius=24,
+                        spread_radius=0,
+                        offset=ft.Offset(0, 6),
+                    )
+                    if _is_dark
+                    else None
                 ),
-                opacity=0.76 if _is_dark else 0.58,
-                offset=ft.Offset(0, 0),
-                animate_offset=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
-                animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
             )
 
-            self._welcome_wordmark_letters = [eyebrow, title_host, rule]
+            self._welcome_wordmark_letters = [eyebrow, title_host]
             self._welcome_wordmark_host = ft.Container(
                 content=ft.Column(
-                    [eyebrow, title_host, rule],
-                    spacing=10 if _is_dark else 8,
+                    [eyebrow, title_host],
+                    spacing=8 if _is_dark else 6,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 animate_opacity=240,
