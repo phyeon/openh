@@ -32,6 +32,15 @@ class OpenAIProvider:
         self.model = model
         self._client = AsyncOpenAI(api_key=api_key)
 
+    @staticmethod
+    def _use_responses_api(model: str) -> bool:
+        model_name = str(model or "")
+        return (
+            model_name.startswith("o3")
+            or model_name.startswith("o4")
+            or model_name.startswith("gpt-5")
+        )
+
     def _to_openai_messages(self, messages: list[Message], system: str) -> list[dict[str, Any]]:
         converted: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -168,12 +177,18 @@ class OpenAIProvider:
         tools: list[ToolSchema],
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        if self._use_responses_api(self.model):
+            raise RuntimeError(
+                "Model "
+                f"'{self.model}' requires the OpenAI Responses API which is not yet fully "
+                "implemented. Use gpt-4o or gpt-4o-mini for now."
+            )
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._to_openai_messages(messages, system),
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_completion_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
+            "max_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
         }
         openai_tools = self._to_openai_tools(tools)
         if openai_tools is not None:

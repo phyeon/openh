@@ -83,7 +83,7 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
-| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed again this pass. Assistant text/tool-call conversion is closer to the public adapter now: assistant text is concatenated without injected newlines and assistant-side tool results are emitted as separate tool messages. Still no exact Responses-API capability gate for GPT-5/o-series models. |
+| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed again this pass. Assistant text/tool-call conversion is closer to the public adapter now, and Responses-API-only models (`gpt-5*`, `o3*`, `o4*`) are now explicitly gated instead of being sent to Chat Completions. Chat Completions payload also uses `max_tokens` like the public adapter. Still no actual Responses API implementation. |
 | `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, and JSON-schema sanitizing is much closer to the public Google adapter (enum coercion, required filtering, array item typing). Runtime smoke still depends on local `google.genai` availability, and the streaming path is still simpler than the public SSE parser. |
 | `[~]` | `openh/providers/__init__.py` | provider registry surfaces | Reviewed this pass. Provider imports are now consistently lazy and missing-SDK failures surface as stable runtime errors instead of import crashes. Still a much smaller registry than the public provider module tree. |
 
@@ -113,7 +113,7 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
+1. `providers/gemini.py` final capability-gating / thinking-config follow-up
 2. `flet_app/main.py`, `flet_app/widgets.py` final regression sweep
 3. `flet_app/permission_dialog.py`
 4. `permission_rules.py` exact-manager follow-up
