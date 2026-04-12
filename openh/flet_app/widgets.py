@@ -296,17 +296,12 @@ def top_bar(
                         max_lines=1,
                         expand=True,
                     ),
-                    ft.Icon(
-                        ft.Icons.KEYBOARD_ARROW_DOWN,
-                        color=theme.TEXT_TERTIARY,
-                        size=16,
-                    ),
                 ],
-                spacing=6,
+                spacing=0,
                 tight=True,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.symmetric(horizontal=8, vertical=6),
+            padding=ft.padding.symmetric(horizontal=6, vertical=6),
             ink=True,
             on_click=lambda e: on_rename(),
             tooltip="Click to rename conversation",
@@ -1400,14 +1395,6 @@ def welcome_screen(
                             font_family=theme.FONT_EM,
                         ),
                         ft.Text(
-                            "night shift notebook",
-                            color=theme.TEXT_TERTIARY,
-                            size=11,
-                            text_align=ft.TextAlign.CENTER,
-                            weight=ft.FontWeight.W_600,
-                            font_family=theme.FONT_MONO,
-                        ),
-                        ft.Text(
                             sub_text,
                             color=theme.TEXT_PRIMARY,
                             size=15,
@@ -1429,14 +1416,6 @@ def welcome_screen(
         editorial_card = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text(
-                        "Patisserie Notebook",
-                        color=theme.TEXT_TERTIARY,
-                        size=11,
-                        weight=ft.FontWeight.W_700,
-                        text_align=ft.TextAlign.CENTER,
-                        font_family=theme.FONT_SANS,
-                    ),
                     wordmark or ft.Text(
                         "Fruits & Dessert",
                         color=accent_color or theme.ACCENT,
@@ -1457,15 +1436,15 @@ def welcome_screen(
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.symmetric(horizontal=28, vertical=24),
-            border_radius=28,
+            padding=ft.padding.symmetric(horizontal=26, vertical=22),
+            border_radius=24,
             bgcolor="#fffaf4",
-            border=ft.border.all(1, "#eedfd2"),
+            border=ft.border.all(1, "#f0e4d9"),
             shadow=ft.BoxShadow(
-                color="#e4c5ad33",
-                blur_radius=18,
+                color="#f2d8c233",
+                blur_radius=12,
                 spread_radius=0,
-                offset=ft.Offset(0, 8),
+                offset=ft.Offset(0, 6),
             ),
         )
 

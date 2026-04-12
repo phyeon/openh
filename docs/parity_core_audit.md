@@ -84,7 +84,7 @@ Status legend:
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
 | `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed again this pass. Assistant text/tool-call conversion is closer to the public adapter now, and Responses-API-only models (`gpt-5*`, `o3*`, `o4*`) are now explicitly gated instead of being sent to Chat Completions. Chat Completions payload also uses `max_tokens` like the public adapter. Still no actual Responses API implementation. |
-| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, duplicate streamed function-call chunks are coalesced before emitting tool-use events, `FINISH_REASON_UNSPECIFIED` maps cleanly to `end_turn`, and Gemini requests now always carry an explicit `max_output_tokens` cap like the public adapter. Still no full HTTP/SSE adapter or request-level thinking config surface. |
+| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, duplicate streamed function-call chunks are coalesced before emitting tool-use events, `FINISH_REASON_UNSPECIFIED` maps cleanly to `end_turn`, Gemini model names now normalize `google/` and `models/` prefixes before hitting the SDK, and an optional `thinking_config` path now exists for Gemini 2.5+/3.x style budgets. Still no full HTTP/SSE adapter or UI wiring for thinking effort. |
 | `[~]` | `openh/providers/__init__.py` | provider registry surfaces | Reviewed this pass. Provider imports are now consistently lazy and missing-SDK failures surface as stable runtime errors instead of import crashes. Still a much smaller registry than the public provider module tree. |
 
 ## 6. UI / Desktop Runtime
@@ -93,27 +93,26 @@ These are not strict engine parity targets, but they still matter for behavior a
 
 | Status | OpenH file | Primary public reference | Notes |
 | --- | --- | --- | --- |
-| `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed again this pass for hot-path UX parity. Transient actions like model/theme/init/mode-switch feedback now use a top-bar status surface instead of polluting the transcript, closer to the public TUI `status_message` flow. Still not a full file-wide audit. |
-| `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, and the sidebar new-chat button no longer swaps into a decorative emoji object. Still not a full file-wide audit. |
+| `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed again this pass for hot-path UX parity. Transient actions like model/theme/init/mode-switch feedback now use a top-bar status surface instead of polluting the transcript, sub-agent permission requests now normalize back to the base tool name before rule matching/persistence, and the FnD wordmark was simplified to remove decorative eyebrow clutter. Still not a full file-wide audit. |
+| `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, the sidebar new-chat button no longer swaps into a decorative emoji object, and the FnD top bar / welcome screen were simplified to remove extra labels and chrome. Still not a full file-wide audit. |
 | `[ ]` | `openh/flet_app/theme.py` | none | Local design system, not a direct public parity target. |
 | `[~]` | `openh/flet_app/settings_dialog.py` | `crates/tui/src/settings_screen.rs` and related settings surfaces | Reviewed this pass. Output-style picker now uses style labels, custom model values stay selectable instead of disappearing from the dropdown, and prompt preset UI follows stable slug/display-name separation. Still a desktop/Flet-specific UI, not a literal port of the TUI settings screen. |
-| `[~]` | `openh/flet_app/permission_dialog.py` | `crates/tui/src/dialogs.rs` | Reviewed this pass. Dialog titles and previews are now tool-specific (`Bash`, file read/write, web fetch/search, agent question), so the prompt resembles the public permission overlays more closely. Runtime permission option semantics are still OpenH-specific (`always deny` is retained). |
+| `[~]` | `openh/flet_app/permission_dialog.py` | `crates/tui/src/dialogs.rs` | Reviewed again this pass. Dialog titles and previews are tool-specific, reason strings are now split into description + danger explanation like the public overlays, and the action set now matches the public flow more closely (`allow once`, `allow this session`, `always allow`, `deny`) with a Bash-only session prefix-allow affordance. Still a Flet modal rather than the TUI overlay implementation. |
 
 ## 7. Clearly remaining parity work
 
 These are the main open deltas after the reviewed files above:
 
 1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
-2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges and model-capability gating.
-3. Permission handler model is much closer, but still not a literal `PermissionManager` port.
+2. Permission handler model is much closer, but still not a literal `PermissionManager` port.
+3. Provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges and missing UI/runtime wiring for effort/thinking controls.
 4. File-by-file audit is still missing for parts of `flet_app/*`, plus a deeper follow-up on some provider and memory edges.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `flet_app/main.py`, `flet_app/widgets.py` one last visual/UX regression sweep
-2. `flet_app/permission_dialog.py` semantics follow-up
-3. `providers/gemini.py` final capability-gating / thinking-config follow-up
-4. `permission_rules.py` literal `PermissionManager` follow-up if needed
-5. `coordinator.py` managed runtime exact pass
+1. `permission_rules.py` literal `PermissionManager` follow-up if needed
+2. `coordinator.py` managed runtime exact pass
+3. `providers/gemini.py` effort/thinking UI/runtime wiring follow-up
+4. `flet_app/main.py`, `flet_app/widgets.py` final regression watch after real usage

@@ -29,7 +29,11 @@ from ..config import SYSTEM_PROMPT, dotenv_paths, load_config, load_system_promp
 from ..coordinator import coordinator_user_context, is_coordinator_mode, match_session_mode
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
-from ..permission_rules import derive_rule_pattern, remember_persistent_rule
+from ..permission_rules import (
+    derive_rule_pattern,
+    format_permission_reason,
+    remember_persistent_rule,
+)
 from .settings_dialog import SettingsDialog
 from ..system_prompt import (
     build_managed_agent_prompt,
@@ -2480,30 +2484,73 @@ class OpenHApp:
         self._flush_message_column()
 
     async def _ask_permission(self, tool_name: str, input_dict: dict[str, Any]) -> bool:
+        raw_tool_name = str(tool_name or "").strip()
+        is_subagent_request = raw_tool_name.startswith("[sub-agent] ")
+        base_tool_name = (
+            raw_tool_name.removeprefix("[sub-agent] ").strip()
+            if is_subagent_request
+            else raw_tool_name
+        )
         if self._skip_permissions:
             return True
-        rule_pattern = derive_rule_pattern(tool_name, input_dict)
-        if (tool_name, "*") in self.session.always_allow or (
-            tool_name, rule_pattern
+        rule_pattern = derive_rule_pattern(base_tool_name, input_dict)
+        if (base_tool_name, "*") in self.session.always_allow or (
+            base_tool_name, rule_pattern
         ) in self.session.always_allow:
             return True
-        if (tool_name, "*") in self.session.always_deny or (
-            tool_name, rule_pattern
+        if (base_tool_name, "*") in self.session.always_deny or (
+            base_tool_name, rule_pattern
         ) in self.session.always_deny:
             return False
-        decision = await self.permission_dialog.ask(tool_name, input_dict)
-        if decision == "always":
-            self.session.always_allow.add((tool_name, rule_pattern))
+        tool_obj = next(
+            (
+                tool
+                for tool in self.session.tools
+                if str(getattr(tool, "name", "") or "").strip() == base_tool_name
+            ),
+            None,
+        )
+        level = tool_obj.get_permission_level() if tool_obj is not None else None
+        reason = format_permission_reason(base_tool_name, input_dict, level) if level else ""
+        decision = await self.permission_dialog.ask(
+            base_tool_name,
+            input_dict,
+            reason=reason,
+            is_subagent=is_subagent_request,
+        )
+        if decision == "session":
+            self.session.always_allow.add((base_tool_name, rule_pattern))
+            return True
+        if decision == "persistent":
+            self.session.always_allow.add((base_tool_name, rule_pattern))
             remember_persistent_rule(
                 "allow",
-                tool_name if rule_pattern == "*" else f"{tool_name}({rule_pattern})",
+                base_tool_name
+                if rule_pattern == "*"
+                else f"{base_tool_name}({rule_pattern})",
+            )
+            return True
+        if decision.startswith("prefix:"):
+            prefix = decision.split(":", 1)[1].strip()
+            if prefix:
+                self.session.always_allow.add((base_tool_name, prefix))
+                return True
+        if decision == "always":
+            self.session.always_allow.add((base_tool_name, rule_pattern))
+            remember_persistent_rule(
+                "allow",
+                base_tool_name
+                if rule_pattern == "*"
+                else f"{base_tool_name}({rule_pattern})",
             )
             return True
         if decision == "deny_always":
-            self.session.always_deny.add((tool_name, rule_pattern))
+            self.session.always_deny.add((base_tool_name, rule_pattern))
             remember_persistent_rule(
                 "deny",
-                tool_name if rule_pattern == "*" else f"{tool_name}({rule_pattern})",
+                base_tool_name
+                if rule_pattern == "*"
+                else f"{base_tool_name}({rule_pattern})",
             )
             return False
         return decision == "allow"
@@ -2686,23 +2733,9 @@ class OpenHApp:
         _is_dark = theme.is_dark()
 
         if getattr(spec, "id", "") == "fnd":
-            eyebrow = ft.Container(
-                content=ft.Text(
-                    "AFTER MIDNIGHT" if _is_dark else "PATISSERIE NOTEBOOK",
-                    size=10 if _is_dark else 11,
-                    weight=ft.FontWeight.W_700,
-                    color=theme.ACCENT if _is_dark else theme.TEXT_TERTIARY,
-                    font_family=theme.FONT_MONO if _is_dark else theme.FONT_SANS,
-                ),
-                opacity=0.92,
-                offset=ft.Offset(0, 0),
-                animate_offset=ft.Animation(320, ft.AnimationCurve.EASE_OUT),
-                animate_opacity=ft.Animation(320, ft.AnimationCurve.EASE_OUT),
-            )
-
             title_text = ft.Text(
                 spec.wordmark,
-                size=44 if _is_dark else 42,
+                size=42 if _is_dark else 40,
                 weight=ft.FontWeight.W_600,
                 font_family=theme.FONT_EM,
                 color="#ffffff" if _is_dark else color,
@@ -2732,20 +2765,20 @@ class OpenHApp:
                 shadow=(
                     ft.BoxShadow(
                         color="#2cff4fa3",
-                        blur_radius=24,
+                        blur_radius=18,
                         spread_radius=0,
-                        offset=ft.Offset(0, 6),
+                        offset=ft.Offset(0, 4),
                     )
                     if _is_dark
                     else None
                 ),
             )
 
-            self._welcome_wordmark_letters = [eyebrow, title_host]
+            self._welcome_wordmark_letters = [title_host]
             self._welcome_wordmark_host = ft.Container(
                 content=ft.Column(
-                    [eyebrow, title_host],
-                    spacing=8 if _is_dark else 6,
+                    [title_host],
+                    spacing=0,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 animate_opacity=240,

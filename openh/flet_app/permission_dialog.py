@@ -27,6 +27,24 @@ def _dialog_meta(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str, 
     return f"Allow {name}?", ft.Icons.SHIELD_OUTLINED, theme.ACCENT
 
 
+def _split_reason(reason: str, fallback: str) -> tuple[str, str]:
+    text = str(reason or "").strip()
+    if not text:
+        return fallback, ""
+    if "\n" not in text:
+        return text, ""
+    head, tail = text.split("\n", 1)
+    return head.strip(), tail.strip()
+
+
+def _bash_prefix(input_dict: dict[str, Any]) -> str | None:
+    command = str(input_dict.get("command") or "").strip()
+    if not command:
+        return None
+    prefix = command.split(maxsplit=1)[0].strip()
+    return prefix or None
+
+
 def _preview_lines(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str] | None:
     if tool_name == "Bash":
         command = str(input_dict.get("command") or "").strip()
@@ -35,6 +53,7 @@ def _preview_lines(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str
     if tool_name in {"Read", "Write", "Edit", "NotebookEdit"}:
         path = str(
             input_dict.get("file_path")
+            or input_dict.get("notebook_path")
             or input_dict.get("path")
             or ""
         ).strip()
@@ -64,7 +83,12 @@ def _preview_lines(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str
 class PermissionDialog:
     """A dialog that asks the user to allow / always-allow / deny a tool call.
 
-    Returns one of: 'allow', 'always', 'deny', 'deny_always'.
+    Returns one of:
+      'allow'      -> allow once
+      'session'    -> allow this session
+      'persistent' -> allow persistently
+      'deny'       -> deny
+      'prefix:<x>' -> bash prefix allow for this session
     """
 
     def __init__(self, page: ft.Page) -> None:
@@ -72,7 +96,14 @@ class PermissionDialog:
         self._future: asyncio.Future[str] | None = None
         self._dialog: ft.AlertDialog | None = None
 
-    async def ask(self, tool_name: str, input_dict: dict[str, Any]) -> str:
+    async def ask(
+        self,
+        tool_name: str,
+        input_dict: dict[str, Any],
+        *,
+        reason: str = "",
+        is_subagent: bool = False,
+    ) -> str:
         loop = asyncio.get_running_loop()
         self._future = loop.create_future()
 
@@ -83,9 +114,13 @@ class PermissionDialog:
         if len(body) > 1500:
             body = body[:1500] + "\n…(truncated)"
 
-        description = theme.TOOL_DESCRIPTIONS.get(tool_name, "Run a tool")
+        description, danger = _split_reason(
+            reason,
+            theme.TOOL_DESCRIPTIONS.get(tool_name, "Run a tool"),
+        )
         title_text, title_icon, accent = _dialog_meta(tool_name, input_dict)
         preview = _preview_lines(tool_name, input_dict)
+        bash_prefix = _bash_prefix(input_dict) if tool_name == "Bash" else None
 
         def make_handler(decision: str):
             def _h(e):
@@ -113,8 +148,37 @@ class PermissionDialog:
                 [
                     ft.Text(
                         description,
-                        color=theme.TEXT_SECONDARY,
+                        color=theme.TEXT_PRIMARY,
                         size=12,
+                    ),
+                    *(
+                        [
+                            ft.Text(
+                                "Requested by a sub-agent",
+                                color=theme.TEXT_TERTIARY,
+                                size=11,
+                                italic=True,
+                            )
+                        ]
+                        if is_subagent
+                        else []
+                    ),
+                    *(
+                        [
+                            ft.Container(
+                                content=ft.Text(
+                                    danger,
+                                    color=theme.WARN,
+                                    size=11,
+                                ),
+                                bgcolor=theme.BG_PAGE,
+                                border=ft.border.all(1, theme.BORDER_FAINT),
+                                border_radius=theme.RADIUS_SM,
+                                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                            )
+                        ]
+                        if danger
+                        else []
                     ),
                     *(
                         [
@@ -148,19 +212,25 @@ class PermissionDialog:
                         if preview is not None
                         else []
                     ),
-                    ft.Container(
-                        content=ft.Text(
-                            body,
-                            font_family=theme.FONT_MONO,
-                            size=11,
-                            color=theme.TEXT_SECONDARY,
-                            selectable=True,
-                        ),
-                        bgcolor=theme.BG_PAGE,
-                        border=ft.border.all(1, theme.BORDER_FAINT),
-                        border_radius=theme.RADIUS_SM,
-                        padding=12,
-                        width=520,
+                    *(
+                        [
+                            ft.Container(
+                                content=ft.Text(
+                                    body,
+                                    font_family=theme.FONT_MONO,
+                                    size=11,
+                                    color=theme.TEXT_SECONDARY,
+                                    selectable=True,
+                                ),
+                                bgcolor=theme.BG_PAGE,
+                                border=ft.border.all(1, theme.BORDER_FAINT),
+                                border_radius=theme.RADIUS_SM,
+                                padding=12,
+                                width=520,
+                            )
+                        ]
+                        if preview is None
+                        else []
                     ),
                 ],
                 spacing=10,
@@ -173,12 +243,8 @@ class PermissionDialog:
                     on_click=make_handler("deny"),
                 ),
                 ft.TextButton(
-                    content=ft.Text("Always deny", color=theme.WARN, size=13),
-                    on_click=make_handler("deny_always"),
-                ),
-                ft.TextButton(
-                    content=ft.Text("Allow always", color=theme.ACCENT, size=13),
-                    on_click=make_handler("always"),
+                    content=ft.Text("Allow this session", color=theme.TEXT_SECONDARY, size=13),
+                    on_click=make_handler("session"),
                 ),
                 ft.FilledButton(
                     content=ft.Text(
@@ -192,6 +258,24 @@ class PermissionDialog:
                         bgcolor=accent,
                         color=theme.TEXT_ON_ACCENT,
                     ),
+                ),
+                ft.TextButton(
+                    content=ft.Text("Always allow", color=theme.ACCENT, size=13),
+                    on_click=make_handler("persistent"),
+                ),
+                *(
+                    [
+                        ft.TextButton(
+                            content=ft.Text(
+                                f"Allow {bash_prefix}*",
+                                color=theme.ACCENT,
+                                size=13,
+                            ),
+                            on_click=make_handler(f"prefix:{bash_prefix}"),
+                        )
+                    ]
+                    if bash_prefix
+                    else []
                 ),
             ],
             actions_alignment=ft.MainAxisAlignment.END,

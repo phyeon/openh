@@ -32,6 +32,29 @@ class GeminiProvider:
         self._client = genai.Client(api_key=api_key)
 
     @staticmethod
+    def _normalize_model_name(model: str) -> str:
+        name = str(model or "").strip()
+        if name.startswith("models/"):
+            name = name[len("models/") :]
+        if name.startswith("google/"):
+            name = name.split("/", 1)[1]
+        if "gemini" not in name.lower():
+            raise RuntimeError(
+                f"Gemini provider only supports Gemini models, got: {model}"
+            )
+        return name
+
+    @staticmethod
+    def _supports_thinking(model: str) -> bool:
+        normalized = str(model or "")
+        return (
+            "2.5" in normalized
+            or "3.0" in normalized
+            or "3.1" in normalized
+            or "gemini-3" in normalized
+        )
+
+    @staticmethod
     def _tool_use_id_for_name(name: str, occurrence: int) -> str:
         sanitized = "".join(
             ch if ch.isascii() and (ch.isalnum() or ch in {"_", "-"}) else "_"
@@ -148,12 +171,27 @@ class GeminiProvider:
         tools: list[ToolSchema],
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        api_model = self._normalize_model_name(self.model)
         contents = self._to_gemini_contents(messages)
         config_kwargs: dict[str, Any] = {"system_instruction": system}
         gemini_tools = self._to_gemini_tools(tools)
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
         config_kwargs["max_output_tokens"] = int(max_tokens or MAX_OUTPUT_TOKENS)
+        thinking_budget = getattr(self, "thinking_budget", None)
+        if (
+            thinking_budget is not None
+            and self._supports_thinking(api_model)
+        ):
+            try:
+                budget = int(thinking_budget)
+            except Exception:
+                budget = 0
+            if budget > 0:
+                config_kwargs["thinking_config"] = gtypes.ThinkingConfig(
+                    include_thoughts=True,
+                    thinking_budget=budget,
+                )
 
         config = gtypes.GenerateContentConfig(**config_kwargs)
 
@@ -171,7 +209,7 @@ class GeminiProvider:
         for _attempt in range(3):
             try:
                 stream = await self._client.aio.models.generate_content_stream(
-                    model=self.model,
+                    model=api_model,
                     contents=contents,
                     config=config,
                 )
