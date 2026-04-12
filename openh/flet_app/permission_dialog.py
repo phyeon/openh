@@ -88,6 +88,7 @@ class PermissionDialog:
       'session'    -> allow this session
       'persistent' -> allow persistently
       'deny'       -> deny
+      'deny_always'-> deny persistently
       'prefix:<x>' -> bash prefix allow for this session
     """
 
@@ -241,6 +242,10 @@ class PermissionDialog:
                 ft.TextButton(
                     content=ft.Text("Deny", color=theme.TEXT_SECONDARY, size=13),
                     on_click=make_handler("deny"),
+                ),
+                ft.TextButton(
+                    content=ft.Text("Always deny", color=theme.WARN, size=13),
+                    on_click=make_handler("deny_always"),
                 ),
                 ft.TextButton(
                     content=ft.Text("Allow this session", color=theme.TEXT_SECONDARY, size=13),
