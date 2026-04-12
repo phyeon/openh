@@ -22,7 +22,13 @@ from ..config import (
     preferred_dotenv_path,
 )
 from .. import output_styles, prompts, settings as settings_mod
-from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
+from ..settings import (
+    ANTHROPIC_MODELS,
+    GEMINI_MODELS,
+    GEMINI_THINKING_EFFORTS,
+    OPENAI_MODELS,
+    Settings,
+)
 from ..session import normalize_usage_by_model
 from . import theme
 
@@ -379,12 +385,25 @@ class SettingsDialog:
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
             keyboard_type=ft.KeyboardType.NUMBER,
         )
+        self._gemini_thinking_dropdown = ft.Dropdown(
+            value=getattr(self.settings, "gemini_thinking_effort", "low"),
+            options=[
+                ft.dropdown.Option(key=level, text=level.capitalize())
+                for level in GEMINI_THINKING_EFFORTS
+            ],
+            label="Gemini thinking effort",
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+        )
         summary_card = self._token_usage_summary_card()
         children: list[ft.Control] = [
             _label("Token budgets"),
             self._max_tokens_field,
             ft.Container(height=10),
             self._compact_field,
+            ft.Container(height=10),
+            self._gemini_thinking_dropdown,
         ]
         if summary_card is not None:
             children.extend(
@@ -398,7 +417,8 @@ class SettingsDialog:
             [
                 ft.Container(height=14),
                 _hint(
-                    "모델에게 보내는 컨텍스트만 줄여. 네가 보는 transcript는 그대로 두고, 0이면 자동 compact를 끈다."
+                    "모델에게 보내는 컨텍스트만 줄여. 네가 보는 transcript는 그대로 두고, 0이면 자동 compact를 끈다. "
+                    "Gemini thinking effort는 low/medium/high/max에 따라 0/5k/10k/20k budget으로 이어져."
                 ),
             ]
         )
@@ -1244,6 +1264,10 @@ class SettingsDialog:
         self.settings.openai_model = self._openai_dropdown.value or self.settings.openai_model
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
+        self.settings.gemini_thinking_effort = (
+            self._gemini_thinking_dropdown.value
+            or getattr(self.settings, "gemini_thinking_effort", "low")
+        )
         self.settings.active_prompt = self._default_preset_name or prompts.BUILTIN_NAME
         self.settings.output_style = self._output_style_dropdown.value or "default"
 

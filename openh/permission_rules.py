@@ -128,12 +128,8 @@ class InteractivePermissionHandler(PermissionHandler):
         return "allow", ""
 
 
-class _ManagedPermissionHandler(PermissionHandler):
-    def __init__(
-        self,
-        session: Any,
-        rules: PermissionRules,
-    ) -> None:
+class PermissionManager:
+    def __init__(self, session: Any, rules: PermissionRules) -> None:
         self.session = session
         self.rules = rules
 
@@ -183,10 +179,7 @@ class _ManagedPermissionHandler(PermissionHandler):
 
         return "none", ""
 
-    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
-        raise NotImplementedError
-
-    def _manager_default_decision(
+    def _default_decision(
         self,
         request: PermissionRequest,
         *,
@@ -213,36 +206,50 @@ class _ManagedPermissionHandler(PermissionHandler):
             return "ask", reason
         return "deny", reason
 
-
-class ManagedAutoPermissionHandler(_ManagedPermissionHandler):
-    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+    def evaluate(
+        self,
+        request: PermissionRequest,
+        *,
+        interactive: bool,
+    ) -> tuple[Decision, str]:
         if request.level == PermissionLevel.FORBIDDEN:
             return "deny", "this action is unconditionally forbidden"
         rule_decision, reason = self._evaluate_rules(request)
         if rule_decision != "none":
-            if rule_decision == "ask":
+            if rule_decision == "ask" and not interactive:
                 return "deny", reason
             return rule_decision, reason
-        default_decision, default_reason = self._default_decision(request)
-        if default_decision == "ask":
+        default_decision, default_reason = self._default_decision(
+            request,
+            interactive=interactive,
+        )
+        if default_decision == "ask" and not interactive:
             return "deny", default_reason
         return default_decision, default_reason
 
-    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
-        return self._manager_default_decision(request, interactive=False)
 
+class ManagedAutoPermissionHandler(PermissionHandler):
+    def __init__(self, manager: PermissionManager) -> None:
+        self.manager = manager
 
-class ManagedInteractivePermissionHandler(_ManagedPermissionHandler):
     def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
-        if request.level == PermissionLevel.FORBIDDEN:
-            return "deny", "this action is unconditionally forbidden"
-        rule_decision, reason = self._evaluate_rules(request)
-        if rule_decision != "none":
-            return rule_decision, reason
-        return self._default_decision(request)
+        return self.manager.evaluate(request, interactive=False)
 
-    def _default_decision(self, request: PermissionRequest) -> tuple[Decision, str]:
-        return self._manager_default_decision(request, interactive=True)
+
+class ManagedInteractivePermissionHandler(PermissionHandler):
+    def __init__(self, manager: PermissionManager) -> None:
+        self.manager = manager
+
+    def check_permission(self, request: PermissionRequest) -> tuple[Decision, str]:
+        return self.manager.evaluate(request, interactive=True)
+
+
+def interactive_with_manager(manager: PermissionManager) -> ManagedInteractivePermissionHandler:
+    return ManagedInteractivePermissionHandler(manager)
+
+
+def auto_with_manager(manager: PermissionManager) -> ManagedAutoPermissionHandler:
+    return ManagedAutoPermissionHandler(manager)
 
 
 def effective_permission_mode(session: Any) -> PermissionMode:
@@ -259,7 +266,6 @@ def build_permission_handler(
     session: Any,
     rules: PermissionRules,
 ) -> PermissionHandler:
-    mode = effective_permission_mode(session)
     forced_non_interactive = bool(getattr(session, "is_non_interactive", False))
     kind = str(
         getattr(
@@ -271,9 +277,10 @@ def build_permission_handler(
     ).strip().lower()
     if forced_non_interactive and kind == "interactive":
         kind = "auto"
+    manager = PermissionManager(session, rules)
     if kind.strip().lower() == "auto":
-        return ManagedAutoPermissionHandler(session, rules)
-    return ManagedInteractivePermissionHandler(session, rules)
+        return ManagedAutoPermissionHandler(manager)
+    return ManagedInteractivePermissionHandler(manager)
 
 
 def derive_rule_pattern(tool_name: str, input_dict: dict[str, Any]) -> str:

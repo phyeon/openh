@@ -88,6 +88,17 @@ from .permission_dialog import PermissionDialog
 
 
 class OpenHApp:
+    @staticmethod
+    def _thinking_budget_for_effort(effort: str) -> int | None:
+        value = str(effort or "").strip().lower()
+        if value == "medium":
+            return 5_000
+        if value == "high":
+            return 10_000
+        if value == "max":
+            return 20_000
+        return None
+
     def __init__(self, page: ft.Page) -> None:
         self.page = page
         self.config = load_config()
@@ -163,6 +174,7 @@ class OpenHApp:
         except Exception as exc:  # noqa: BLE001
             page.add(widgets.error_panel(f"Failed to start provider {initial}: {exc}"))
             return
+        self._apply_provider_runtime_options(provider)
 
         import time
         sid = new_session_uuid()
@@ -603,6 +615,14 @@ class OpenHApp:
         style_name = str(getattr(self.settings, "output_style", "default") or "default")
         self.session.output_style = style_name
         self.session.output_style_prompt = resolve_style_prompt(style_name, self.session.cwd)
+
+    def _apply_provider_runtime_options(self, provider: Any) -> None:
+        if str(getattr(provider, "name", "") or "").strip() != "gemini":
+            return
+        budget = self._thinking_budget_for_effort(
+            getattr(self.settings, "gemini_thinking_effort", "low")
+        )
+        setattr(provider, "thinking_budget", budget)
 
     def _set_session_output_style(self, style_name: str, *, persist: bool = True) -> None:
         normalized = str(style_name or "default").strip().lower() or "default"
@@ -1376,6 +1396,7 @@ class OpenHApp:
             )
             return
         self.session.switch_provider(new_provider)
+        self._apply_provider_runtime_options(new_provider)
         self._sync_session_managed_agent_config()
         save_settings(self.settings)
         self._refresh_top_bar()
@@ -1434,6 +1455,7 @@ class OpenHApp:
             try:
                 new_provider = get_provider(new_settings.active_provider, self.config)
                 self.session.switch_provider(new_provider)
+                self._apply_provider_runtime_options(new_provider)
             except Exception as exc:  # noqa: BLE001
                 self._append_to_messages(
                     widgets.error_panel(f"provider reload failed: {exc}")
@@ -1958,6 +1980,7 @@ class OpenHApp:
             try:
                 new_provider = get_provider(target, self.config)
                 self.session.switch_provider(new_provider)
+                self._apply_provider_runtime_options(new_provider)
                 self._refresh_top_bar()
                 self._refresh_input()
             except Exception as exc:  # noqa: BLE001
@@ -2002,6 +2025,7 @@ class OpenHApp:
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(str(exc))
             self.session.switch_provider(new_provider)
+            self._apply_provider_runtime_options(new_provider)
             self._sync_session_managed_agent_config()
             save_settings(self.settings)
             self._refresh_top_bar()
@@ -2586,6 +2610,7 @@ class OpenHApp:
         self.settings.active_provider = target
         save_settings(self.settings)
         self.session.switch_provider(new_provider)
+        self._apply_provider_runtime_options(new_provider)
         self._refresh_top_bar()
         self._refresh_input()
         self._set_status_note(f"Model: {target}/{new_provider.model}")

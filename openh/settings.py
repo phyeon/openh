@@ -28,6 +28,12 @@ GEMINI_MODELS = [
     "gemini-3-flash-preview",
     "gemini-2.5-flash",
 ]
+GEMINI_THINKING_EFFORTS = [
+    "low",
+    "medium",
+    "high",
+    "max",
+]
 
 _PROVIDERS = {"openai", "anthropic", "gemini"}
 _KNOWN_KEYS = {
@@ -35,6 +41,7 @@ _KNOWN_KEYS = {
     "openai_model",
     "anthropic_model",
     "gemini_model",
+    "gemini_thinking_effort",
     "output_style",
     "max_output_tokens",
     "auto_compact_threshold",
@@ -59,6 +66,7 @@ class Settings:
     openai_model: str = "gpt-5.4-mini"
     anthropic_model: str = "claude-sonnet-4-6"
     gemini_model: str = "gemini-2.5-flash"
+    gemini_thinking_effort: str = "low"
     output_style: str = "default"
     max_output_tokens: int = 8192
     auto_compact_threshold: int = 80_000
@@ -117,6 +125,10 @@ def normalize_settings(s: Settings) -> Settings:
     s.openai_model = _coerce_str(s.openai_model, "gpt-5.4-mini")
     s.anthropic_model = _coerce_str(s.anthropic_model, "claude-sonnet-4-6")
     s.gemini_model = _coerce_str(s.gemini_model, "gemini-2.5-flash")
+    gemini_effort = _coerce_str(s.gemini_thinking_effort, "low").lower()
+    s.gemini_thinking_effort = (
+        gemini_effort if gemini_effort in set(GEMINI_THINKING_EFFORTS) else "low"
+    )
     s.output_style = _coerce_str(s.output_style, "default").lower()
     s.active_prompt = _coerce_str(s.active_prompt, "default")
 

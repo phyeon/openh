@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from enum import Enum
 
 PRIMARY_COORDINATOR_ENV_VAR = "CLAUDE_CODE_COORDINATOR_MODE"
 LEGACY_COORDINATOR_ENV_VAR = "CLAURST_COORDINATOR_MODE"
@@ -14,6 +15,20 @@ INTERNAL_COORDINATOR_TOOLS = (
 )
 
 COORDINATOR_ONLY_TOOLS = INTERNAL_COORDINATOR_TOOLS
+WORKER_SIMPLE_TOOLS = (
+    "Bash",
+    "Read",
+    "Edit",
+)
+COORDINATOR_BANNED_TOOLS = (
+    "Bash",
+)
+
+
+class AgentMode(str, Enum):
+    COORDINATOR = "coordinator"
+    WORKER = "worker"
+    NORMAL = "normal"
 
 
 def _truthy_env(name: str) -> bool:
@@ -66,16 +81,25 @@ You are operating as an orchestrator for parallel worker agents.
 """.strip()
 
 
-def filter_worker_tool_names(available_tools: list[str]) -> list[str]:
+def filter_tool_names_for_mode(
+    available_tools: list[str],
+    mode: AgentMode,
+) -> list[str]:
     seen: set[str] = set()
     filtered: list[str] = []
     for tool in available_tools:
         name = str(tool or "").strip()
-        if not name or name in INTERNAL_COORDINATOR_TOOLS or name in seen:
+        if not name or name in seen:
+            continue
+        if mode == AgentMode.WORKER and name in COORDINATOR_ONLY_TOOLS:
             continue
         seen.add(name)
         filtered.append(name)
     return filtered
+
+
+def filter_worker_tool_names(available_tools: list[str]) -> list[str]:
+    return filter_tool_names_for_mode(available_tools, AgentMode.WORKER)
 
 
 def coordinator_user_context(
@@ -100,3 +124,7 @@ def match_session_mode(stored_coordinator: bool) -> str | None:
     if stored_coordinator:
         return "Entered coordinator mode to match resumed session."
     return "Exited coordinator mode to match resumed session."
+
+
+def match_session_mode_from_agent_mode(mode: AgentMode) -> str | None:
+    return match_session_mode(mode == AgentMode.COORDINATOR)

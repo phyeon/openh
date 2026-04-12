@@ -599,6 +599,12 @@ class AgentTool(Tool):
         elif provider_name == "gemini":
             config = replace(config, gemini_model=model_name)
         provider = get_provider(provider_name, config)
+        if provider_name == "gemini":
+            setattr(
+                provider,
+                "thinking_budget",
+                getattr(parent.provider, "thinking_budget", None),
+            )
         return provider, config
 
     @staticmethod
