@@ -688,8 +688,13 @@ def user_bubble(
     on_edit: Callable | None = None,
     msg_index: int = -1,
     content_width: int | None = None,
+    queued: bool = False,
 ) -> ft.Container:
-    """User message: right-aligned, rounded warm box. Edit icon on hover."""
+    """User message: right-aligned, rounded warm box. Edit icon on hover.
+
+    When queued=True, the bubble is rendered at reduced opacity (steering message
+    waiting to be sent). Call set_queued_opacity(container, 1.0) to restore.
+    """
     edit_btn = ft.IconButton(
         icon=ft.Icons.EDIT_OUTLINED,
         icon_color=theme.TEXT_TERTIARY,
@@ -753,12 +758,14 @@ def user_bubble(
     else:
         wrapper = col
 
-    return ft.Container(
+    outer = ft.Container(
         content=wrapper,
         width=content_width or theme.MESSAGE_MAX_WIDTH,
         alignment=ft.Alignment(1, 0),
         margin=ft.margin.only(top=16, bottom=8),
+        opacity=0.4 if queued else 1.0,
     )
+    return outer
 
 
 def assistant_message(

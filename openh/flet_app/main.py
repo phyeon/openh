@@ -978,8 +978,8 @@ class OpenHApp:
             content_width=self._content_width,
             attachments=[(i, type(b).__name__, getattr(b, "data_base64", "")) for i, b in enumerate(pending)],
             queued_inputs=[
-                text + (" [media]" if media_blocks else "")
-                for text, media_blocks in self._queued_turns
+                item[0] + (" [media]" if item[1] else "")
+                for item in self._queued_turns
             ],
             on_remove_queued_input=self._remove_queued_turn,
             on_remove_attachment=self._remove_attachment,
@@ -1756,12 +1756,19 @@ class OpenHApp:
         pending_media = list(getattr(self, "_pending_media", None) or [])
         self._pending_media = []  # type: ignore[attr-defined]
         if self._busy:
-            # Queue future steering turns without polluting the transcript.
-            self._queued_turns.append((text, pending_media))
+            # Queue steering turn + show faded bubble immediately
+            bubble = widgets.user_bubble(
+                text,
+                content_width=self._content_width,
+                queued=True,
+            )
+            self._append_to_messages(bubble)
+            self._queued_turns.append((text, pending_media, bubble))
             self.input_field.value = ""
             self.input_field.update()
             self._refresh_input()
             self._focus_input()
+            self._scroll_to_end()
             return
         self.input_field.value = ""
         self.input_field.update()
@@ -1822,7 +1829,15 @@ class OpenHApp:
         if self._busy or not self._queued_turns:
             self._refresh_input()
             return
-        text, media_blocks = self._queued_turns.pop(0)
+        queued_item = self._queued_turns.pop(0)
+        text, media_blocks = queued_item[0], queued_item[1]
+        # Restore bubble opacity from faded to full
+        if len(queued_item) > 2 and queued_item[2] is not None:
+            queued_item[2].opacity = 1.0
+            try:
+                queued_item[2].update()
+            except Exception:
+                pass
         self._refresh_input()
         self._submit_turn(text, media_blocks)
 
@@ -2661,7 +2676,14 @@ class OpenHApp:
 
     def _remove_queued_turn(self, idx: int) -> None:
         if 0 <= idx < len(self._queued_turns):
-            self._queued_turns.pop(idx)
+            item = self._queued_turns.pop(idx)
+            # Remove the faded bubble from the message column
+            if len(item) > 2 and item[2] is not None:
+                try:
+                    self.message_column.controls.remove(item[2])
+                    self._flush_message_column()
+                except (ValueError, Exception):
+                    pass
         self._refresh_input()
 
     def _on_attach(self) -> None:

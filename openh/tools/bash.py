@@ -253,6 +253,9 @@ class BashTool(Tool):
                         k, _, v = line.partition("=")
                         if k.startswith("_") or k in _SKIP_ENV:
                             continue
+                        # Skip invalid variable names (e.g. Windows "I:=..." entries)
+                        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', k):
+                            continue
                         new_env[k] = v
                     inherited = os.environ
                     for k, v in new_env.items():
