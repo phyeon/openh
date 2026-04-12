@@ -1,16 +1,28 @@
 """SendMessage tool — communicate with a running sub-agent."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+from .agent_tool import (
+    coordinator_identity,
+    find_subagent_entry,
+    get_coordination_root,
+    get_subagent_registry,
+    pending_subagent_message_count,
+    queue_coordinator_message,
+    queue_subagent_message,
+    run_subagent_prompt,
+)
 from .base import PermissionDecision, Tool, ToolContext
 
 
 class SendMessageTool(Tool):
     name = "SendMessage"
     description = (
-        "Send a follow-up message to a previously spawned sub-agent. "
-        "The agent resumes with its full context preserved."
+        "Send a message to another agent by name, or broadcast to all active agents with to='*'. "
+        "Messages are queued for running agents and delivered in order. "
+        "Use message='__status__' to inspect a worker's current state."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -23,6 +35,10 @@ class SendMessageTool(Tool):
                 "type": "string",
                 "description": "The message content to send.",
             },
+            "summary": {
+                "type": "string",
+                "description": "Optional 5-10 word preview for the UI.",
+            },
         },
         "required": ["to", "message"],
     }
@@ -34,44 +50,98 @@ class SendMessageTool(Tool):
         return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
-        to = input.get("to", "")
-        message = input.get("message", "")
+        to = str(input.get("to", "")).strip()
+        message = str(input.get("message", "")).strip()
+        summary = str(input.get("summary", "")).strip()
+        coordination_root = get_coordination_root(ctx.session)
+        sender_id = ctx.session.session_id or coordinator_identity(ctx.session)
+        if not to:
+            return "Error: agent target is required."
+        if not message:
+            return "Error: message cannot be empty."
 
-        # Look for the sub-agent in the session's agent registry
-        registry = getattr(ctx.session, "_subagent_registry", None)
-        if registry is None:
-            return f"Error: no sub-agent registry found. Cannot send message to '{to}'."
+        if to == "*":
+            registry = get_subagent_registry(coordination_root)
+            if not registry:
+                return "Broadcast queued (no active recipient inboxes yet)."
+            recipients = [
+                entry
+                for entry in registry.values()
+                if str(entry.get("id") or "") and str(entry.get("id") or "") != sender_id
+            ]
+            for agent_entry in recipients:
+                queue_subagent_message(
+                    coordination_root,
+                    str(agent_entry.get("id") or ""),
+                    sender=sender_id,
+                    content=message,
+                    summary=summary,
+                )
+                self._ensure_delivery(agent_entry, ctx)
+            preview = summary or message[:60]
+            return f"Broadcast to {len(recipients)} agent(s): {preview}"
 
-        agent_entry = registry.get(to)
+        if to in {"coordinator", "manager", coordinator_identity(ctx.session)}:
+            queue_coordinator_message(
+                coordination_root,
+                sender=sender_id,
+                content=message,
+                summary=summary,
+            )
+            preview = summary or message[:60]
+            return f"Message sent to '{coordinator_identity(ctx.session)}': {preview}"
+
+        agent_entry = find_subagent_entry(coordination_root, to)
         if agent_entry is None:
-            # Try matching by name prefix
-            for key, entry in registry.items():
-                if key.startswith(to) or entry.get("name", "").startswith(to):
-                    agent_entry = entry
-                    break
+            return f"Error: agent '{to}' not found."
 
-        if agent_entry is None:
-            available = ", ".join(registry.keys()) if registry else "(none)"
-            return f"Error: agent '{to}' not found. Available: {available}"
+        if message == "__status__":
+            status = agent_entry.get("status", "unknown")
+            error = agent_entry.get("error", "")
+            last_output = agent_entry.get("last_output", "")
+            queued = pending_subagent_message_count(
+                coordination_root,
+                str(agent_entry.get("id") or ""),
+            )
+            if status == "running":
+                return f"Agent {agent_entry.get('id')} is still running. queued_messages={queued}"
+            if error:
+                return f"Agent {agent_entry.get('id')} error: {error}"
+            return last_output or f"Agent {agent_entry.get('id')} is idle. queued_messages={queued}"
 
-        sub_agent = agent_entry.get("agent")
-        if sub_agent is None:
-            return f"Error: agent '{to}' has no active session."
+        queue_subagent_message(
+            coordination_root,
+            str(agent_entry.get("id") or ""),
+            sender=sender_id,
+            content=message,
+            summary=summary,
+        )
+        preview = summary or message[:60]
+        if agent_entry.get("status") == "running":
+            queued = pending_subagent_message_count(
+                coordination_root,
+                str(agent_entry.get("id") or ""),
+            )
+            return f"Message queued for '{agent_entry.get('id')}': {preview} (queued={queued})"
 
-        # Inject the message and run another turn
-        sub_agent.session.append_user_text(message)
+        self._ensure_delivery(agent_entry, ctx)
+        return f"Message sent to '{agent_entry.get('id')}': {preview}"
 
-        try:
-            result = await sub_agent.run_turn()
-        except Exception as e:
-            return f"Error running sub-agent turn: {e}"
+    @staticmethod
+    def _ensure_delivery(agent_entry: dict[str, Any], ctx: ToolContext) -> None:
+        task = agent_entry.get("task")
+        if task is not None and not task.done():
+            return
 
-        # Extract text from the response
-        text_parts = []
-        if sub_agent.session.messages:
-            last = sub_agent.session.messages[-1]
-            if last.role == "assistant":
-                for block in last.content:
-                    if hasattr(block, "text"):
-                        text_parts.append(block.text)
-        return "\n".join(text_parts) if text_parts else "(no text response)"
+        async def runner() -> None:
+            try:
+                output = await run_subagent_prompt(
+                    agent_entry,
+                    "",
+                    get_coordination_root(ctx.session),
+                )
+                agent_entry["last_output"] = output
+            finally:
+                agent_entry["task"] = None
+
+        agent_entry["task"] = asyncio.create_task(runner())

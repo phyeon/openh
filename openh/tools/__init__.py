@@ -15,7 +15,14 @@ from .planmode import EnterPlanModeTool, ExitPlanModeTool
 from .read import ReadTool
 from .send_message import SendMessageTool
 from .skill_tool import SkillTool
-from .task_tools import TaskCreateTool, TaskOutputTool, TaskStopTool
+from .task_tools import (
+    TaskCreateTool,
+    TaskGetTool,
+    TaskListTool,
+    TaskOutputTool,
+    TaskStopTool,
+    TaskUpdateTool,
+)
 from .todowrite import TodoWriteTool
 from .tool_search import ToolSearchTool
 from .webfetch import WebFetchTool
@@ -53,6 +60,9 @@ __all__ = [
     "EnterWorktreeTool",
     "ExitWorktreeTool",
     "TaskCreateTool",
+    "TaskGetTool",
+    "TaskUpdateTool",
+    "TaskListTool",
     "TaskOutputTool",
     "TaskStopTool",
     "SendMessageTool",
@@ -93,8 +103,11 @@ def default_tools() -> list[Tool]:
         EnterWorktreeTool(),
         ExitWorktreeTool(),
         TaskCreateTool(),
-        TaskOutputTool(),
+        TaskGetTool(),
+        TaskUpdateTool(),
+        TaskListTool(),
         TaskStopTool(),
+        TaskOutputTool(),
         SendMessageTool(),
         ToolSearchTool(),
     ]

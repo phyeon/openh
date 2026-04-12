@@ -587,11 +587,15 @@ def save_session_meta(
     title: str | None = None,
     total_input_tokens: int | None = None,
     total_output_tokens: int | None = None,
+    total_cache_creation_input_tokens: int | None = None,
+    total_cache_read_input_tokens: int | None = None,
     last_input_tokens: int | None = None,
     total_estimated_cost_usd: float | None = None,
     session_cwd: str | None = None,
     prompt_override: str | None = None,
     profile_id: str | None = None,
+    session_memory_last_extracted_message_count: int | None = None,
+    session_memory_last_extracted_tool_call_count: int | None = None,
 ) -> None:
     """Append a __meta__ line with session metadata to the JSONL file."""
     meta: dict[str, Any] = {"type": "__meta__"}
@@ -601,6 +605,10 @@ def save_session_meta(
         meta["total_input_tokens"] = total_input_tokens
     if total_output_tokens is not None:
         meta["total_output_tokens"] = total_output_tokens
+    if total_cache_creation_input_tokens is not None:
+        meta["total_cache_creation_input_tokens"] = total_cache_creation_input_tokens
+    if total_cache_read_input_tokens is not None:
+        meta["total_cache_read_input_tokens"] = total_cache_read_input_tokens
     if last_input_tokens is not None:
         meta["last_input_tokens"] = last_input_tokens
     if total_estimated_cost_usd is not None:
@@ -611,6 +619,14 @@ def save_session_meta(
         meta["prompt_override"] = prompt_override
     if profile_id is not None and profile_id != "default":
         meta["profile_id"] = profile_id
+    if session_memory_last_extracted_message_count is not None:
+        meta["session_memory_last_extracted_message_count"] = (
+            session_memory_last_extracted_message_count
+        )
+    if session_memory_last_extracted_tool_call_count is not None:
+        meta["session_memory_last_extracted_tool_call_count"] = (
+            session_memory_last_extracted_tool_call_count
+        )
     line = json.dumps(meta, ensure_ascii=False)
     with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")

@@ -70,7 +70,11 @@ class Agent:
                 pass
 
         from .compaction import compact_messages, should_compact
-        if should_compact(self.session.model_messages):
+        if should_compact(
+            self.session.model_messages,
+            model=getattr(self.session.provider, "model", ""),
+            usage_tokens=self.session.last_input_tokens,
+        ):
             try:
                 compacted = await compact_messages(
                     self.session.model_messages, self.session.provider
@@ -113,6 +117,7 @@ class Agent:
     async def _drive_loop(self) -> None:
         """Drive the provider ↔ tool loop using whatever is already in session.messages."""
         import asyncio
+        from .tools.agent_tool import drain_coordinator_messages, get_coordination_root
 
         iterations = 0
         while True:
@@ -122,6 +127,19 @@ class Agent:
                     text=f"\n\n[agent: tool loop hit {self.MAX_TOOL_LOOP_ITERATIONS} iterations — stopping]"
                 ))
                 return
+
+            if get_coordination_root(self.session) is self.session:
+                injected_messages = drain_coordinator_messages(self.session)
+                for item in injected_messages:
+                    sender = str(item.get("from") or "coordinator")
+                    summary = str(item.get("summary") or "").strip()
+                    suffix = f" ({summary})" if summary else ""
+                    content = str(item.get("content") or "").strip()
+                    if content:
+                        self.session.append_user_text(
+                            f"[Agent message from {sender}{suffix}]\n{content}"
+                        )
+
             assistant_blocks: list[Block] = []
             current_text: list[str] = []
             tool_uses: list[ToolUseBlock] = []
@@ -149,7 +167,12 @@ class Agent:
                         assistant_blocks.append(block)
                         tool_uses.append(block)
                     elif isinstance(event, Usage):
-                        self.session.add_tokens(event.input_tokens, event.output_tokens)
+                        self.session.add_tokens(
+                            event.input_tokens,
+                            event.output_tokens,
+                            event.cache_creation_input_tokens,
+                            event.cache_read_input_tokens,
+                        )
                     elif isinstance(event, MessageStop):
                         stop_reason = event.stop_reason
             except _StreamTimeout as exc:

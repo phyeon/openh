@@ -1,4 +1,4 @@
-"""CLAUDE.md memory loader.
+"""AGENTS.md / CLAUDE.md memory loader.
 
 When a session starts in a workspace, collect all CLAUDE.md / AGENTS.md files
 from the cwd walking UP to the home directory, and concatenate them as
@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Iterable
 
 
-MEMORY_FILENAMES = ("CLAUDE.md", "AGENTS.md", ".claude/CLAUDE.md")
+MEMORY_FILENAMES = (
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claurst/AGENTS.md",
+    ".claurst/CLAUDE.md",
+    ".claude/CLAUDE.md",
+)
 
 
 def _walk_up(start: Path) -> Iterable[Path]:

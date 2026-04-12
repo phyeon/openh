@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from .base import PermissionDecision, Tool, ToolContext
 
-MAX_RESULTS = 100
+MAX_RESULTS = 250
 
 
 class GlobTool(Tool):
@@ -62,9 +62,7 @@ class GlobTool(Tool):
             return f"no files matched {pattern} under {base}"
 
         out = "\n".join(str(p) for p in truncated)
-        suffix = (
-            f"\n\n(showing {len(truncated)} of {len(files)} matches)"
-            if len(files) > MAX_RESULTS
-            else ""
-        )
+        suffix = ""
+        if len(files) > MAX_RESULTS:
+            suffix = f"\n\n... and {len(files) - MAX_RESULTS} more files (showing first {MAX_RESULTS})"
         return out + suffix

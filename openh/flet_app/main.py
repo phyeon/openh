@@ -27,6 +27,11 @@ from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
 from .settings_dialog import SettingsDialog
+from ..system_prompt import (
+    build_managed_agent_prompt,
+    build_runtime_system_prompt,
+    merge_base_prompt,
+)
 from ..messages import (
     MessageStop,
     StreamEvent,
@@ -54,6 +59,14 @@ from ..cc_compat import (
 SessionMeta = CCSessionMeta
 from ..providers import get_provider
 from ..pricing import estimate_cost_usd
+from ..session_memory import (
+    count_tool_calls,
+    count_visible_messages,
+    extract_memories,
+    persist_memories,
+    project_agents_path,
+    should_extract as should_extract_session_memory,
+)
 from ..session import AgentSession
 from ..tools import default_tools
 from ..profiles import get_profile, list_profiles
@@ -146,6 +159,7 @@ class OpenHApp:
             title="",
             created_at=time.time(),
         )
+        self._sync_session_managed_agent_config()
         ensure_project_dirs(self.config.cwd)
         self._jsonl_writer = JsonlSessionWriter(self.config.cwd, sid)
         # Load MCP tools asynchronously
@@ -192,6 +206,7 @@ class OpenHApp:
         self._pending_scroll_animated = False
         self._jsonl_written_count = 0
         self._busy_note_active = False
+        self._session_memory_inflight: set[str] = set()
         # FnD ambient effects
         self._fnd_particles: list[ft.Container] = []
         self._fnd_ambient_running = False
@@ -516,6 +531,8 @@ class OpenHApp:
     def _on_window_event(self, e) -> None:
         try:
             event_type = getattr(e, "data", "") or getattr(e, "type", "") or str(e)
+            if str(event_type).lower() in {"close", "destroy", "closed"}:
+                self._schedule_session_memory_extraction(force=True)
             w = int(self.page.window.width or 0)
             h = int(self.page.window.height or 0)
             if w > 100 and h > 100:
@@ -528,27 +545,75 @@ class OpenHApp:
         except Exception:
             pass
 
-    def _get_system_prompt(self) -> str:
-        """Return the effective system prompt.
-
-        Priority: session override > session preset > global preset > built-in.
-        """
-        # 1. Per-session custom override
+    def _get_custom_prompt_text(self) -> str:
+        """Return only the selected custom prompt text, if any."""
         if self.session.prompt_override:
             return self.session.prompt_override
-        # 2. Per-session preset
         session_preset = (self.session.prompt_preset or "").strip()
         if session_preset and session_preset.lower() != prompts_mod.BUILTIN_NAME:
             preset = prompts_mod.get_preset(session_preset)
             if preset is not None and preset.text.strip():
                 return preset.text
-        # 3. Global active preset
         active = (self.settings.active_prompt or "").strip()
         if active and active.lower() != prompts_mod.BUILTIN_NAME:
             preset = prompts_mod.get_preset(active)
             if preset is not None and preset.text.strip():
                 return preset.text
-        return load_system_prompt()
+        return ""
+
+    def _sync_session_managed_agent_config(self) -> None:
+        provider_name = getattr(self.session.provider, "name", "") or self.settings.active_provider or "anthropic"
+        provider_model = getattr(self.session.provider, "model", "") or ""
+        executor_model = (
+            f"{provider_name}/{provider_model}"
+            if provider_name and provider_model
+            else provider_model
+        )
+        self.session.managed_agent_enabled = True
+        self.session.managed_executor_model = executor_model
+        self.session.managed_executor_max_turns = 10
+        self.session.managed_max_concurrent_executors = max(
+            1,
+            int(self.settings.subagent_parallel or 1),
+        )
+        self.session.managed_executor_isolation = True
+
+    def _get_managed_prompt_text(self) -> str:
+        if not getattr(self.session, "managed_agent_enabled", False):
+            return ""
+        executor_model = (self.session.managed_executor_model or "").strip()
+        if not executor_model:
+            return ""
+        return build_managed_agent_prompt(
+            executor_model=executor_model,
+            executor_max_turns=max(1, int(self.session.managed_executor_max_turns or 10)),
+            max_concurrent=max(1, int(self.session.managed_max_concurrent_executors or 1)),
+            executor_isolation=bool(self.session.managed_executor_isolation),
+        )
+
+    def _get_base_system_prompt(self) -> str:
+        """Return the effective base prompt sent to the model before runtime context."""
+        base_prompt = merge_base_prompt(
+            load_system_prompt(),
+            self._get_custom_prompt_text(),
+        )
+        managed_prompt = self._get_managed_prompt_text()
+        if managed_prompt:
+            base_prompt = merge_base_prompt(base_prompt, managed_prompt)
+        return base_prompt
+
+    def _get_prompt_editor_text(self) -> str:
+        custom = self._get_custom_prompt_text()
+        return custom or load_system_prompt()
+
+    def _get_system_prompt(self) -> str:
+        from datetime import date
+
+        return build_runtime_system_prompt(
+            self._get_base_system_prompt(),
+            self.session.cwd,
+            date.today().isoformat(),
+        )
 
     def _refresh_top_bar(self, note: str = "") -> None:
         # Determine prompt label for the pill
@@ -1108,6 +1173,7 @@ class OpenHApp:
             )
             return
         self.session.switch_provider(new_provider)
+        self._sync_session_managed_agent_config()
         save_settings(self.settings)
         self._refresh_top_bar()
         self._refresh_input()
@@ -1162,6 +1228,7 @@ class OpenHApp:
                 self._append_to_messages(
                     widgets.error_panel(f"provider reload failed: {exc}")
                 )
+        self._sync_session_managed_agent_config()
         # Propagate the new auto-compact threshold globally
         import openh.config as cfg_mod
         cfg_mod.AUTO_COMPACT_THRESHOLD = int(new_settings.auto_compact_threshold)
@@ -1454,12 +1521,13 @@ class OpenHApp:
             self._refresh_top_bar()
             self._refresh_status_bar()
             self._autosave()
+            self._schedule_session_memory_extraction()
             self._focus_input()
             self._scroll_to_end()
 
     def _open_prompt_editor(self) -> None:
         """Open a dialog to edit this session's system prompt."""
-        current_text = self._get_system_prompt()
+        current_text = self._get_prompt_editor_text()
         presets = prompts_mod.list_presets()
         preset_names = [p.name for p in presets]
 
@@ -1729,10 +1797,11 @@ class OpenHApp:
             self._refresh_top_bar()
             self._refresh_input()
             self._refresh_status_bar()
+            self._schedule_session_memory_extraction(force=True)
 
     async def _init_claude_md_async(self) -> None:
         from pathlib import Path
-        target = Path(self.session.cwd) / "CLAUDE.md"
+        target = Path(self.session.cwd) / "AGENTS.md"
         if target.exists():
             self._append_to_messages(
                 widgets.system_note(f"{target} already exists")
@@ -1791,15 +1860,6 @@ class OpenHApp:
                 return
 
         self._hide_welcome()
-        # Inject system context (cwd + memory) on the first user turn
-        if not self.session.messages:
-            from ..memory import build_system_context
-            from datetime import date
-            from ..messages import TextBlock
-            ctx = build_system_context(self.session.cwd, date.today().isoformat())
-            if ctx.strip():
-                self.session.append_message("user", [TextBlock(text=ctx)])
-                self.session.append_message("assistant", [TextBlock(text="Acknowledged. Ready to help.")])
         # msg_index = where this user message will land after agent appends it
         upcoming_index = len(self.session.messages)
         self._append_to_messages(widgets.user_bubble(
@@ -1845,7 +1905,11 @@ class OpenHApp:
         """Like _run_turn_async but first injects image/document blocks on the user message."""
         from ..compaction import compact_messages, should_compact
         from ..messages import TextBlock
-        if should_compact(self.session.model_messages):
+        if should_compact(
+            self.session.model_messages,
+            model=getattr(self.session.provider, "model", ""),
+            usage_tokens=self.session.last_input_tokens,
+        ):
             self.session.model_messages = await compact_messages(
                 self.session.model_messages, self.session.provider
             )
@@ -1879,6 +1943,7 @@ class OpenHApp:
             self._refresh_top_bar()
             self._refresh_status_bar()
             self._autosave()
+            self._schedule_session_memory_extraction()
             self._focus_input()
             self._scroll_to_end()
             self._drain_queued_turns()
@@ -1998,6 +2063,7 @@ class OpenHApp:
             self._refresh_top_bar()
             self._refresh_status_bar()
             self._autosave()
+            self._schedule_session_memory_extraction()
             self._focus_input()
             self._scroll_to_end()
             self._drain_queued_turns()
@@ -2118,8 +2184,12 @@ class OpenHApp:
             "profile_id": self.session.profile_id,
             "total_input_tokens": self.session.total_input_tokens,
             "total_output_tokens": self.session.total_output_tokens,
+            "total_cache_creation_input_tokens": self.session.total_cache_creation_input_tokens,
+            "total_cache_read_input_tokens": self.session.total_cache_read_input_tokens,
             "last_input_tokens": self.session.last_input_tokens,
             "total_estimated_cost_usd": self.session.total_estimated_cost_usd,
+            "session_memory_last_extracted_message_count": self.session.session_memory_last_extracted_message_count,
+            "session_memory_last_extracted_tool_call_count": self.session.session_memory_last_extracted_tool_call_count,
         }
         try:
             stat = path.stat()
@@ -2212,6 +2282,7 @@ class OpenHApp:
     def _new_chat(self, _skip_toggle: bool = False) -> None:
         if self._busy:
             return
+        self._schedule_session_memory_extraction(force=True)
         # 웰컴 화면 상태에서 또 누르면 → 프로필 토글
         if (not _skip_toggle
                 and not self.session.messages
@@ -2228,14 +2299,19 @@ class OpenHApp:
         self.session.always_allow.clear()
         self.session.total_input_tokens = 0
         self.session.total_output_tokens = 0
+        self.session.total_cache_creation_input_tokens = 0
+        self.session.total_cache_read_input_tokens = 0
         self.session.last_input_tokens = 0
         self.session.total_estimated_cost_usd = 0.0
+        self.session.session_memory_last_extracted_message_count = 0
+        self.session.session_memory_last_extracted_tool_call_count = 0
         self.session.session_id = new_session_uuid()
         self.session.created_at = time.time()
         self.session.title = ""
         self.session.profile_id = "default"
         self.session.prompt_override = ""
         self.session.tools = default_tools()
+        self._sync_session_managed_agent_config()
         self._current_title = ""
         self._queued_turns = []
         self._reset_live_tool_stack()
@@ -2291,6 +2367,7 @@ class OpenHApp:
                     self.session.tools.extend(extra)
             except Exception:
                 pass
+        self._sync_session_managed_agent_config()
         # Apply profile color theme + full UI rebuild
         if spec.color_preset:
             theme.set_color_preset(spec.color_preset)
@@ -2451,6 +2528,7 @@ class OpenHApp:
             return
         if self.session.session_id == session_id:
             return
+        self._schedule_session_memory_extraction(force=True)
         target = next((m for m in self._session_metas if m.session_id == session_id), None)
         if target is None:
             return
@@ -2461,6 +2539,7 @@ class OpenHApp:
                 widgets.error_panel(f"failed to load session: {exc}")
             )
             return
+        self.session.tools = default_tools()
         self.session.messages = messages
         self.session.reset_model_messages()
         self.session.read_files.clear()
@@ -2468,7 +2547,19 @@ class OpenHApp:
         # Restore persisted state from metadata (includes __meta__ fields)
         self.session.total_input_tokens = metadata.get("total_input_tokens", 0)
         self.session.total_output_tokens = metadata.get("total_output_tokens", 0)
+        self.session.total_cache_creation_input_tokens = int(
+            metadata.get("total_cache_creation_input_tokens", 0) or 0
+        )
+        self.session.total_cache_read_input_tokens = int(
+            metadata.get("total_cache_read_input_tokens", 0) or 0
+        )
         self.session.last_input_tokens = int(metadata.get("last_input_tokens", 0) or 0)
+        self.session.session_memory_last_extracted_message_count = int(
+            metadata.get("session_memory_last_extracted_message_count", 0) or 0
+        )
+        self.session.session_memory_last_extracted_tool_call_count = int(
+            metadata.get("session_memory_last_extracted_tool_call_count", 0) or 0
+        )
         self.session.total_estimated_cost_usd = float(
             metadata.get(
                 "total_estimated_cost_usd",
@@ -2515,6 +2606,7 @@ class OpenHApp:
             self.page.bgcolor = theme.BG_PAGE
         self.session.session_id = metadata.get("session_id") or session_id
         self.session.title = metadata.get("title") or target.title or ""
+        self._sync_session_managed_agent_config()
         self._current_title = self.session.title or target.title or ""
         self._queued_turns = []
         self._reset_live_tool_stack()
@@ -2611,11 +2703,15 @@ class OpenHApp:
             title=self.session.title or self._current_title or None,
             total_input_tokens=self.session.total_input_tokens,
             total_output_tokens=self.session.total_output_tokens,
+            total_cache_creation_input_tokens=self.session.total_cache_creation_input_tokens,
+            total_cache_read_input_tokens=self.session.total_cache_read_input_tokens,
             last_input_tokens=self.session.last_input_tokens,
             total_estimated_cost_usd=self.session.total_estimated_cost_usd,
             session_cwd=self.session.cwd,
             prompt_override=self.session.prompt_override or None,
             profile_id=self.session.profile_id if self.session.profile_id != "default" else None,
+            session_memory_last_extracted_message_count=self.session.session_memory_last_extracted_message_count,
+            session_memory_last_extracted_tool_call_count=self.session.session_memory_last_extracted_tool_call_count,
         )
         self._cache_current_session()
         self._remember_current_session()
@@ -2666,6 +2762,61 @@ class OpenHApp:
             self._persist_session_snapshot(rewrite=rewrite)
         except Exception:
             pass
+
+    def _schedule_session_memory_extraction(self, *, force: bool = False) -> None:
+        session_id = self.session.session_id
+        if not session_id or session_id in self._session_memory_inflight:
+            return
+
+        snapshot = list(self.session.messages)
+        if not should_extract_session_memory(
+            snapshot,
+            last_extracted_message_count=self.session.session_memory_last_extracted_message_count,
+            last_extracted_tool_call_count=self.session.session_memory_last_extracted_tool_call_count,
+            force=force,
+        ):
+            return
+
+        cwd = self.session.cwd
+        provider = self.session.provider
+        self._session_memory_inflight.add(session_id)
+        self.page.run_task(
+            self._extract_session_memory_async,
+            session_id,
+            cwd,
+            snapshot,
+            provider,
+        )
+
+    async def _extract_session_memory_async(
+        self,
+        session_id: str,
+        cwd: str,
+        snapshot: list[Any],
+        provider: Any,
+    ) -> None:
+        try:
+            memories = await extract_memories(snapshot, provider, cwd)
+            if memories:
+                await persist_memories(memories, project_agents_path(cwd))
+
+            visible_count = count_visible_messages(snapshot)
+            tool_call_count = count_tool_calls(snapshot)
+            meta_path = session_jsonl_path(cwd, session_id)
+            save_session_meta(
+                meta_path,
+                session_memory_last_extracted_message_count=visible_count,
+                session_memory_last_extracted_tool_call_count=tool_call_count,
+            )
+
+            if self.session.session_id == session_id:
+                self.session.session_memory_last_extracted_message_count = visible_count
+                self.session.session_memory_last_extracted_tool_call_count = tool_call_count
+                self._cache_current_session()
+        except Exception:
+            pass
+        finally:
+            self._session_memory_inflight.discard(session_id)
 
     def _remove_attachment(self, idx: int) -> None:
         pending = getattr(self, "_pending_media", None) or []

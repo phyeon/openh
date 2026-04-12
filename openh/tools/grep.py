@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import re
 import shutil
 from pathlib import Path
@@ -11,15 +12,43 @@ from .base import PermissionDecision, Tool, ToolContext
 
 MAX_OUTPUT_BYTES = 50_000
 DEFAULT_HEAD_LIMIT = 250
+_IGNORED_NAMES = {"node_modules", "target", "__pycache__", ".git"}
+
+
+def _extensions_for_type(file_type: str) -> list[str]:
+    mapping = {
+        "rust": ["rs"],
+        "rs": ["rs"],
+        "js": ["js", "jsx", "mjs", "cjs"],
+        "ts": ["ts", "tsx", "mts", "cts"],
+        "py": ["py", "pyi"],
+        "python": ["py", "pyi"],
+        "go": ["go"],
+        "java": ["java"],
+        "c": ["c", "h"],
+        "cpp": ["cpp", "hpp", "cc", "hh", "cxx"],
+        "swift": ["swift"],
+        "kt": ["kt", "kts"],
+        "kotlin": ["kt", "kts"],
+        "json": ["json"],
+        "yaml": ["yaml", "yml"],
+        "yml": ["yaml", "yml"],
+        "toml": ["toml"],
+        "md": ["md", "markdown"],
+        "markdown": ["md", "markdown"],
+        "sh": ["sh", "bash", "zsh"],
+        "bash": ["sh", "bash", "zsh"],
+    }
+    return mapping.get((file_type or "").lower(), [])
 
 
 class GrepTool(Tool):
     name: ClassVar[str] = "Grep"
     description: ClassVar[str] = (
         "A powerful search tool built on ripgrep. Supports full regex syntax. "
-        "Filter files with the glob parameter (e.g. '*.js', '**/*.tsx'). "
-        "Output modes: 'content' shows matching lines (default), "
-        "'files_with_matches' shows only file paths, 'count' shows match counts. "
+        "Filter files with the glob parameter or the type parameter. "
+        "Output modes: 'content' shows matching lines, "
+        "'files_with_matches' shows only file paths (default), 'count' shows match counts. "
         "ALWAYS use Grep for content search. NEVER invoke grep or rg via Bash."
     )
     input_schema: ClassVar[dict[str, Any]] = {
@@ -34,12 +63,29 @@ class GrepTool(Tool):
                 "type": "string",
                 "description": "Glob filter for which files to include (e.g. `*.py`). Optional.",
             },
+            "type": {
+                "type": "string",
+                "description": "Optional file type shorthand like py, ts, js, rust, go, json, yaml.",
+            },
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
-                "description": "Output mode. Defaults to `content`.",
+                "description": "Output mode. Defaults to `files_with_matches`.",
             },
             "case_insensitive": {"type": "boolean", "description": "Case-insensitive search."},
+            "-i": {"type": "boolean", "description": "Case-insensitive search."},
+            "-n": {
+                "type": "boolean",
+                "description": "Show line numbers in content mode. Defaults to true.",
+            },
+            "context": {
+                "type": "integer",
+                "description": "Number of context lines to show before and after each match.",
+            },
+            "multiline": {
+                "type": "boolean",
+                "description": "Enable multiline regex mode where matches can span newlines.",
+            },
             "head_limit": {
                 "type": "integer",
                 "description": "Max lines/entries to return. Defaults to 250.",
@@ -60,16 +106,40 @@ class GrepTool(Tool):
             return "error: pattern is required"
         path = input.get("path") or ctx.session.cwd
         glob_pattern = input.get("glob")
-        output_mode = input.get("output_mode") or "content"
-        case_insensitive = bool(input.get("case_insensitive"))
+        file_type = input.get("type")
+        output_mode = input.get("output_mode") or "files_with_matches"
+        case_insensitive = bool(input.get("case_insensitive") or input.get("-i"))
+        show_line_numbers_raw = input.get("-n")
+        show_line_numbers = True if show_line_numbers_raw is None else bool(show_line_numbers_raw)
+        context_lines = max(0, int(input.get("context") or 0))
+        multiline = bool(input.get("multiline"))
         head_limit = int(input.get("head_limit") or DEFAULT_HEAD_LIMIT)
+        extensions = _extensions_for_type(str(file_type or ""))
 
         if shutil.which("rg"):
             return await self._run_rg(
-                pattern, path, glob_pattern, output_mode, case_insensitive, head_limit
+                pattern,
+                path,
+                glob_pattern,
+                output_mode,
+                case_insensitive,
+                show_line_numbers,
+                context_lines,
+                multiline,
+                head_limit,
+                extensions,
             )
         return self._run_python(
-            pattern, path, glob_pattern, output_mode, case_insensitive, head_limit
+            pattern,
+            path,
+            glob_pattern,
+            output_mode,
+            case_insensitive,
+            show_line_numbers,
+            context_lines,
+            multiline,
+            head_limit,
+            extensions,
         )
 
     @staticmethod
@@ -79,19 +149,33 @@ class GrepTool(Tool):
         glob_pattern: str | None,
         output_mode: str,
         case_insensitive: bool,
+        show_line_numbers: bool,
+        context_lines: int,
+        multiline: bool,
         head_limit: int,
+        extensions: list[str],
     ) -> str:
         args = ["rg"]
         if case_insensitive:
             args.append("-i")
+        if multiline:
+            args.append("--multiline")
         if output_mode == "files_with_matches":
             args.append("-l")
         elif output_mode == "count":
             args.append("-c")
         else:
-            args.extend(["-n", "--column", "--no-heading"])
+            if show_line_numbers:
+                args.append("-n")
+            else:
+                args.append("--no-line-number")
+            args.extend(["--column", "--no-heading"])
+            if context_lines > 0:
+                args.extend(["-C", str(context_lines)])
         if glob_pattern:
             args.extend(["-g", glob_pattern])
+        for ext in extensions:
+            args.extend(["-g", f"*.{ext}"])
         args.extend(["--", pattern, path])
 
         try:
@@ -126,9 +210,15 @@ class GrepTool(Tool):
         glob_pattern: str | None,
         output_mode: str,
         case_insensitive: bool,
+        show_line_numbers: bool,
+        context_lines: int,
+        multiline: bool,
         head_limit: int,
+        extensions: list[str],
     ) -> str:
         flags = re.IGNORECASE if case_insensitive else 0
+        if multiline:
+            flags |= re.MULTILINE | re.DOTALL
         try:
             regex = re.compile(pattern, flags)
         except re.error as exc:
@@ -147,20 +237,57 @@ class GrepTool(Tool):
         match_files: dict[str, int] = {}
 
         for f in files:
-            # skip binaries / huge / hidden git
-            if any(part.startswith(".") and part not in (".",) for part in f.parts):
+            if any(part.startswith(".") or part in _IGNORED_NAMES for part in f.parts):
                 continue
+            if extensions:
+                ext = f.suffix.lstrip(".").lower()
+                if ext not in extensions:
+                    continue
             try:
-                with f.open("r", encoding="utf-8", errors="replace") as fh:
-                    for n, line in enumerate(fh, start=1):
-                        if regex.search(line):
-                            match_files[str(f)] = match_files.get(str(f), 0) + 1
-                            if output_mode == "content":
-                                out.append(f"{f}:{n}:{line.rstrip(chr(10))}")
-                                if len(out) >= head_limit:
-                                    break
+                content = f.read_text(encoding="utf-8", errors="replace")
             except (OSError, UnicodeDecodeError):
                 continue
+
+            lines = content.splitlines()
+            if multiline:
+                matches = list(regex.finditer(content))
+                if not matches:
+                    continue
+                match_files[str(f)] = len(matches)
+                if output_mode == "content":
+                    rendered = _render_multiline_matches(
+                        f,
+                        content,
+                        lines,
+                        matches,
+                        context_lines=context_lines,
+                        show_line_numbers=show_line_numbers,
+                    )
+                    for line in rendered:
+                        out.append(line)
+                        if len(out) >= head_limit:
+                            break
+            else:
+                match_lines: list[int] = []
+                for n, line in enumerate(lines, start=1):
+                    if regex.search(line):
+                        match_lines.append(n)
+                if not match_lines:
+                    continue
+                match_files[str(f)] = len(match_lines)
+                if output_mode == "content":
+                    rendered = _render_line_matches(
+                        f,
+                        lines,
+                        match_lines,
+                        context_lines=context_lines,
+                        show_line_numbers=show_line_numbers,
+                    )
+                    for line in rendered:
+                        out.append(line)
+                        if len(out) >= head_limit:
+                            break
+
             if output_mode == "content" and len(out) >= head_limit:
                 break
 
@@ -177,3 +304,73 @@ class GrepTool(Tool):
         if len(result) > MAX_OUTPUT_BYTES:
             result = result[:MAX_OUTPUT_BYTES] + "\n… (truncated)"
         return result
+
+
+def _render_line_matches(
+    path: Path,
+    lines: list[str],
+    match_lines: list[int],
+    *,
+    context_lines: int,
+    show_line_numbers: bool,
+) -> list[str]:
+    selected = _expand_with_context(match_lines, len(lines), context_lines)
+    return _format_selected_lines(path, lines, selected, show_line_numbers=show_line_numbers)
+
+
+def _render_multiline_matches(
+    path: Path,
+    content: str,
+    lines: list[str],
+    matches: list[re.Match[str]],
+    *,
+    context_lines: int,
+    show_line_numbers: bool,
+) -> list[str]:
+    if not lines:
+        return []
+
+    offsets = [0]
+    for idx, char in enumerate(content):
+        if char == "\n":
+            offsets.append(idx + 1)
+
+    matched_lines: list[int] = []
+    for match in matches:
+        start_line = bisect.bisect_right(offsets, match.start())
+        end_pos = max(match.start(), match.end() - 1)
+        end_line = bisect.bisect_right(offsets, end_pos)
+        matched_lines.extend(range(start_line, end_line + 1))
+
+    selected = _expand_with_context(matched_lines, len(lines), context_lines)
+    return _format_selected_lines(path, lines, selected, show_line_numbers=show_line_numbers)
+
+
+def _expand_with_context(match_lines: list[int], total_lines: int, context_lines: int) -> list[int]:
+    selected: set[int] = set()
+    for line_no in match_lines:
+        start = max(1, line_no - context_lines)
+        end = min(total_lines, line_no + context_lines)
+        selected.update(range(start, end + 1))
+    return sorted(selected)
+
+
+def _format_selected_lines(
+    path: Path,
+    lines: list[str],
+    selected_lines: list[int],
+    *,
+    show_line_numbers: bool,
+) -> list[str]:
+    output: list[str] = []
+    prev_line = 0
+    for line_no in selected_lines:
+        if prev_line and line_no > prev_line + 1:
+            output.append("--")
+        line_text = lines[line_no - 1]
+        if show_line_numbers:
+            output.append(f"{path}:{line_no}:{line_text}")
+        else:
+            output.append(f"{path}:{line_text}")
+        prev_line = line_no
+    return output

@@ -71,8 +71,8 @@ class CommandDispatcher:
         self.register("compact", _cmd_compact, "Force summarize + compact the conversation")
         self.register("rename", _cmd_rename, "Rename the current conversation: /rename new title")
         self.register("theme", _cmd_theme, "Toggle light/dark theme")
-        self.register("init", _cmd_init, "Generate a starter CLAUDE.md in the current directory")
-        self.register("memory", _cmd_memory, "Show loaded CLAUDE.md memory")
+        self.register("init", _cmd_init, "Generate a starter AGENTS.md in the current directory")
+        self.register("memory", _cmd_memory, "Show loaded AGENTS.md / CLAUDE.md memory")
         self.register("todos", _cmd_todos, "Show the current todo list")
         self.register("cwd", _cmd_cwd, "Show the current working directory")
         self.register("version", _cmd_version, "Show openh version")
@@ -152,14 +152,14 @@ def _cmd_theme(args: list[str], ctx: CommandContext) -> CommandResult:
 
 def _cmd_init(args: list[str], ctx: CommandContext) -> CommandResult:
     ctx.on_init()
-    return CommandResult(handled=True, output="creating starter CLAUDE.md …")
+    return CommandResult(handled=True, output="creating starter AGENTS.md …")
 
 
 def _cmd_memory(args: list[str], ctx: CommandContext) -> CommandResult:
     from .memory import load_memory
     text = load_memory(ctx.session.cwd)
     if not text:
-        return CommandResult(handled=True, output="(no CLAUDE.md memory files found)")
+        return CommandResult(handled=True, output="(no AGENTS.md / CLAUDE.md memory files found)")
     return CommandResult(handled=True, output=text)
 
 

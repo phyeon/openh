@@ -10,17 +10,15 @@ from .base import PermissionDecision, Tool, ToolContext
 class SkillTool(Tool):
     name: ClassVar[str] = "Skill"
     description: ClassVar[str] = (
-        "Execute a named skill. Skills live under ~/.claude/skills/ and encode "
-        "domain-specific workflows. The tool returns the skill's full instructions "
-        "which you should then follow. Call `list_skills=true` with no name to "
-        "discover available skills."
+        "Execute a skill by name. Use skill='list' to discover available skills. "
+        "The expanded skill instructions are returned inline for you to follow."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "skill": {
                 "type": "string",
-                "description": "Skill name (matches the `name` field in SKILL.md frontmatter).",
+                "description": "Skill name, or 'list' to enumerate skills.",
             },
             "args": {
                 "type": "string",
@@ -40,22 +38,30 @@ class SkillTool(Tool):
         return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
-        if input.get("list_skills"):
+        skill_name = (input.get("skill") or "").strip()
+        if input.get("list_skills") or skill_name.lower() == "list":
             all_skills = skills.list_skills()
             if not all_skills:
-                return "(no skills installed)"
-            lines = [f"{len(all_skills)} skill(s) available:"]
+                return "No skills found."
+            lines = [f"Available skills ({len(all_skills)}):"]
             for s in all_skills:
-                lines.append(f"  {s.name} — {s.description}")
+                description = s.description or "(no description)"
+                lines.append(f"  {s.name} — {description}")
             return "\n".join(lines)
 
-        name = (input.get("skill") or "").strip()
+        name = skill_name.removesuffix(".md")
         if not name:
-            return "error: skill name is required (or pass list_skills=true)"
+            return "error: skill name is required (or use skill='list')"
         skill = skills.get_skill(name)
         if skill is None:
-            return f"error: unknown skill '{name}'"
+            return f"error: unknown skill '{name}'. Use skill='list' to see available skills."
         args = (input.get("args") or "").strip()
         body = skill.body
-        suffix = f"\n\n[invoked with args: {args}]" if args else ""
-        return f"# Skill: {skill.name}\n\n{body}{suffix}"
+        if args:
+            body = body.replace("$ARGUMENTS", args)
+        else:
+            body = body.replace("$ARGUMENTS", "")
+        body = body.strip()
+        if not body:
+            return f"error: skill '{skill.name}' expanded to empty content"
+        return body

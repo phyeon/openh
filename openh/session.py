@@ -24,6 +24,8 @@ class AgentSession:
     always_allow: set[tuple[str, str]] = field(default_factory=set)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_input_tokens: int = 0
+    total_cache_read_input_tokens: int = 0
     last_input_tokens: int = 0      # context size of last API call
     total_estimated_cost_usd: float = 0.0
     session_id: str = ""
@@ -33,6 +35,13 @@ class AgentSession:
     prompt_override: str = ""     # per-session custom prompt text (empty = use preset)
     profile_id: str = "default"   # session profile ("default", "fnd", ...)
     shell_env: dict[str, str] = field(default_factory=dict)  # persisted env vars (CC pattern)
+    managed_agent_enabled: bool = False
+    managed_executor_model: str = ""
+    managed_executor_max_turns: int = 10
+    managed_max_concurrent_executors: int = 1
+    managed_executor_isolation: bool = True
+    session_memory_last_extracted_message_count: int = 0
+    session_memory_last_extracted_tool_call_count: int = 0
     _cwd: str = ""
 
     @property
@@ -98,13 +107,26 @@ class AgentSession:
     def append_tool_results(self, results: list[ToolResultBlock]) -> None:
         self.append_message("user", list(results))
 
-    def add_tokens(self, input_tokens: int, output_tokens: int) -> None:
-        self.total_input_tokens += input_tokens
+    def add_tokens(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation_input_tokens: int = 0,
+        cache_read_input_tokens: int = 0,
+    ) -> None:
+        effective_input = (
+            input_tokens
+            + cache_creation_input_tokens
+            + cache_read_input_tokens
+        )
+        self.total_input_tokens += effective_input
         self.total_output_tokens += output_tokens
-        if input_tokens > 0:
-            self.last_input_tokens = input_tokens
+        self.total_cache_creation_input_tokens += cache_creation_input_tokens
+        self.total_cache_read_input_tokens += cache_read_input_tokens
+        if effective_input > 0:
+            self.last_input_tokens = effective_input
         self.total_estimated_cost_usd += estimate_cost_usd(
             getattr(self.provider, "model", ""),
-            input_tokens,
+            effective_input,
             output_tokens,
         )

@@ -17,6 +17,7 @@ from ..messages import (
     ToolUseStart,
     Usage,
 )
+from ..system_prompt import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
 from .base import ToolSchema
 
 
@@ -36,10 +37,10 @@ class AnthropicProvider:
         msg_dicts = [m.to_anthropic_dict() for m in messages]
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "system": system,
             "messages": msg_dicts,
             "max_tokens": MAX_OUTPUT_TOKENS,
         }
+        kwargs["system"] = self._build_system_blocks(system)
         if tools:
             kwargs["tools"] = list(tools)
 
@@ -48,6 +49,8 @@ class AnthropicProvider:
         # Final usage emitted on message_stop
         in_tokens = 0
         out_tokens = 0
+        cache_creation_tokens = 0
+        cache_read_tokens = 0
         stop_reason = "end_turn"
 
         async with self._client.messages.stream(**kwargs) as stream:
@@ -88,6 +91,16 @@ class AnthropicProvider:
                     usage = getattr(event, "usage", None)
                     if usage is not None:
                         out_tokens = getattr(usage, "output_tokens", out_tokens)
+                        cache_creation_tokens = getattr(
+                            usage,
+                            "cache_creation_input_tokens",
+                            cache_creation_tokens,
+                        )
+                        cache_read_tokens = getattr(
+                            usage,
+                            "cache_read_input_tokens",
+                            cache_read_tokens,
+                        )
                     delta = getattr(event, "delta", None)
                     if delta is not None:
                         sr = getattr(delta, "stop_reason", None)
@@ -100,6 +113,45 @@ class AnthropicProvider:
                         usage = getattr(msg, "usage", None)
                         if usage is not None:
                             in_tokens = getattr(usage, "input_tokens", 0)
+                            cache_creation_tokens = getattr(
+                                usage,
+                                "cache_creation_input_tokens",
+                                cache_creation_tokens,
+                            )
+                            cache_read_tokens = getattr(
+                                usage,
+                                "cache_read_input_tokens",
+                                cache_read_tokens,
+                            )
 
-        yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)
+        yield Usage(
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cache_creation_input_tokens=cache_creation_tokens,
+            cache_read_input_tokens=cache_read_tokens,
+        )
         yield MessageStop(stop_reason=stop_reason)
+
+    @staticmethod
+    def _build_system_blocks(system: str) -> str | list[dict[str, Any]]:
+        if SYSTEM_PROMPT_DYNAMIC_BOUNDARY not in system:
+            return system
+
+        static_part, dynamic_part = system.split(SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
+        blocks: list[dict[str, Any]] = []
+
+        static_text = static_part.strip()
+        if static_text:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": static_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
+
+        dynamic_text = dynamic_part.strip()
+        if dynamic_text:
+            blocks.append({"type": "text", "text": dynamic_text})
+
+        return blocks or system.replace(SYSTEM_PROMPT_DYNAMIC_BOUNDARY, "").strip()
