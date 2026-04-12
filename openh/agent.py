@@ -22,6 +22,10 @@ EventSink = Callable[[StreamEvent], Awaitable[None] | None]
 PermissionCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
 
+class _StreamTimeout(Exception):
+    """Raised when the model stream exceeds liveness or total timeout."""
+
+
 class Agent:
     def __init__(
         self,
@@ -103,15 +107,19 @@ class Agent:
                 pass
 
     MAX_TOOL_LOOP_ITERATIONS = 40
+    STREAM_LIVENESS_TIMEOUT = 45  # seconds — no event for this long → dead
+    STREAM_TOTAL_TIMEOUT = 300    # seconds — max total time per model call
 
     async def _drive_loop(self) -> None:
         """Drive the provider ↔ tool loop using whatever is already in session.messages."""
+        import asyncio
+
         iterations = 0
         while True:
             iterations += 1
             if iterations > self.MAX_TOOL_LOOP_ITERATIONS:
                 await self._emit(TextDelta(
-                    text=f"\n\n[agent: tool loop hit {self.MAX_TOOL_LOOP_ITERATIONS} iterations — stopping to prevent infinite loop]"
+                    text=f"\n\n[agent: tool loop hit {self.MAX_TOOL_LOOP_ITERATIONS} iterations — stopping]"
                 ))
                 return
             assistant_blocks: list[Block] = []
@@ -125,25 +133,38 @@ class Agent:
                 tools=self._tool_schemas(),  # type: ignore[arg-type]
             )
 
-            async for event in stream:
-                await self._emit(event)
+            timed_out = False
+            timeout_reason = ""
+            try:
+                async for event in self._stream_with_liveness(stream):
+                    await self._emit(event)
 
-                if isinstance(event, TextDelta):
-                    current_text.append(event.text)
-                elif isinstance(event, ToolUseEnd):
-                    if current_text:
-                        assistant_blocks.append(TextBlock(text="".join(current_text)))
-                        current_text = []
-                    block = ToolUseBlock(id=event.id, name=event.name, input=event.input, _raw_part=getattr(event, "_raw_part", None))
-                    assistant_blocks.append(block)
-                    tool_uses.append(block)
-                elif isinstance(event, Usage):
-                    self.session.add_tokens(event.input_tokens, event.output_tokens)
-                elif isinstance(event, MessageStop):
-                    stop_reason = event.stop_reason
+                    if isinstance(event, TextDelta):
+                        current_text.append(event.text)
+                    elif isinstance(event, ToolUseEnd):
+                        if current_text:
+                            assistant_blocks.append(TextBlock(text="".join(current_text)))
+                            current_text = []
+                        block = ToolUseBlock(id=event.id, name=event.name, input=event.input, _raw_part=getattr(event, "_raw_part", None))
+                        assistant_blocks.append(block)
+                        tool_uses.append(block)
+                    elif isinstance(event, Usage):
+                        self.session.add_tokens(event.input_tokens, event.output_tokens)
+                    elif isinstance(event, MessageStop):
+                        stop_reason = event.stop_reason
+            except _StreamTimeout as exc:
+                timed_out = True
+                timeout_reason = str(exc)
 
             if current_text:
                 assistant_blocks.append(TextBlock(text="".join(current_text)))
+
+            if timed_out:
+                msg = f"\n\n[agent: {timeout_reason}]"
+                assistant_blocks.append(TextBlock(text=msg))
+                await self._emit(TextDelta(text=msg))
+                self.session.append_assistant_message(assistant_blocks)
+                return
 
             self.session.append_assistant_message(assistant_blocks)
 
@@ -155,6 +176,38 @@ class Agent:
 
             if stop_reason not in ("tool_use", "end_turn"):
                 return
+
+    async def _stream_with_liveness(self, stream):
+        """Wrap an async stream with liveness + total timeout (CC pattern).
+
+        Raises _StreamTimeout if:
+        - No event received for STREAM_LIVENESS_TIMEOUT seconds
+        - Total stream time exceeds STREAM_TOTAL_TIMEOUT seconds
+        """
+        import asyncio
+
+        aiter = stream.__aiter__()
+        start = asyncio.get_event_loop().time()
+        while True:
+            now = asyncio.get_event_loop().time()
+            elapsed = now - start
+            if elapsed > self.STREAM_TOTAL_TIMEOUT:
+                raise _StreamTimeout(
+                    f"model stream total timeout ({self.STREAM_TOTAL_TIMEOUT}s)"
+                )
+            remaining_total = self.STREAM_TOTAL_TIMEOUT - elapsed
+            chunk_timeout = min(self.STREAM_LIVENESS_TIMEOUT, remaining_total)
+            try:
+                event = await asyncio.wait_for(
+                    aiter.__anext__(), timeout=chunk_timeout
+                )
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                raise _StreamTimeout(
+                    f"no stream event for {self.STREAM_LIVENESS_TIMEOUT}s — connection likely dead"
+                )
+            yield event
 
     async def _run_tool_uses(self, tool_uses: list[ToolUseBlock]) -> list[ToolResultBlock]:
         """Execute a batch of tool calls.
