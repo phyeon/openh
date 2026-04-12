@@ -2209,6 +2209,7 @@ class OpenHApp:
         self.session.created_at = time.time()
         self.session.title = ""
         self.session.profile_id = "default"
+        self.session.prompt_override = ""
         self.session.tools = default_tools()
         self._current_title = ""
         self._queued_turns = []
