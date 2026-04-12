@@ -76,6 +76,8 @@ class CommandDispatcher:
         self.register("tokens", _cmd_tokens, "Show current token usage")
         self.register("status", _cmd_status, "Show session status")
         self.register("compact", _cmd_compact, "Request a manual conversation compact")
+        self.register("max-turns", _cmd_max_turns, "Show or set the current session max turns")
+        self.register("max_turns", _cmd_max_turns, "Alias for /max-turns")
         self.register("rename", _cmd_rename, "Rename the current conversation: /rename new title")
         self.register("theme", _cmd_theme, "Toggle light/dark theme")
         self.register("init", _cmd_init, "Generate a starter AGENTS.md in the current directory")
@@ -189,6 +191,7 @@ def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
         f"subagent_tokens: {subagent_tokens:,}",
         f"cost: ${s.total_estimated_cost_usd:.4f}",
         f"tools: {len(s.tools)}",
+        f"max_turns: {getattr(s, 'max_turns', 10)}",
         f"session_id: {s.session_id}",
         f"title: {s.title or '(untitled)'}",
         f"output_style: {getattr(s, 'output_style', 'default')}",
@@ -210,6 +213,24 @@ def _cmd_compact(args: list[str], ctx: CommandContext) -> CommandResult:
             f"Instruction: {instruction}]"
         ),
     )
+
+
+def _cmd_max_turns(args: list[str], ctx: CommandContext) -> CommandResult:
+    current = max(1, int(getattr(ctx.session, "max_turns", 10) or 10))
+    if not args:
+        return CommandResult(handled=True, output=f"current max_turns: {current}")
+    raw = (args[0] or "").strip().lower()
+    if raw in {"default", "reset"}:
+        ctx.session.max_turns = 10
+        return CommandResult(handled=True, output="max_turns reset to 10")
+    try:
+        value = int(raw)
+    except Exception:
+        return CommandResult(handled=True, output="usage: /max-turns <number|default>")
+    if value < 1:
+        return CommandResult(handled=True, output="max_turns must be >= 1")
+    ctx.session.max_turns = value
+    return CommandResult(handled=True, output=f"max_turns set to {value}")
 
 
 def _cmd_rename(args: list[str], ctx: CommandContext) -> CommandResult:

@@ -1387,7 +1387,7 @@ class OpenHApp:
 
     def _replay_messages_all(self) -> None:
         """Replay all session messages, pairing tool_call + tool_result into combined panels."""
-        from ..messages import TextBlock, ToolResultBlock, ToolUseBlock
+        from ..messages import ImageBlock, TextBlock, ToolResultBlock, ToolUseBlock
 
         # Build a map of tool_use_id → ToolResultBlock for matching
         result_map: dict[str, ToolResultBlock] = {}
@@ -1405,6 +1405,7 @@ class OpenHApp:
         for msg_index, msg in enumerate(self.session.messages):
             if msg.role == "user":
                 text_parts = []
+                image_parts = []
                 for b in msg.content:
                     if isinstance(b, TextBlock):
                         t = b.text.strip()
@@ -1413,14 +1414,17 @@ class OpenHApp:
                         if t.startswith("[Conversation compacted") or t.startswith("[Prior conversation summary"):
                             continue
                         text_parts.append(b.text)
+                    elif isinstance(b, ImageBlock):
+                        image_parts.append((b.data_base64, b.media_type))
                     # ToolResultBlocks are rendered with their matching tool_call above
-                if text_parts:
+                if text_parts or image_parts:
                     queue(
                         widgets.user_bubble(
                             "\n".join(text_parts),
                             on_edit=self._on_edit_message,
                             msg_index=msg_index,
                             content_width=self._content_width,
+                            images=image_parts or None,
                         )
                     )
             else:
@@ -1987,11 +1991,17 @@ class OpenHApp:
         self._hide_welcome()
         # msg_index = where this user message will land after agent appends it
         upcoming_index = len(self.session.messages)
+        image_previews = [
+            (b.data_base64, b.media_type)
+            for b in media_blocks
+            if hasattr(b, "data_base64")
+        ] if media_blocks else None
         self._append_to_messages(widgets.user_bubble(
             text,
             on_edit=self._on_edit_message,
             msg_index=upcoming_index,
             content_width=self._content_width,
+            images=image_previews or None,
         ))
         self._stick_to_bottom = True
         self._busy = True
@@ -2200,7 +2210,10 @@ class OpenHApp:
         elif isinstance(event, Usage):
             self._refresh_top_bar(note="thinking…")
         elif isinstance(event, StatusEvent):
-            self._set_status_note(event.text, timeout_s=5.0)
+            timeout_s = 5.0
+            if "Reached maximum turn limit" in (event.text or ""):
+                timeout_s = 0
+            self._set_status_note(event.text, timeout_s=timeout_s)
         elif isinstance(event, MessageStop):
             self._finalize_streaming_message()
             self._reset_live_tool_stack()

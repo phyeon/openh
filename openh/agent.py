@@ -81,13 +81,14 @@ class Agent:
             "Make sure to complete all tasks before ending your response."
         )
 
-    def _has_visible_assistant_text(self) -> bool:
-        for message in getattr(self.session, "messages", []):
+    def _last_assistant_has_visible_text(self) -> bool:
+        for message in reversed(getattr(self.session, "messages", [])):
             if getattr(message, "role", "") != "assistant":
                 continue
-            for block in getattr(message, "content", []):
-                if isinstance(block, TextBlock) and block.text.strip():
-                    return True
+            return any(
+                isinstance(block, TextBlock) and block.text.strip()
+                for block in getattr(message, "content", [])
+            )
         return False
 
     def _system_prompt_for_turn(self, turn: int) -> str:
@@ -300,7 +301,7 @@ class Agent:
             if turns > effective_max_turns:
                 notice = f"Reached maximum turn limit ({effective_max_turns})."
                 await self._emit(StatusEvent(text=notice))
-                if not self._has_visible_assistant_text():
+                if not self._last_assistant_has_visible_text():
                     self.session.append_assistant_message([TextBlock(text=notice)])
                 return
 
