@@ -221,6 +221,7 @@ class OpenHApp:
         self._busy_indicator_letters: list[ft.Text] = []
         self._busy_indicator_task_running = False
         self._busy_indicator_token = 0
+        self._input_has_text = False
         self._welcome_wordmark_host: ft.Container | None = None
         self._welcome_wordmark_letters: list[ft.Control] = []
         self._welcome_wordmark_task_running = False
@@ -320,6 +321,7 @@ class OpenHApp:
             min_lines=1,
             max_lines=10,
             shift_enter=True,
+            on_change=self._on_input_change,
             on_submit=self._on_submit,
             autofocus=True,
             expand=True,
@@ -1118,6 +1120,7 @@ class OpenHApp:
 
     def _refresh_input(self) -> None:
         pending = getattr(self, "_pending_media", None) or []
+        self._input_has_text = bool((self.input_field.value or "").strip())
         box = widgets.input_area(
             input_field=self.input_field,
             on_send=lambda: self._on_submit(None),
@@ -1143,6 +1146,16 @@ class OpenHApp:
             self.input_holder.update()
         except Exception:
             pass
+
+    def _on_input_change(self, e) -> None:
+        has_text = bool((self.input_field.value or "").strip())
+        if has_text == self._input_has_text:
+            return
+        self._input_has_text = has_text
+        if not self._busy:
+            return
+        self._refresh_input()
+        self._focus_input()
 
     def _compute_content_width(self) -> int:
         window_w = int(
