@@ -14,7 +14,7 @@ from typing import Callable
 
 import flet as ft
 
-from .. import prompts, settings as settings_mod
+from .. import output_styles, prompts, settings as settings_mod
 from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
 from ..session import normalize_usage_by_model
 from . import theme
@@ -824,6 +824,43 @@ class SettingsDialog:
     # --------------------------------------------------------------- tab 5
 
     def _tab_prompt(self) -> ft.Control:
+        style_defs = output_styles.all_styles(self._session.cwd if self._session else None)
+
+        def _style_help_text(name: str | None) -> str:
+            active_name = str(name or "default").strip().lower() or "default"
+            style = next((item for item in style_defs if item.name == active_name), None)
+            if style is None:
+                return ""
+            if style.description:
+                return style.description
+            if style.prompt:
+                return style.prompt
+            return "No extra output-style prompt. Uses the default response behavior."
+
+        def _on_output_style_change(e) -> None:
+            self._output_style_help.value = _style_help_text(self._output_style_dropdown.value)
+            try:
+                self._output_style_help.update()
+            except Exception:
+                pass
+
+        self._output_style_dropdown = ft.Dropdown(
+            value=getattr(self.settings, "output_style", "default") or "default",
+            options=[ft.dropdown.Option(style.name) for style in style_defs],
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            label="Output style",
+            on_change=_on_output_style_change,
+            expand=True,
+        )
+        self._output_style_help = ft.Text(
+            _style_help_text(self._output_style_dropdown.value),
+            color=theme.TEXT_TERTIARY,
+            size=11,
+            italic=True,
+        )
+
         self._preset_dropdown = ft.Dropdown(
             value=self._active_preset_name,
             options=[ft.dropdown.Option(p.name) for p in self._presets],
@@ -900,6 +937,10 @@ class SettingsDialog:
 
         return _padded_column(
             [
+                ft.Text("Response style", color=theme.TEXT_TERTIARY, size=12),
+                self._output_style_dropdown,
+                self._output_style_help,
+                ft.Container(height=12),
                 ft.Row(
                     [
                         ft.Column(
@@ -1159,6 +1200,7 @@ class SettingsDialog:
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
         self.settings.active_prompt = self._default_preset_name or prompts.BUILTIN_NAME
+        self.settings.output_style = self._output_style_dropdown.value or "default"
 
         try:
             self.settings.max_output_tokens = int(self._max_tokens_field.value or 0) or 8192

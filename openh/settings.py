@@ -36,6 +36,7 @@ class Settings:
     openai_model: str = "gpt-5.4-mini"
     anthropic_model: str = "claude-sonnet-4-6"
     gemini_model: str = "gemini-2.5-flash"
+    output_style: str = "default"
     max_output_tokens: int = 8192
     auto_compact_threshold: int = 80_000
     subagent_parallel: int = 1

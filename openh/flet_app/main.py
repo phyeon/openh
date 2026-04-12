@@ -73,6 +73,7 @@ from ..session_memory import (
     should_extract as should_extract_session_memory,
 )
 from ..session import AgentSession, normalize_usage_by_model, record_usage_by_model
+from ..output_styles import resolve_style_prompt
 from ..tools import default_tools
 from ..profiles import get_profile, list_profiles
 from . import theme, widgets
@@ -165,6 +166,7 @@ class OpenHApp:
             created_at=time.time(),
         )
         self._sync_session_managed_agent_config()
+        self._sync_session_output_style()
         ensure_project_dirs(self.config.cwd)
         self._jsonl_writer = JsonlSessionWriter(self.config.cwd, sid)
         # Load MCP tools asynchronously
@@ -587,6 +589,26 @@ class OpenHApp:
             int(self.settings.subagent_parallel or 1),
         )
         self.session.managed_executor_isolation = True
+
+    def _sync_session_output_style(self) -> None:
+        style_name = str(getattr(self.settings, "output_style", "default") or "default")
+        self.session.output_style = style_name
+        self.session.output_style_prompt = resolve_style_prompt(style_name, self.session.cwd)
+
+    def _set_session_output_style(self, style_name: str, *, persist: bool = True) -> None:
+        normalized = str(style_name or "default").strip().lower() or "default"
+        self.session.output_style = normalized
+        self.session.output_style_prompt = resolve_style_prompt(normalized, self.session.cwd)
+        self.settings.output_style = normalized
+        if persist:
+            try:
+                save_settings(self.settings)
+            except Exception:
+                pass
+        clear_system_prompt_sections()
+        self._refresh_top_bar()
+        self._refresh_status_bar()
+        self._autosave()
 
     def _get_managed_prompt_text(self) -> str:
         if not getattr(self.session, "managed_agent_enabled", False):
@@ -1279,6 +1301,11 @@ class OpenHApp:
             cwd=target,
         )
         self.session.config = self.config
+        self.session.output_style_prompt = resolve_style_prompt(
+            self.session.output_style,
+            target,
+        )
+        clear_system_prompt_sections()
         ensure_project_dirs(target)
         self.settings.last_session_cwd = target
         if save:
@@ -1388,6 +1415,7 @@ class OpenHApp:
                     widgets.error_panel(f"provider reload failed: {exc}")
                 )
         self._sync_session_managed_agent_config()
+        self._set_session_output_style(new_settings.output_style, persist=False)
         # Propagate the new auto-compact threshold globally
         import openh.config as cfg_mod
         cfg_mod.AUTO_COMPACT_THRESHOLD = int(new_settings.auto_compact_threshold)
@@ -1925,6 +1953,9 @@ class OpenHApp:
         def init_claude_md() -> None:
             self.page.run_task(self._init_claude_md_async)
 
+        def set_output_style(style_name: str) -> None:
+            self._set_session_output_style(style_name)
+
         return CommandContext(
             session=self.session,
             on_clear=self._new_chat,
@@ -1933,6 +1964,7 @@ class OpenHApp:
             on_compact_now=compact_now,
             on_init=init_claude_md,
             set_title=set_title,
+            on_set_output_style=set_output_style,
         )
 
     async def _compact_now_async(self) -> None:
@@ -2488,13 +2520,12 @@ class OpenHApp:
         self.session.title = ""
         self.session.profile_id = "default"
         self.session.prompt_override = ""
-        self.session.output_style = "default"
-        self.session.output_style_prompt = ""
         self.session.append_system_prompt = ""
         self.session.replace_system_prompt = False
         self.session.is_non_interactive = False
         self.session.tools = default_tools()
         self._sync_session_managed_agent_config()
+        self._sync_session_output_style()
         clear_system_prompt_sections()
         self._current_title = ""
         self._queued_turns = []
@@ -2937,7 +2968,14 @@ class OpenHApp:
             self._set_runtime_cwd(target_cwd, save=False)
         self.session.prompt_override = metadata.get("prompt_override", "")
         self.session.output_style = str(metadata.get("output_style", "default") or "default")
-        self.session.output_style_prompt = str(metadata.get("output_style_prompt", "") or "")
+        resolved_output_style_prompt = resolve_style_prompt(
+            self.session.output_style,
+            self.session.cwd,
+        )
+        self.session.output_style_prompt = (
+            resolved_output_style_prompt
+            or str(metadata.get("output_style_prompt", "") or "")
+        )
         self.session.append_system_prompt = str(metadata.get("append_system_prompt", "") or "")
         self.session.replace_system_prompt = bool(metadata.get("replace_system_prompt", False))
         self.session.profile_id = metadata.get("profile_id", "default")

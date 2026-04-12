@@ -30,6 +30,7 @@ class CommandContext:
     on_compact_now: Callable[[], None]
     on_init: Callable[[], None]
     set_title: Callable[[str], None]
+    on_set_output_style: Callable[[str], None]
 
 
 class CommandDispatcher:
@@ -80,6 +81,8 @@ class CommandDispatcher:
         self.register("providers", _cmd_providers, "List available model providers")
         self.register("system", _cmd_system, "Show the active system prompt")
         self.register("config", _cmd_config, "Show effective configuration (env + files)")
+        self.register("output-style", _cmd_output_style, "Show or set output style")
+        self.register("output_style", _cmd_output_style, "Alias for /output-style")
 
 
 def _cmd_help(dispatcher: "CommandDispatcher"):
@@ -169,6 +172,7 @@ def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
         f"cost: ${s.total_estimated_cost_usd:.4f}",
         f"tools: {len(s.tools)}",
         f"session_id: {s.session_id}",
+        f"output_style: {getattr(s, 'output_style', 'default')}",
     ]
     return CommandResult(handled=True, output="\n".join(lines))
 
@@ -269,6 +273,7 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         MAX_OUTPUT_TOKENS,
         SYSTEM_PROMPT_FILE,
     )
+    from .output_styles import available_style_names
     from .persistence import SESSIONS_DIR
 
     s = ctx.session
@@ -307,5 +312,34 @@ def _cmd_config(args: list[str], ctx: CommandContext) -> CommandResult:
         f"  tools:      {len(s.tools)}  ({', '.join(t.name for t in s.tools[:13])}{'…' if len(s.tools) > 13 else ''})",
         f"  read_files: {len(s.read_files)}",
         f"  cwd:        {s.cwd}",
+        f"  output_style: {getattr(s, 'output_style', 'default')}",
+        f"  output_style_options: {', '.join(available_style_names(s.cwd))}",
     ]
     return CommandResult(handled=True, output="\n".join(lines))
+
+
+def _cmd_output_style(args: list[str], ctx: CommandContext) -> CommandResult:
+    from .output_styles import all_styles, find_style
+
+    current = getattr(ctx.session, "output_style", "default") or "default"
+    styles = all_styles(ctx.session.cwd)
+    if not args:
+        lines = [f"current output style: {current}", "", "available styles:"]
+        for style in styles:
+            desc = f" — {style.description}" if style.description else ""
+            lines.append(f"  {style.name}{desc}")
+        return CommandResult(handled=True, output="\n".join(lines))
+
+    target = args[0].strip().lower()
+    style = find_style(target, ctx.session.cwd)
+    if style is None:
+        return CommandResult(
+            handled=True,
+            output=(
+                f"unknown output style: {target}\n"
+                f"available: {', '.join(style.name for style in styles)}"
+            ),
+        )
+    ctx.on_set_output_style(style.name)
+    desc = f" — {style.description}" if style.description else ""
+    return CommandResult(handled=True, output=f"output style set to {style.name}{desc}")
