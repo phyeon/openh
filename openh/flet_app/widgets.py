@@ -1600,7 +1600,7 @@ def input_area(
             tooltip="Send / queue steering (Enter)",
             opacity=1.0 if has_text else 0.3,
         )
-        right_buttons.extend([dim_send, ft.Container(width=6), stop_btn])
+        right_buttons.extend([dim_send, ft.Container(width=2), stop_btn])
     else:
         right_buttons.append(send_btn)
 
