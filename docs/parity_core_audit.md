@@ -56,8 +56,8 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/tools/base.py` | `crates/tools/src/lib.rs` | Reviewed. `resolve_path()` added to match public relative-path behavior. |
 | `[~]` | `openh/tools/__init__.py` | `crates/tools/src/lib.rs` | Reviewed. Legacy `LS` removed from default built-ins because public built-ins do not expose it. |
-| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, worktree behavior checked. Mode prompt wiring and wrapper output fixed. Background poll surface is still not exact public helper parity. |
-| `[~]` | `openh/tools/send_message.py` | `crates/tools/src/send_message.rs` | Reviewed. Mailbox/broadcast/status surface exists, and `__status__` now polls finished background workers. Full helper parity is still open. |
+| `[~]` | `openh/tools/agent_tool.py` | `crates/query/src/agent_tool.rs`, `crates/tools/src/agent_tool.rs` | Reviewed heavily. Permission level, max_turns, background mode, and worktree behavior checked. Background agents now use a one-shot poll helper surface and isolated worktrees are removed after both sync and background runs. Still not an exact Rust structure port. |
+| `[~]` | `openh/tools/send_message.py` | `crates/tools/src/send_message.rs` | Reviewed. Mailbox/broadcast/status surface exists, and `__status__` now consumes finished background-agent results through the helper flow instead of reusing stale task state. |
 | `[~]` | `openh/tools/task_tools.py` | `crates/tools/src/tasks.rs` | Reviewed. Task board added, but still lighter than public task model. |
 | `[~]` | `openh/tools/todowrite.py` | `crates/tools/src/todo_write.rs` | Reviewed. Input/status parity partially matched. |
 | `[~]` | `openh/tools/tool_search.py` | `crates/tools/src/tool_search.rs` | Reviewed. Keyword scoring improved. Deferred-loading parity still open. |
@@ -104,18 +104,17 @@ These are not strict engine parity targets, but they still matter for behavior a
 These are the main open deltas after the reviewed files above:
 
 1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
-2. Background sub-agent surface is closer now, but still not identical to the public helper flow.
-3. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges.
-4. Permission handler model is much closer, but still not a literal `PermissionManager` port.
-5. Plugin-discovered output styles are still incomplete.
-6. File-by-file audit is still missing for `commands.py`, `cc_compat.py`, `persistence.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
+2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges.
+3. Permission handler model is much closer, but still not a literal `PermissionManager` port.
+4. Plugin-discovered output styles are still incomplete.
+5. File-by-file audit is still missing for `cc_compat.py`, `persistence.py`, `commands.py`, `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `tools/agent_tool.py` + `tools/send_message.py` + public background-helper flow
-2. `cc_compat.py` + `session_storage/sqlite_storage` public files
-3. `commands.py`
-4. `webfetch.py`, `websearch.py`, `worktree.py`
+1. `cc_compat.py` + `session_storage/sqlite_storage` public files
+2. `commands.py`
+3. `webfetch.py`, `websearch.py`, `worktree.py`
+4. `providers/openai.py`, `providers/gemini.py` edge-capability pass
 5. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep

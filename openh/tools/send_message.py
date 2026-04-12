@@ -108,7 +108,11 @@ class SendMessageTool(Tool):
             polled = poll_background_agent(coordination_root, str(agent_entry.get("id") or ""))
             if polled is not None:
                 agent_entry["last_output"] = polled
-                agent_entry["status"] = "idle" if not error else "error"
+                if polled.startswith("[Agent error"):
+                    agent_entry["status"] = "error"
+                    agent_entry["error"] = polled
+                else:
+                    agent_entry["status"] = "idle"
                 return polled
             if status == "running":
                 return f"Agent {agent_entry.get('id')} is still running. queued_messages={queued}"

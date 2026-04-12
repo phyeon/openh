@@ -29,6 +29,7 @@ _MODE_DEFAULT_TURNS = {
     "plan": 20,
     "explore": 15,
 }
+_BACKGROUND_AGENTS: dict[str, "asyncio.Task[str]"] = {}
 
 
 def poll_background_agent(session: AgentSession, target: str) -> str | None:
@@ -36,16 +37,33 @@ def poll_background_agent(session: AgentSession, target: str) -> str | None:
     if entry is None:
         return None
 
-    task = entry.get("task")
+    agent_id = str(entry.get("id") or "")
+    task = _BACKGROUND_AGENTS.get(agent_id)
+    if task is None:
+        task = entry.get("task")
+    if task is None:
+        return None
     if task is not None and not task.done():
         return None
 
-    error = str(entry.get("error") or "").strip()
-    if error:
-        return f"[Agent error: {error}]"
-
-    output = extract_subagent_text(entry).strip()
-    return output or "(sub-agent finished without text output)"
+    if task is not None:
+        _BACKGROUND_AGENTS.pop(agent_id, None)
+        entry["task"] = None
+        try:
+            output = str(task.result() or "").strip()
+        except asyncio.CancelledError:
+            output = "[Agent error or cancelled]"
+        except Exception:
+            output = "[Agent error or cancelled]"
+        if output:
+            if output.startswith("[Agent error"):
+                entry["status"] = "error"
+                entry["error"] = output
+            else:
+                entry["status"] = "idle"
+                entry["last_output"] = output
+            return output
+    return None
 
 
 def get_coordination_root(session: AgentSession) -> AgentSession:
@@ -224,7 +242,7 @@ async def run_subagent_prompt(
         except Exception as exc:  # noqa: BLE001
             entry["status"] = "error"
             entry["error"] = str(exc)
-            return f"sub-agent failed: {exc}"
+            raise RuntimeError(str(exc)) from exc
 
         parent.read_files.update(agent.session.read_files)
         output = extract_subagent_text(entry) or "(sub-agent finished without text output)"
@@ -292,6 +310,31 @@ async def _create_isolated_worktree(parent_cwd: str, agent_id: str) -> tuple[str
         return parent_cwd, None, git_root
 
     return str(worktree_dir), worktree_dir, git_root
+
+
+async def _remove_isolated_worktree(
+    worktree_dir: Path | None,
+    git_root: Path | None,
+) -> None:
+    if worktree_dir is None or git_root is None:
+        return
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(git_root),
+            "worktree",
+            "remove",
+            "--force",
+            str(worktree_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        return
+
+    await proc.communicate()
 
 
 class AgentTool(Tool):
@@ -464,8 +507,16 @@ class AgentTool(Tool):
         registry[agent_id] = entry
 
         if bool(input.get("run_in_background")):
-            async def runner() -> None:
-                output = await run_subagent_prompt(entry, prompt, parent)
+            async def runner() -> str:
+                try:
+                    output = await run_subagent_prompt(entry, prompt, parent)
+                except Exception as exc:  # noqa: BLE001
+                    entry["status"] = "error"
+                    entry["error"] = str(exc)
+                    output = f"[Agent error: {exc}]"
+                finally:
+                    await _remove_isolated_worktree(worktree_dir, git_root)
+
                 entry["last_output"] = output
                 finished_state = "failed" if entry.get("status") == "error" else "finished"
                 summary = f"{desc} {finished_state}"
@@ -478,9 +529,11 @@ class AgentTool(Tool):
                     content=f"Agent '{desc}' {finished_state}.\n\n{preview or '(no output)'}",
                     summary=summary,
                 )
+                return output
 
             task = asyncio.create_task(runner())
             entry["task"] = task
+            _BACKGROUND_AGENTS[agent_id] = task
             return (
                 "{"
                 f"\"agent_id\": \"{agent_id}\", "
@@ -489,7 +542,12 @@ class AgentTool(Tool):
                 "}"
             )
 
-        output = await run_subagent_prompt(entry, prompt, parent)
+        try:
+            output = await run_subagent_prompt(entry, prompt, parent)
+        except Exception as exc:  # noqa: BLE001
+            await _remove_isolated_worktree(worktree_dir, git_root)
+            return f"error: Sub-agent error: {exc}"
+        await _remove_isolated_worktree(worktree_dir, git_root)
         streamed = "".join(collected).strip()
         if streamed and not output.strip():
             output = streamed
