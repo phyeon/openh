@@ -943,151 +943,113 @@ class OpenHApp:
     # ---- FnD ambient effects (particles + breathing gradient) ----
 
     def _build_fnd_ambient_layout(self, content: ft.Control) -> ft.Control:
-        """Wrap content in gradients, fruit-pattern art, and floating particles for FnD."""
+        """Wrap content in a restrained FnD ambient layout."""
         import random
 
         dark = theme.is_dark()
-        asset_name = "fnd-splash-dark.svg" if dark else "fnd-splash-light.svg"
         self._fnd_gradient_layers = [
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(-0.45, -0.78),
-                    radius=1.08 if dark else 0.92,
+                    center=ft.Alignment(-0.42, -0.62),
+                    radius=1.0 if dark else 0.88,
                     colors=(
-                        ["#32ff4fa3", "#12ff4fa3", "#00000000"]
+                        ["#28ff6fa3", "#00000000"]
                         if dark
-                        else ["#46ffc6d8", "#16ffc6d8", "#00000000"]
+                        else ["#2effb48a", "#00000000"]
                     ),
-                    stops=[0.0, 0.42, 1.0],
                 ),
-                opacity=0.62 if dark else 0.72,
-                animate_opacity=ft.Animation(3600, ft.AnimationCurve.EASE_IN_OUT),
+                opacity=0.24 if dark else 0.18,
+                animate_opacity=ft.Animation(4200, ft.AnimationCurve.EASE_IN_OUT),
             ),
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.62, 0.52),
-                    radius=0.92,
+                    center=ft.Alignment(0.46, -0.08),
+                    radius=0.86 if dark else 0.72,
                     colors=(
-                        ["#1cc46cff", "#08c46cff", "#00000000"]
+                        ["#34ff4fa3", "#00000000"]
                         if dark
-                        else ["#36ffd7aa", "#14ffd7aa", "#00000000"]
+                        else ["#44ee6f97", "#00000000"]
                     ),
-                    stops=[0.0, 0.38, 1.0],
                 ),
-                opacity=0.46 if dark else 0.56,
-                animate_opacity=ft.Animation(4300, ft.AnimationCurve.EASE_IN_OUT),
-            ),
-            ft.Container(
-                expand=True,
-                gradient=ft.RadialGradient(
-                    center=ft.Alignment(0.94, -0.18),
-                    radius=0.78,
-                    colors=(
-                        ["#1600e5ff", "#0a00e5ff", "#00000000"]
-                        if dark
-                        else ["#1affc49f", "#08ffc49f", "#00000000"]
-                    ),
-                    stops=[0.0, 0.32, 1.0],
-                ),
-                opacity=0.42 if dark else 0.34,
+                opacity=0.28 if dark else 0.2,
                 animate_opacity=ft.Animation(5200, ft.AnimationCurve.EASE_IN_OUT),
             ),
             ft.Container(
                 expand=True,
                 gradient=ft.RadialGradient(
-                    center=ft.Alignment(-0.75, 0.48),
-                    radius=0.68,
+                    center=ft.Alignment(0.78, 0.52),
+                    radius=0.8 if dark else 0.68,
                     colors=(
-                        ["#18ff8b52", "#00000000"]
+                        ["#2479e8ff", "#00000000"]
                         if dark
-                        else ["#2bffa967", "#00000000"]
+                        else ["#28f4a261", "#00000000"]
                     ),
                 ),
-                opacity=0.3 if dark else 0.4,
-                animate_opacity=ft.Animation(6000, ft.AnimationCurve.EASE_IN_OUT),
-            ),
-            ft.Container(
-                expand=True,
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment(-1, -1),
-                    end=ft.Alignment(1, 1),
-                    colors=(
-                        ["#00000000", "#10ffffff", "#00000000"]
-                        if dark
-                        else ["#00000000", "#0eff9b74", "#00000000"]
-                    ),
-                    stops=[0.0, 0.5, 1.0],
-                ),
-                opacity=0.18 if dark else 0.24,
-                animate_opacity=ft.Animation(5000, ft.AnimationCurve.EASE_IN_OUT),
+                opacity=0.22 if dark else 0.16,
+                animate_opacity=ft.Animation(6100, ft.AnimationCurve.EASE_IN_OUT),
             ),
         ]
 
         particle_colors = (
-            ["#ff4fa3", "#ff8ac5", "#c48cff", "#79e8ff", "#6ff0b5", "#ffd36a"]
+            ["#ff4fa3", "#c48cff", "#79e8ff", "#6ff0b5"]
             if dark
-            else ["#ef7098", "#f7a56a", "#6ecaa8", "#ffd08a", "#d98aff"]
+            else ["#ef7098", "#f7a56a", "#6ecaa8"]
         )
         self._fnd_particles = []
         random.seed(42)
-        for _ in range(28 if dark else 18):
-            sz = random.uniform(2, 5.5 if dark else 4.6)
+        for _ in range(8 if dark else 5):
+            sz = random.uniform(2, 4.2 if dark else 3.6)
             color = random.choice(particle_colors)
             p = ft.Container(
                 width=sz,
                 height=sz,
                 border_radius=sz,
                 bgcolor=color,
-                opacity=random.uniform(0.14, 0.42 if dark else 0.3),
+                opacity=random.uniform(0.08, 0.22 if dark else 0.16),
                 offset=ft.Offset(random.uniform(-0.9, 0.9), random.uniform(-0.9, 0.9)),
                 animate_opacity=ft.Animation(
-                    int(random.uniform(2200, 5200)),
+                    int(random.uniform(2800, 6200)),
                     ft.AnimationCurve.EASE_IN_OUT,
                 ),
                 animate_offset=ft.Animation(
-                    int(random.uniform(6500, 13000)),
+                    int(random.uniform(8000, 15000)),
                     ft.AnimationCurve.EASE_IN_OUT,
                 ),
                 shadow=ft.BoxShadow(
-                    color=color.replace("#", "#36"),
-                    blur_radius=sz * (4 if dark else 3),
+                    color=color.replace("#", "#22"),
+                    blur_radius=sz * (3 if dark else 2),
                     spread_radius=1,
                 ),
             )
             self._fnd_particles.append(p)
 
         particle_layer = ft.Container(content=ft.Stack(self._fnd_particles), expand=True)
-        pattern_layer = ft.Container(
+        streak_layer = ft.Container(
             expand=True,
-            content=ft.Image(
-                src=asset_name,
-                fit="cover",
-                opacity=0.26 if dark else 0.34,
-            ),
-        )
-        side_glow = ft.Container(
-            width=6 if dark else 4,
-            expand=True,
-            alignment=ft.Alignment(1, 0),
-            gradient=ft.LinearGradient(
-                begin=ft.Alignment(0, -1),
-                end=ft.Alignment(0, 1),
-                colors=(
-                    ["#00000000", "#40ff4fa3", "#1000e5ff", "#00000000"]
-                    if dark
-                    else ["#00000000", "#40ef7098", "#30f7a56a", "#00000000"]
+            alignment=ft.Alignment(0.02 if dark else 0, -0.08 if dark else -0.02),
+            content=ft.Container(
+                width=420 if dark else 300,
+                height=1 if dark else 2,
+                gradient=ft.LinearGradient(
+                    colors=(
+                        ["#00000000", "#80ff4fa3", "#8079e8ff", "#00000000"]
+                        if dark
+                        else ["#00000000", "#90ee6f97", "#70f7a56a", "#00000000"]
+                    ),
+                    begin=ft.Alignment(-1, 0),
+                    end=ft.Alignment(1, 0),
                 ),
+                opacity=0.48 if dark else 0.34,
             ),
-            opacity=0.8 if dark else 0.55,
         )
         grain_layer = ft.Container(
             expand=True,
             image=ft.DecorationImage(
                 src="grain.png",
                 repeat=ft.ImageRepeat.REPEAT,
-                opacity=0.045 if dark else 0.03,
+                opacity=0.03 if dark else 0.02,
             ),
         )
         content_layer = ft.Container(content=content, expand=True)
@@ -1102,8 +1064,7 @@ class OpenHApp:
             [
                 ft.Container(expand=True, bgcolor=theme.BG_PAGE),
                 *self._fnd_gradient_layers,
-                pattern_layer,
-                ft.Row([ft.Container(expand=True), side_glow], spacing=0, expand=True),
+                streak_layer,
                 particle_layer,
                 grain_layer,
                 content_layer,
@@ -2632,146 +2593,96 @@ class OpenHApp:
         _is_dark = theme.is_dark()
 
         if getattr(spec, "id", "") == "fnd":
-            art_src = "fnd-splash-dark.svg" if _is_dark else "fnd-splash-light.svg"
-
-            art_panel = ft.Container(
-                content=ft.Image(
-                    src=art_src,
-                    width=240,
-                    height=120,
-                    fit="contain",
+            eyebrow = ft.Container(
+                content=ft.Text(
+                    "AFTER MIDNIGHT" if _is_dark else "PATISSERIE NOTEBOOK",
+                    size=10 if _is_dark else 11,
+                    weight=ft.FontWeight.W_700,
+                    color=theme.ACCENT if _is_dark else theme.TEXT_TERTIARY,
+                    font_family=theme.FONT_MONO if _is_dark else theme.FONT_SANS,
                 ),
-                width=260,
-                height=132,
-                padding=ft.padding.symmetric(horizontal=10, vertical=8),
-                bgcolor="#121827cc" if _is_dark else "#fffdfa",
-                border=ft.border.all(1, theme.BORDER_SUBTLE),
-                border_radius=20,
-                shadow=ft.BoxShadow(
-                    color="#1b1cff77" if _is_dark else "#ffdacc99",
-                    blur_radius=28 if _is_dark else 18,
-                    spread_radius=0,
-                    offset=ft.Offset(0, 10),
-                ),
-                opacity=0.98,
+                opacity=0.92,
                 offset=ft.Offset(0, 0),
-                animate_offset=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
-                animate_opacity=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
+                animate_offset=ft.Animation(320, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(320, ft.AnimationCurve.EASE_OUT),
             )
 
             title_text = ft.Text(
                 spec.wordmark,
-                size=42 if _is_dark else 40,
+                size=46 if _is_dark else 44,
                 weight=ft.FontWeight.W_600,
                 font_family=theme.FONT_EM,
                 color="#ffffff" if _is_dark else color,
                 text_align=ft.TextAlign.CENTER,
             )
-            if _is_dark:
-                title_display = ft.ShaderMask(
+            title_display = (
+                ft.ShaderMask(
                     content=title_text,
                     shader=ft.LinearGradient(
                         begin=ft.Alignment(-1, 0),
                         end=ft.Alignment(1, 0),
-                        colors=["#ff74bf", "#ff4fa3", "#c48cff", "#79e8ff"],
-                        stops=[0.0, 0.28, 0.65, 1.0],
+                        colors=["#ff7abf", "#ff4fa3", "#c48cff", "#79e8ff"],
+                        stops=[0.0, 0.24, 0.62, 1.0],
                     ),
                     blend_mode=ft.BlendMode.SRC_IN,
                 )
-            else:
-                title_display = title_text
+                if _is_dark
+                else title_text
+            )
 
             title_host = ft.Container(
                 content=ft.Stack(
                     [
                         ft.Container(
-                            width=360,
-                            height=92,
+                            width=380,
+                            height=96,
                             gradient=ft.RadialGradient(
                                 center=ft.Alignment(0, 0),
-                                radius=0.9,
+                                radius=0.86,
                                 colors=(
-                                    ["#22ff4fa3", "#12c48cff", "#00000000"]
+                                    ["#24ff4fa3", "#1079e8ff", "#00000000"]
                                     if _is_dark
-                                    else ["#2bffd2d8", "#18ffd7aa", "#00000000"]
+                                    else ["#26ee6f97", "#22f7a56a", "#00000000"]
                                 ),
-                                stops=[0.0, 0.5, 1.0],
                             ),
-                            opacity=0.9 if _is_dark else 0.65,
+                            opacity=0.46 if _is_dark else 0.2,
                             animate_opacity=ft.Animation(2600, ft.AnimationCurve.EASE_IN_OUT),
                         ),
-                        ft.Container(
-                            content=title_display,
-                            alignment=ft.Alignment(0, 0),
-                        ),
+                        ft.Container(content=title_display, alignment=ft.Alignment(0, 0)),
                     ],
-                    width=360,
-                    height=92,
+                    width=380,
+                    height=96,
                 ),
                 opacity=0.96,
                 offset=ft.Offset(0, 0),
-                animate_offset=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
-                animate_opacity=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
+                animate_offset=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
             )
 
-            tag_defs = (
-                [("FIELD NOTES", theme.ACCENT), ("CYBER BAR", "#79e8ff"), ("AFTER MIDNIGHT", "#c48cff")]
-                if _is_dark
-                else [("JUICY LOGBOOK", theme.ACCENT), ("SOFT GLOW", "#f7a56a"), ("CREAM SIGNAL", "#67c7a5")]
-            )
-            tag_items: list[ft.Control] = []
-            for label, tag_color in tag_defs:
-                tag_items.append(
-                    ft.Container(
-                        content=ft.Text(
-                            label,
-                            size=10,
-                            weight=ft.FontWeight.W_700,
-                            color=tag_color,
-                            font_family=theme.FONT_MONO,
-                        ),
-                        padding=ft.padding.symmetric(horizontal=10, vertical=5),
-                        bgcolor="#0f1422d0" if _is_dark else "#fffdfa",
-                        border=ft.border.all(1, tag_color + ("44" if _is_dark else "55")),
-                        border_radius=theme.RADIUS_PILL,
-                        opacity=0.96,
-                        offset=ft.Offset(0, 0),
-                        animate_offset=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
-                        animate_opacity=ft.Animation(420, ft.AnimationCurve.EASE_OUT),
-                    )
-                )
-
-            underline = ft.Container(
-                width=150 if _is_dark else 130,
+            rule = ft.Container(
+                width=112 if _is_dark else 96,
                 height=2 if _is_dark else 3,
+                border_radius=999,
                 gradient=ft.LinearGradient(
+                    begin=ft.Alignment(-1, 0),
+                    end=ft.Alignment(1, 0),
                     colors=(
-                        ["#00ffffff", "#80ff4fa3", "#9079e8ff", "#00ffffff"]
+                        ["#00000000", "#80ff4fa3", "#8079e8ff", "#00000000"]
                         if _is_dark
-                        else ["#00ffffff", "#80ee6f97", "#80f7a56a", "#00ffffff"]
+                        else ["#00000000", "#90ee6f97", "#80f7a56a", "#00000000"]
                     ),
                 ),
-                opacity=0.78 if _is_dark else 0.62,
-                animate_opacity=ft.Animation(700, ft.AnimationCurve.EASE_OUT),
+                opacity=0.76 if _is_dark else 0.58,
+                offset=ft.Offset(0, 0),
+                animate_offset=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(360, ft.AnimationCurve.EASE_OUT),
             )
 
-            self._welcome_wordmark_letters = [art_panel, title_host, *tag_items, underline]
+            self._welcome_wordmark_letters = [eyebrow, title_host, rule]
             self._welcome_wordmark_host = ft.Container(
                 content=ft.Column(
-                    [
-                        art_panel,
-                        ft.Container(height=6),
-                        title_host,
-                        ft.Row(
-                            tag_items,
-                            spacing=8,
-                            run_spacing=8,
-                            wrap=True,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                        ),
-                        underline,
-                    ],
-                    spacing=8,
+                    [eyebrow, title_host, rule],
+                    spacing=10 if _is_dark else 8,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 animate_opacity=240,

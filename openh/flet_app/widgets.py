@@ -328,42 +328,29 @@ def top_bar(
 
     if is_fnd:
         title_widget = ft.Container(
-            content=ft.Column(
+            content=ft.Row(
                 [
                     ft.Text(
-                        "SESSION // AFTER MIDNIGHT" if dark_fnd else "PATISSERIE FIELD LOG",
-                        color=theme.ACCENT if dark_fnd else theme.TEXT_TERTIARY,
-                        size=9 if dark_fnd else 10,
-                        weight=ft.FontWeight.W_700,
-                        font_family=theme.FONT_MONO,
+                        title or "New chat",
+                        color=theme.TEXT_PRIMARY,
+                        size=15 if dark_fnd else 17,
+                        weight=ft.FontWeight.W_600,
+                        font_family=theme.FONT_SANS if dark_fnd else theme.FONT_EM,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                        max_lines=1,
+                        expand=True,
                     ),
-                    ft.Row(
-                        [
-                            ft.Text(
-                                title or "New chat",
-                                color=theme.TEXT_PRIMARY,
-                                size=16 if dark_fnd else 18,
-                                weight=ft.FontWeight.W_700 if dark_fnd else ft.FontWeight.W_600,
-                                font_family=theme.FONT_SANS if dark_fnd else theme.FONT_EM,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                                max_lines=1,
-                                expand=True,
-                            ),
-                            ft.Icon(
-                                ft.Icons.KEYBOARD_ARROW_DOWN,
-                                color=theme.TEXT_TERTIARY,
-                                size=16,
-                            ),
-                        ],
-                        spacing=6,
-                        tight=True,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ft.Icon(
+                        ft.Icons.KEYBOARD_ARROW_DOWN,
+                        color=theme.TEXT_TERTIARY,
+                        size=16,
                     ),
                 ],
-                spacing=1,
+                spacing=6,
                 tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.symmetric(horizontal=8, vertical=4),
+            padding=ft.padding.symmetric(horizontal=8, vertical=6),
             ink=True,
             on_click=lambda e: on_rename(),
             tooltip="Click to rename conversation",
@@ -403,20 +390,17 @@ def top_bar(
     note_text = busy_indicator or ft.Container()
     if on_edit_prompt:
         if is_fnd:
-            prompt_control = ft.Container(
-                content=ft.Text(
-                    f"prompt // {prompt_label or 'default'}",
-                    color=theme.ACCENT if dark_fnd else theme.TEXT_SECONDARY,
-                    size=10,
-                    font_family=theme.FONT_MONO,
-                    weight=ft.FontWeight.W_600 if dark_fnd else ft.FontWeight.W_500,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-                padding=ft.padding.only(left=6, right=6, top=4, bottom=4),
-                ink=True,
+            prompt_control = ft.IconButton(
+                icon=ft.Icons.ARTICLE_OUTLINED,
+                icon_color=theme.ACCENT if dark_fnd else theme.TEXT_SECONDARY,
+                icon_size=17,
+                tooltip=f"Edit prompt ({prompt_label or 'default'})",
                 on_click=lambda e: on_edit_prompt(),
-                tooltip="Edit session prompt",
+                style=ft.ButtonStyle(
+                    shape=ft.CircleBorder(),
+                    padding=ft.padding.all(6),
+                    overlay_color=theme.BG_HOVER,
+                ),
             )
         else:
             prompt_control = ft.Container(
@@ -1415,134 +1399,6 @@ def welcome_screen(
 
     if theme.is_fnd():
         dark = theme.is_dark()
-        if dark:
-            def _signal_chip(label: str, color: str) -> ft.Container:
-                return ft.Container(
-                    content=ft.Text(
-                        label,
-                        color=color,
-                        size=10,
-                        weight=ft.FontWeight.W_700,
-                        font_family=theme.FONT_MONO,
-                    ),
-                    padding=ft.padding.symmetric(horizontal=10, vertical=5),
-                    border_radius=theme.RADIUS_PILL,
-                    border=ft.border.all(1, color + "55"),
-                    bgcolor="#0c1220c2",
-                )
-
-            workspace = ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Icon(ft.Icons.FOLDER_OUTLINED, color=theme.TEXT_TERTIARY, size=14),
-                        ft.Text(
-                            display_cwd,
-                            color=theme.TEXT_SECONDARY,
-                            size=12,
-                            font_family=theme.FONT_MONO,
-                            expand=True,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.TextButton(
-                            "Change",
-                            style=ft.ButtonStyle(
-                                color=accent_color or theme.ACCENT,
-                                padding=ft.padding.symmetric(horizontal=6, vertical=0),
-                            ),
-                            on_click=lambda e: on_change_cwd() if on_change_cwd else None,
-                        ),
-                    ],
-                    spacing=8,
-                    tight=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                padding=ft.padding.symmetric(horizontal=12, vertical=8),
-                border_radius=22,
-                border=ft.border.all(1, theme.BORDER_SUBTLE),
-                bgcolor="#0b1020c2",
-            ) if cwd else ft.Container()
-
-            signal_row = ft.Row(
-                [
-                    _signal_chip("FIELD LOG", theme.ACCENT),
-                    _signal_chip("SIGNAL RAIN", "#79e8ff"),
-                    _signal_chip("AFTERGLOW", "#c48cff"),
-                ],
-                spacing=8,
-                run_spacing=8,
-                wrap=True,
-                alignment=ft.MainAxisAlignment.CENTER,
-            )
-
-            return ft.Container(
-                content=ft.Column(
-                    [
-                        wordmark or ft.Text(
-                            "Fruits & Dessert",
-                            color=accent_color or theme.ACCENT,
-                            size=38,
-                            weight=ft.FontWeight.W_600,
-                            text_align=ft.TextAlign.CENTER,
-                            font_family=theme.FONT_EM,
-                        ),
-                        ft.Container(height=2),
-                        signal_row,
-                        ft.Text(
-                            sub_text,
-                            color=theme.TEXT_PRIMARY,
-                            size=15,
-                            text_align=ft.TextAlign.CENTER,
-                            weight=ft.FontWeight.W_700,
-                            font_family=theme.FONT_MONO,
-                        ),
-                        ft.Text(
-                            "Neon haze, radio hiss, field notes after midnight.",
-                            color=theme.TEXT_SECONDARY,
-                            size=12,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        workspace,
-                    ],
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=12,
-                ),
-                alignment=ft.Alignment(0, 0),
-                padding=ft.padding.only(left=20, right=20, top=92, bottom=36),
-                expand=True,
-            )
-
-        def _dessert_card(label: str, flavor: str, color: str) -> ft.Container:
-            return ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Text(
-                            label,
-                            color=color,
-                            size=10,
-                            weight=ft.FontWeight.W_700,
-                            font_family=theme.FONT_MONO,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                        ft.Text(
-                            flavor,
-                            color=theme.TEXT_SECONDARY,
-                            size=12,
-                            font_family=theme.FONT_EM,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                    ],
-                    spacing=2,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    tight=True,
-                ),
-                padding=ft.padding.symmetric(horizontal=14, vertical=10),
-                border_radius=18,
-                bgcolor="#fff6ef",
-                border=ft.border.all(1, color + "55"),
-            )
-
         workspace = ft.Container(
             content=ft.Row(
                 [
@@ -1569,10 +1425,10 @@ def welcome_screen(
                 tight=True,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.symmetric(horizontal=12, vertical=10),
-            border_radius=22,
-            border=ft.border.all(1, "#f0c8bd"),
-            bgcolor="#fffdf9",
+            padding=ft.padding.symmetric(horizontal=14, vertical=10),
+            border_radius=24,
+            border=ft.border.all(1, theme.BORDER_SUBTLE),
+            bgcolor="#0b1020c8" if dark else "#fffdfa",
         ) if cwd else ft.Container()
 
         return ft.Container(
@@ -1581,45 +1437,51 @@ def welcome_screen(
                     wordmark or ft.Text(
                         "Fruits & Dessert",
                         color=accent_color or theme.ACCENT,
-                        size=38,
+                        size=40 if dark else 38,
                         weight=ft.FontWeight.W_600,
                         text_align=ft.TextAlign.CENTER,
                         font_family=theme.FONT_EM,
                     ),
-                    ft.Row(
-                        [
-                            _dessert_card("MENU A", "strawberry cream", theme.ACCENT),
-                            _dessert_card("MENU B", "citrus soda", "#f4a261"),
-                            _dessert_card("MENU C", "mint parfait", "#67c7a5"),
-                        ],
-                        spacing=10,
-                        run_spacing=10,
-                        wrap=True,
-                        alignment=ft.MainAxisAlignment.CENTER,
+                    ft.Text(
+                        (
+                            "ESP32 · nRF52840 · Pi5 · RTL8812BU"
+                            if dark
+                            else "strawberry cream · citrus peel · mint hush"
+                        ),
+                        color=theme.TEXT_TERTIARY if dark else theme.ACCENT,
+                        size=11 if dark else 12,
+                        text_align=ft.TextAlign.CENTER,
+                        weight=ft.FontWeight.W_600,
+                        font_family=theme.FONT_MONO if dark else theme.FONT_SANS,
                     ),
                     ft.Text(
                         sub_text,
                         color=theme.TEXT_PRIMARY,
                         size=15,
                         text_align=ft.TextAlign.CENTER,
-                        weight=ft.FontWeight.W_600,
+                        weight=ft.FontWeight.W_700 if dark else ft.FontWeight.W_600,
+                        font_family=theme.FONT_MONO if dark else theme.FONT_SANS,
                     ),
                     ft.Text(
-                        "Cream light, fruit sketches, and a quieter kind of signal.",
+                        (
+                            "Neon hush, radio drift, and a cleaner kind of signal."
+                            if dark
+                            else "Soft fruit, cream paper, and a slower kind of signal."
+                        ),
                         color=theme.TEXT_SECONDARY,
                         size=13,
-                        italic=True,
                         text_align=ft.TextAlign.CENTER,
-                        font_family=theme.FONT_EM,
+                        italic=not dark,
+                        font_family=theme.FONT_EM if not dark else None,
                     ),
                     workspace,
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 alignment=ft.MainAxisAlignment.CENTER,
-                spacing=14,
+                spacing=16 if dark else 14,
             ),
             alignment=ft.Alignment(0, 0),
-            padding=ft.padding.only(left=24, right=24, top=80, bottom=36),
+            padding=ft.padding.only(left=28, right=28, top=96 if dark else 86, bottom=36),
             expand=True,
         )
 
