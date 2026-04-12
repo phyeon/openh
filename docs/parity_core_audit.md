@@ -84,7 +84,7 @@ Status legend:
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
 | `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed again this pass. Assistant text/tool-call conversion is closer to the public adapter now, and Responses-API-only models (`gpt-5*`, `o3*`, `o4*`) are now explicitly gated instead of being sent to Chat Completions. Chat Completions payload also uses `max_tokens` like the public adapter. Still no actual Responses API implementation. |
-| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, and JSON-schema sanitizing is much closer to the public Google adapter (enum coercion, required filtering, array item typing). Runtime smoke still depends on local `google.genai` availability, and the streaming path is still simpler than the public SSE parser. |
+| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, duplicate streamed function-call chunks are coalesced before emitting tool-use events, `FINISH_REASON_UNSPECIFIED` maps cleanly to `end_turn`, and Gemini requests now always carry an explicit `max_output_tokens` cap like the public adapter. Still no full HTTP/SSE adapter or request-level thinking config surface. |
 | `[~]` | `openh/providers/__init__.py` | provider registry surfaces | Reviewed this pass. Provider imports are now consistently lazy and missing-SDK failures surface as stable runtime errors instead of import crashes. Still a much smaller registry than the public provider module tree. |
 
 ## 6. UI / Desktop Runtime
@@ -97,7 +97,7 @@ These are not strict engine parity targets, but they still matter for behavior a
 | `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, and the sidebar new-chat button no longer swaps into a decorative emoji object. Still not a full file-wide audit. |
 | `[ ]` | `openh/flet_app/theme.py` | none | Local design system, not a direct public parity target. |
 | `[~]` | `openh/flet_app/settings_dialog.py` | `crates/tui/src/settings_screen.rs` and related settings surfaces | Reviewed this pass. Output-style picker now uses style labels, custom model values stay selectable instead of disappearing from the dropdown, and prompt preset UI follows stable slug/display-name separation. Still a desktop/Flet-specific UI, not a literal port of the TUI settings screen. |
-| `[ ]` | `openh/flet_app/permission_dialog.py` | TUI permission dialog surfaces | Not fully audited. |
+| `[~]` | `openh/flet_app/permission_dialog.py` | `crates/tui/src/dialogs.rs` | Reviewed this pass. Dialog titles and previews are now tool-specific (`Bash`, file read/write, web fetch/search, agent question), so the prompt resembles the public permission overlays more closely. Runtime permission option semantics are still OpenH-specific (`always deny` is retained). |
 
 ## 7. Clearly remaining parity work
 
@@ -114,7 +114,7 @@ These are the main open deltas after the reviewed files above:
 Recommended next line-by-line audit batches:
 
 1. `providers/gemini.py` final capability-gating / thinking-config follow-up
-2. `flet_app/main.py`, `flet_app/widgets.py` final regression sweep
-3. `flet_app/permission_dialog.py`
-4. `permission_rules.py` exact-manager follow-up
-5. `coordinator.py` / managed runtime exact pass
+2. `permission_rules.py` exact-manager follow-up
+3. `coordinator.py` / managed runtime exact pass
+4. `flet_app/main.py`, `flet_app/widgets.py` one last visual/UX regression sweep
+5. `flet_app/permission_dialog.py` semantics follow-up

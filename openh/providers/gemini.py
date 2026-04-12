@@ -1,12 +1,12 @@
 """Gemini provider — translates Anthropic message format ↔ Gemini Content."""
 from __future__ import annotations
 
-import itertools
 from typing import Any, AsyncIterator
 
 from google import genai
 from google.genai import types as gtypes
 
+from ..config import MAX_OUTPUT_TOKENS
 from ..messages import (
     DocumentBlock,
     ImageBlock,
@@ -30,12 +30,6 @@ class GeminiProvider:
     def __init__(self, api_key: str, model: str) -> None:
         self.model = model
         self._client = genai.Client(api_key=api_key)
-        self._tool_id_counter = itertools.count(1)
-
-    # ------------------------------------------------------------------ helpers
-
-    def _next_tool_id(self) -> str:
-        return f"gem_{next(self._tool_id_counter)}"
 
     @staticmethod
     def _tool_use_id_for_name(name: str, occurrence: int) -> str:
@@ -126,10 +120,9 @@ class GeminiProvider:
             return "max_tokens"
         if reason_str in {"SAFETY", "RECITATION"}:
             return "content_filtered"
-        if reason_str in {"STOP", "END_TURN", ""}:
+        if reason_str in {"STOP", "END_TURN", "FINISH_REASON_UNSPECIFIED", ""}:
             return "end_turn"
         return str(reason or "end_turn").lower()
-        return None
 
     @staticmethod
     def _to_gemini_tools(tools: list[ToolSchema]) -> list[gtypes.Tool] | None:
@@ -160,8 +153,7 @@ class GeminiProvider:
         gemini_tools = self._to_gemini_tools(tools)
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
-        if max_tokens is not None:
-            config_kwargs["max_output_tokens"] = int(max_tokens)
+        config_kwargs["max_output_tokens"] = int(max_tokens or MAX_OUTPUT_TOKENS)
 
         config = gtypes.GenerateContentConfig(**config_kwargs)
 
@@ -171,7 +163,7 @@ class GeminiProvider:
         emitted_tool_use = False
         emitted_text = False
         tool_name_counts: dict[str, int] = {}
-        open_tool_ids: dict[int, tuple[str, str]] = {}
+        pending_tool_calls: dict[int, tuple[str, str, dict[str, Any], Any]] = {}
 
         # Retry on transient errors (503, 429, etc.)
         import asyncio as _aio
@@ -219,20 +211,23 @@ class GeminiProvider:
                     if fc is not None:
                         emitted_tool_use = True
                         name = getattr(fc, "name", "") or "tool"
-                        existing = open_tool_ids.get(part_idx)
+                        existing = pending_tool_calls.get(part_idx)
                         if existing is not None and existing[1] == name:
                             tool_id = existing[0]
                         else:
                             occurrence = tool_name_counts.get(name, 0)
                             tool_id = self._tool_use_id_for_name(name, occurrence)
                             tool_name_counts[name] = occurrence + 1
-                            open_tool_ids[part_idx] = (tool_id, name)
                         try:
                             args = dict(fc.args) if fc.args else {}
                         except Exception:
                             args = {}
-                        yield ToolUseStart(id=tool_id, name=name)
-                        yield ToolUseEnd(id=tool_id, name=name, input=args, _raw_part=part)
+                        pending_tool_calls[part_idx] = (tool_id, name, args, part)
+
+        for part_idx in sorted(pending_tool_calls):
+            tool_id, name, args, raw_part = pending_tool_calls[part_idx]
+            yield ToolUseStart(id=tool_id, name=name)
+            yield ToolUseEnd(id=tool_id, name=name, input=args, _raw_part=raw_part)
 
         if stop_reason == "end_turn" and emitted_tool_use and not emitted_text:
             stop_reason = "tool_use"

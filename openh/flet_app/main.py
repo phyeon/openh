@@ -723,6 +723,23 @@ class OpenHApp:
         self._top_status_text = ""
         self._refresh_top_bar(note="thinking…" if self._busy else "")
 
+    @staticmethod
+    def _command_output_prefers_status(command_text: str, output: str) -> bool:
+        cmd = command_text[1:].split(maxsplit=1)[0].lower() if command_text.startswith("/") else ""
+        if not cmd:
+            return False
+        if "\n" in output or len(output) > 140:
+            return False
+        return cmd in {
+            "theme",
+            "model",
+            "switch",
+            "output-style",
+            "output_style",
+            "rename",
+            "init",
+        }
+
     def _refresh_top_bar(self, note: str = "") -> None:
         # Determine prompt label for the pill
         p_label = self.session.prompt_preset or self.settings.active_prompt or "default"
@@ -2080,10 +2097,13 @@ class OpenHApp:
             if result is not None and result.handled:
                 if result.output:
                     self._hide_welcome()
-                    self._append_to_messages(
-                        widgets.system_note(result.output)
-                    )
-                    self._scroll_to_end()
+                    if self._command_output_prefers_status(text, result.output):
+                        self._set_status_note(result.output)
+                    else:
+                        self._append_to_messages(
+                            widgets.system_note(result.output)
+                        )
+                        self._scroll_to_end()
                 if result.user_message:
                     self._submit_turn(result.user_message, [])
                     return

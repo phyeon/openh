@@ -10,6 +10,57 @@ import flet as ft
 from . import theme
 
 
+def _dialog_meta(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str, str]:
+    name = str(tool_name or "")
+    if name == "Bash":
+        return "Allow Bash Command?", ft.Icons.TERMINAL, theme.WARN
+    if name in {"Read", "Glob", "Grep"}:
+        return "Allow File Read?", ft.Icons.DESCRIPTION_OUTLINED, theme.SUCCESS
+    if name in {"Write", "Edit", "NotebookEdit"}:
+        return "Allow File Write?", ft.Icons.EDIT_OUTLINED, theme.WARN
+    if name == "WebFetch":
+        return "Allow Web Fetch?", ft.Icons.LANGUAGE, theme.ACCENT
+    if name == "WebSearch":
+        return "Allow Web Search?", ft.Icons.SEARCH, theme.ACCENT
+    if name == "AskUserQuestion":
+        return "Allow Agent Question?", ft.Icons.HELP_OUTLINE, theme.ACCENT
+    return f"Allow {name}?", ft.Icons.SHIELD_OUTLINED, theme.ACCENT
+
+
+def _preview_lines(tool_name: str, input_dict: dict[str, Any]) -> tuple[str, str] | None:
+    if tool_name == "Bash":
+        command = str(input_dict.get("command") or "").strip()
+        if command:
+            return "Command", f"$ {command}"
+    if tool_name in {"Read", "Write", "Edit", "NotebookEdit"}:
+        path = str(
+            input_dict.get("file_path")
+            or input_dict.get("path")
+            or ""
+        ).strip()
+        if path:
+            return "File", path
+    if tool_name in {"Glob", "Grep"}:
+        pattern = str(input_dict.get("pattern") or input_dict.get("query") or "").strip()
+        path = str(input_dict.get("path") or input_dict.get("cwd") or "").strip()
+        preview = pattern or path
+        if preview:
+            return "Search", preview
+    if tool_name == "WebFetch":
+        url = str(input_dict.get("url") or "").strip()
+        if url:
+            return "URL", url
+    if tool_name == "WebSearch":
+        query = str(input_dict.get("query") or "").strip()
+        if query:
+            return "Query", query
+    if tool_name == "AskUserQuestion":
+        question = str(input_dict.get("question") or "").strip()
+        if question:
+            return "Question", question
+    return None
+
+
 class PermissionDialog:
     """A dialog that asks the user to allow / always-allow / deny a tool call.
 
@@ -33,6 +84,8 @@ class PermissionDialog:
             body = body[:1500] + "\n…(truncated)"
 
         description = theme.TOOL_DESCRIPTIONS.get(tool_name, "Run a tool")
+        title_text, title_icon, accent = _dialog_meta(tool_name, input_dict)
+        preview = _preview_lines(tool_name, input_dict)
 
         def make_handler(decision: str):
             def _h(e):
@@ -45,9 +98,9 @@ class PermissionDialog:
             content_padding=ft.padding.symmetric(horizontal=24, vertical=20),
             title=ft.Row(
                 [
-                    ft.Icon(ft.Icons.SHIELD_OUTLINED, color=theme.ACCENT, size=20),
+                    ft.Icon(title_icon, color=accent, size=20),
                     ft.Text(
-                        f"Allow {tool_name}?",
+                        title_text,
                         color=theme.TEXT_PRIMARY,
                         weight=ft.FontWeight.W_700,
                         size=16,
@@ -63,18 +116,50 @@ class PermissionDialog:
                         color=theme.TEXT_SECONDARY,
                         size=12,
                     ),
+                    *(
+                        [
+                            ft.Container(
+                                content=ft.Column(
+                                    [
+                                        ft.Text(
+                                            preview[0],
+                                            color=theme.TEXT_TERTIARY,
+                                            size=11,
+                                            font_family=theme.FONT_MONO,
+                                        ),
+                                        ft.Text(
+                                            preview[1],
+                                            font_family=theme.FONT_MONO,
+                                            size=12,
+                                            color=theme.TEXT_PRIMARY,
+                                            selectable=True,
+                                        ),
+                                    ],
+                                    spacing=6,
+                                    tight=True,
+                                ),
+                                bgcolor=theme.BG_DEEPEST,
+                                border=ft.border.all(1, theme.BORDER_SUBTLE),
+                                border_radius=theme.RADIUS_SM,
+                                padding=14,
+                                width=520,
+                            )
+                        ]
+                        if preview is not None
+                        else []
+                    ),
                     ft.Container(
                         content=ft.Text(
                             body,
                             font_family=theme.FONT_MONO,
-                            size=12,
-                            color=theme.TEXT_PRIMARY,
+                            size=11,
+                            color=theme.TEXT_SECONDARY,
                             selectable=True,
                         ),
-                        bgcolor=theme.BG_DEEPEST,
-                        border=ft.border.all(1, theme.BORDER_SUBTLE),
+                        bgcolor=theme.BG_PAGE,
+                        border=ft.border.all(1, theme.BORDER_FAINT),
                         border_radius=theme.RADIUS_SM,
-                        padding=14,
+                        padding=12,
                         width=520,
                     ),
                 ],
@@ -88,7 +173,7 @@ class PermissionDialog:
                     on_click=make_handler("deny"),
                 ),
                 ft.TextButton(
-                    content=ft.Text("Deny always", color=theme.WARN, size=13),
+                    content=ft.Text("Always deny", color=theme.WARN, size=13),
                     on_click=make_handler("deny_always"),
                 ),
                 ft.TextButton(
@@ -97,14 +182,14 @@ class PermissionDialog:
                 ),
                 ft.FilledButton(
                     content=ft.Text(
-                        "Allow",
+                        "Allow once",
                         color=theme.TEXT_ON_ACCENT,
                         size=13,
                         weight=ft.FontWeight.W_600,
                     ),
                     on_click=make_handler("allow"),
                     style=ft.ButtonStyle(
-                        bgcolor=theme.ACCENT,
+                        bgcolor=accent,
                         color=theme.TEXT_ON_ACCENT,
                     ),
                 ),
