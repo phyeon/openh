@@ -16,6 +16,7 @@ import flet as ft
 
 from .. import prompts, settings as settings_mod
 from ..settings import ANTHROPIC_MODELS, GEMINI_MODELS, OPENAI_MODELS, Settings
+from ..session import normalize_usage_by_model
 from . import theme
 
 
@@ -340,17 +341,100 @@ class SettingsDialog:
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
             keyboard_type=ft.KeyboardType.NUMBER,
         )
-        return _padded_column(
+        summary_card = self._token_usage_summary_card()
+        children: list[ft.Control] = [
+            _label("Token budgets"),
+            self._max_tokens_field,
+            ft.Container(height=10),
+            self._compact_field,
+        ]
+        if summary_card is not None:
+            children.extend(
+                [
+                    ft.Container(height=16),
+                    _label("Current session usage"),
+                    summary_card,
+                ]
+            )
+        children.extend(
             [
-                _label("Token budgets"),
-                self._max_tokens_field,
-                ft.Container(height=10),
-                self._compact_field,
                 ft.Container(height=14),
                 _hint(
                     "모델에게 보내는 컨텍스트만 줄여. 네가 보는 transcript는 그대로 두고, 0이면 자동 compact를 끈다."
                 ),
             ]
+        )
+        return _padded_column(
+            children
+        )
+
+    def _token_usage_summary_card(self) -> ft.Container | None:
+        session = self._session
+        if session is None:
+            return None
+
+        total_tokens = (
+            int(getattr(session, "total_input_tokens", 0) or 0)
+            + int(getattr(session, "total_output_tokens", 0) or 0)
+            + int(getattr(session, "total_cache_creation_input_tokens", 0) or 0)
+            + int(getattr(session, "total_cache_read_input_tokens", 0) or 0)
+        )
+        subagent_tokens = (
+            int(getattr(session, "subagent_total_input_tokens", 0) or 0)
+            + int(getattr(session, "subagent_total_output_tokens", 0) or 0)
+            + int(getattr(session, "subagent_total_cache_creation_input_tokens", 0) or 0)
+            + int(getattr(session, "subagent_total_cache_read_input_tokens", 0) or 0)
+        )
+        lines = [
+            f"Total: {total_tokens:,}",
+            (
+                "Breakdown: "
+                f"in {int(getattr(session, 'total_input_tokens', 0) or 0):,} · "
+                f"out {int(getattr(session, 'total_output_tokens', 0) or 0):,}"
+            ),
+            (
+                "Cache: "
+                f"create {int(getattr(session, 'total_cache_creation_input_tokens', 0) or 0):,} · "
+                f"read {int(getattr(session, 'total_cache_read_input_tokens', 0) or 0):,}"
+            ),
+            f"Sub-agents: {subagent_tokens:,}",
+            f"Estimated cost: ${float(getattr(session, 'total_estimated_cost_usd', 0.0) or 0.0):.4f}",
+        ]
+        usage_by_model = normalize_usage_by_model(getattr(session, "usage_by_model", {}))
+        if usage_by_model:
+            lines.append("By model:")
+        for model_name, entry in sorted(
+            usage_by_model.items(),
+            key=lambda item: float(item[1].get("cost_usd", 0.0) or 0.0),
+            reverse=True,
+        ):
+            model_total = (
+                int(entry.get("input_tokens", 0) or 0)
+                + int(entry.get("output_tokens", 0) or 0)
+                + int(entry.get("cache_creation_input_tokens", 0) or 0)
+                + int(entry.get("cache_read_input_tokens", 0) or 0)
+            )
+            lines.append(
+                f"{model_name}: {model_total:,} · ${float(entry.get('cost_usd', 0.0) or 0.0):.4f}"
+            )
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        line,
+                        color=theme.TEXT_SECONDARY,
+                        size=12,
+                        font_family=theme.FONT_MONO,
+                    )
+                    for line in lines
+                ],
+                spacing=6,
+                tight=True,
+            ),
+            bgcolor=theme.BG_DEEPEST,
+            border=ft.border.all(1, theme.BORDER_SUBTLE),
+            border_radius=theme.RADIUS_MD,
+            padding=ft.padding.all(12),
         )
 
     # --------------------------------------------------------------- tab 4

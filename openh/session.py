@@ -26,8 +26,14 @@ class AgentSession:
     total_output_tokens: int = 0
     total_cache_creation_input_tokens: int = 0
     total_cache_read_input_tokens: int = 0
+    subagent_total_input_tokens: int = 0
+    subagent_total_output_tokens: int = 0
+    subagent_total_cache_creation_input_tokens: int = 0
+    subagent_total_cache_read_input_tokens: int = 0
     last_input_tokens: int = 0      # context size of last API call
     total_estimated_cost_usd: float = 0.0
+    subagent_total_estimated_cost_usd: float = 0.0
+    usage_by_model: dict[str, dict[str, int | float]] = field(default_factory=dict)
     session_id: str = ""
     title: str = ""
     created_at: float = 0.0
@@ -113,20 +119,124 @@ class AgentSession:
         output_tokens: int,
         cache_creation_input_tokens: int = 0,
         cache_read_input_tokens: int = 0,
+        *,
+        model: str | None = None,
+        source: str = "direct",
+        update_last_input: bool = True,
+        propagate: bool = True,
     ) -> None:
-        effective_input = (
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_cache_creation_input_tokens += cache_creation_input_tokens
+        self.total_cache_read_input_tokens += cache_read_input_tokens
+        context_input = (
             input_tokens
             + cache_creation_input_tokens
             + cache_read_input_tokens
         )
-        self.total_input_tokens += effective_input
-        self.total_output_tokens += output_tokens
-        self.total_cache_creation_input_tokens += cache_creation_input_tokens
-        self.total_cache_read_input_tokens += cache_read_input_tokens
-        if effective_input > 0:
-            self.last_input_tokens = effective_input
-        self.total_estimated_cost_usd += estimate_cost_usd(
-            getattr(self.provider, "model", ""),
-            effective_input,
+        if update_last_input and context_input > 0:
+            self.last_input_tokens = context_input
+        model_name = (model or getattr(self.provider, "model", "") or "").strip() or "unknown"
+        cost_delta = estimate_cost_usd(
+            model_name,
+            input_tokens,
             output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
         )
+        self.total_estimated_cost_usd += cost_delta
+        record_usage_by_model(
+            self.usage_by_model,
+            model_name,
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+            cost_usd=cost_delta,
+        )
+        if source == "subagent":
+            self.subagent_total_input_tokens += input_tokens
+            self.subagent_total_output_tokens += output_tokens
+            self.subagent_total_cache_creation_input_tokens += cache_creation_input_tokens
+            self.subagent_total_cache_read_input_tokens += cache_read_input_tokens
+            self.subagent_total_estimated_cost_usd += cost_delta
+
+        if source == "direct" and propagate:
+            parent = getattr(self, "_usage_parent", None)
+            if isinstance(parent, AgentSession) and parent is not self:
+                parent.add_tokens(
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_input_tokens,
+                    cache_read_input_tokens,
+                    model=model_name,
+                    source="subagent",
+                    update_last_input=False,
+                    propagate=False,
+                )
+
+
+def normalize_usage_by_model(
+    raw: object,
+) -> dict[str, dict[str, int | float]]:
+    normalized: dict[str, dict[str, int | float]] = {}
+    if not isinstance(raw, dict):
+        return normalized
+
+    for model_name, entry in raw.items():
+        if not isinstance(model_name, str) or not isinstance(entry, dict):
+            continue
+        normalized[model_name] = {
+            "input_tokens": int(entry.get("input_tokens", 0) or 0),
+            "output_tokens": int(entry.get("output_tokens", 0) or 0),
+            "cache_creation_input_tokens": int(
+                entry.get("cache_creation_input_tokens", 0) or 0
+            ),
+            "cache_read_input_tokens": int(
+                entry.get("cache_read_input_tokens", 0) or 0
+            ),
+            "cost_usd": float(entry.get("cost_usd", 0.0) or 0.0),
+            "requests": int(entry.get("requests", 0) or 0),
+        }
+    return normalized
+
+
+def record_usage_by_model(
+    usage_by_model: dict[str, dict[str, int | float]],
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+    *,
+    cost_usd: float = 0.0,
+) -> None:
+    model_name = (model or "").strip() or "unknown"
+    entry = usage_by_model.setdefault(
+        model_name,
+        {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cost_usd": 0.0,
+            "requests": 0,
+        },
+    )
+    entry["input_tokens"] = int(entry.get("input_tokens", 0) or 0) + input_tokens
+    entry["output_tokens"] = int(entry.get("output_tokens", 0) or 0) + output_tokens
+    entry["cache_creation_input_tokens"] = int(
+        entry.get("cache_creation_input_tokens", 0) or 0
+    ) + cache_creation_input_tokens
+    entry["cache_read_input_tokens"] = int(
+        entry.get("cache_read_input_tokens", 0) or 0
+    ) + cache_read_input_tokens
+    entry["cost_usd"] = float(entry.get("cost_usd", 0.0) or 0.0) + cost_usd
+    if (
+        input_tokens
+        or output_tokens
+        or cache_creation_input_tokens
+        or cache_read_input_tokens
+        or cost_usd
+    ):
+        entry["requests"] = int(entry.get("requests", 0) or 0) + 1

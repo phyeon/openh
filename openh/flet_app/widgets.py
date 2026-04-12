@@ -402,9 +402,21 @@ def top_bar(
     )
 
 
-def _estimate_cost(model: str, in_tokens: int, out_tokens: int) -> float:
+def _estimate_cost(
+    model: str,
+    in_tokens: int,
+    out_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
     """Rough USD cost estimate based on published pricing (per 1M tokens)."""
-    return estimate_cost_usd(model, in_tokens, out_tokens)
+    return estimate_cost_usd(
+        model,
+        in_tokens,
+        out_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+    )
 
 
 def _format_cost(cost: float) -> str:
@@ -419,16 +431,40 @@ def bottom_status_bar(
     cwd: str,
     in_tokens: int,
     out_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    subagent_total_tokens: int = 0,
     model: str = "",
     cost_usd: float | None = None,
     context_tokens: int = 0,
     context_limit: int = 200_000,
 ) -> ft.Container:
     """Thin status strip — cwd + token counts + cost estimate + context usage."""
-    cost = cost_usd if cost_usd is not None else _estimate_cost(model, in_tokens, out_tokens)
+    cost = (
+        cost_usd
+        if cost_usd is not None
+        else _estimate_cost(
+            model,
+            in_tokens,
+            out_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+        )
+    )
     cost_str = _format_cost(cost)
-
-    token_label = f"in {in_tokens:,} · out {out_tokens:,}"
+    total_tokens = (
+        in_tokens
+        + out_tokens
+        + cache_creation_tokens
+        + cache_read_tokens
+    )
+    token_label = f"Σ {total_tokens:,} · in {in_tokens:,} · out {out_tokens:,}"
+    cache_label = ""
+    if cache_creation_tokens or cache_read_tokens:
+        cache_label = f"cache +{cache_creation_tokens:,}/{cache_read_tokens:,}"
+    agent_label = ""
+    if subagent_total_tokens > 0:
+        agent_label = f"agents {subagent_total_tokens:,}"
 
     right_parts = [
         ft.Text(
@@ -437,13 +473,35 @@ def bottom_status_bar(
             size=11,
             font_family=theme.FONT_MONO,
         ),
+    ]
+    if cache_label:
+        right_parts.append(
+            ft.Text(
+                cache_label,
+                color=theme.TEXT_TERTIARY,
+                size=11,
+                font_family=theme.FONT_MONO,
+            )
+        )
+    if agent_label:
+        right_parts.append(
+            ft.Text(
+                agent_label,
+                color=theme.ACCENT,
+                size=11,
+                font_family=theme.FONT_MONO,
+            )
+        )
+    right_parts.extend(
+        [
         ft.Text(
             cost_str,
             color=theme.ACCENT if cost > 0.01 else theme.TEXT_TERTIARY,
             size=11,
             font_family=theme.FONT_MONO,
         ),
-    ]
+        ]
+    )
 
     # Context usage bar
     if context_tokens > 0 and context_limit > 0:
@@ -1550,7 +1608,54 @@ def input_area(
 
     # Attachment chips row (above text input)
     box_children: list[ft.Control] = []
-    # Steering queue is handled silently in the backend — no UI needed.
+    if queued_inputs:
+        queue_chips: list[ft.Control] = []
+        for idx, value in enumerate(queued_inputs):
+            preview = (value or "").strip()
+            if len(preview) > 48:
+                preview = preview[:48].rstrip() + "..."
+            chip_children: list[ft.Control] = [
+                ft.Icon(ft.Icons.SCHEDULE, color=theme.ACCENT, size=14),
+                ft.Text(
+                    preview or "(queued)",
+                    color=theme.TEXT_SECONDARY,
+                    size=12,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ]
+            if on_remove_queued_input is not None:
+                chip_children.append(
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        icon_color=theme.TEXT_TERTIARY,
+                        icon_size=12,
+                        tooltip="Remove queued input",
+                        on_click=lambda e, i=idx: on_remove_queued_input(i),
+                        style=ft.ButtonStyle(
+                            shape=ft.CircleBorder(),
+                            padding=ft.padding.all(0),
+                        ),
+                    )
+                )
+            queue_chips.append(
+                ft.Container(
+                    content=ft.Row(
+                        chip_children,
+                        spacing=6,
+                        tight=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    bgcolor=theme.BG_ELEVATED,
+                    border=ft.border.all(1, theme.BORDER_SUBTLE),
+                    border_radius=theme.RADIUS_SM,
+                    padding=ft.padding.only(left=8, right=4, top=4, bottom=4),
+                )
+            )
+        box_children.append(
+            ft.Row(queue_chips, spacing=6, tight=True, wrap=True)
+        )
+        box_children.append(ft.Container(height=6))
 
     if attachments:
         import base64 as _b64mod

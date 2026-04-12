@@ -77,7 +77,9 @@ class Agent:
         ):
             try:
                 compacted = await compact_messages(
-                    self.session.model_messages, self.session.provider
+                    self.session.model_messages,
+                    self.session.provider,
+                    session=self.session,
                 )
                 self.session.model_messages = compacted
             except Exception:

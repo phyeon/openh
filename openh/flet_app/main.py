@@ -51,6 +51,7 @@ from ..cc_compat import (
     new_session_uuid,
     apply_flags,
     read_session_jsonl,
+    read_session_meta,
     save_session_meta,
     session_jsonl_path,
     set_session_flag,
@@ -67,7 +68,7 @@ from ..session_memory import (
     project_agents_path,
     should_extract as should_extract_session_memory,
 )
-from ..session import AgentSession
+from ..session import AgentSession, normalize_usage_by_model, record_usage_by_model
 from ..tools import default_tools
 from ..profiles import get_profile, list_profiles
 from . import theme, widgets
@@ -622,6 +623,21 @@ class OpenHApp:
             p_label = f"{p_label} (edited)"
         self._busy_note_active = bool(note)
         busy_indicator = self._ensure_busy_indicator() if note else None
+        if note and busy_indicator is not None and self._queued_turns:
+            busy_indicator = ft.Row(
+                [
+                    busy_indicator,
+                    ft.Text(
+                        f"queued {len(self._queued_turns)}",
+                        color=theme.TEXT_TERTIARY,
+                        size=11,
+                        font_family=theme.FONT_MONO,
+                    ),
+                ],
+                spacing=6,
+                tight=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
         if note:
             self._start_busy_indicator_animation()
         else:
@@ -998,6 +1014,12 @@ class OpenHApp:
         model = getattr(self.session.provider, "model", "")
         # Last turn's input_tokens approximates current context size
         context_tokens = self.session.last_input_tokens if hasattr(self.session, "last_input_tokens") else 0
+        subagent_total_tokens = (
+            self.session.subagent_total_input_tokens
+            + self.session.subagent_total_output_tokens
+            + self.session.subagent_total_cache_creation_input_tokens
+            + self.session.subagent_total_cache_read_input_tokens
+        )
         # Context limit per model
         ctx_limits = {
             "gpt-5.4": 1_050_000,
@@ -1016,6 +1038,9 @@ class OpenHApp:
             cwd=self.session.cwd,
             in_tokens=self.session.total_input_tokens,
             out_tokens=self.session.total_output_tokens,
+            cache_creation_tokens=self.session.total_cache_creation_input_tokens,
+            cache_read_tokens=self.session.total_cache_read_input_tokens,
+            subagent_total_tokens=subagent_total_tokens,
             model=model,
             cost_usd=self.session.total_estimated_cost_usd,
             context_tokens=context_tokens,
@@ -1507,7 +1532,9 @@ class OpenHApp:
             )
             if should_compact(self.session.model_messages):
                 self.session.model_messages = await compact_messages(
-                    self.session.model_messages, self.session.provider
+                    self.session.model_messages,
+                    self.session.provider,
+                    session=self.session,
                 )
             await agent._drive_loop()
         except Exception as exc:
@@ -1786,7 +1813,9 @@ class OpenHApp:
         self._refresh_top_bar(note="compacting…")
         try:
             self.session.model_messages = await compact_messages(
-                self.session.model_messages, self.session.provider
+                self.session.model_messages,
+                self.session.provider,
+                session=self.session,
             )
         except Exception as exc:  # noqa: BLE001
             self._append_to_messages(
@@ -1835,6 +1864,7 @@ class OpenHApp:
             self._queued_turns.append((text, pending_media, bubble))
             self.input_field.value = ""
             self.input_field.update()
+            self._refresh_top_bar(note="thinking…")
             self._refresh_input()
             self._focus_input()
             self._scroll_to_end()
@@ -1911,7 +1941,9 @@ class OpenHApp:
             usage_tokens=self.session.last_input_tokens,
         ):
             self.session.model_messages = await compact_messages(
-                self.session.model_messages, self.session.provider
+                self.session.model_messages,
+                self.session.provider,
+                session=self.session,
             )
         # Append user message with media + text
         content = list(media_blocks) + [TextBlock(text=user_text)]
@@ -2186,8 +2218,14 @@ class OpenHApp:
             "total_output_tokens": self.session.total_output_tokens,
             "total_cache_creation_input_tokens": self.session.total_cache_creation_input_tokens,
             "total_cache_read_input_tokens": self.session.total_cache_read_input_tokens,
+            "subagent_total_input_tokens": self.session.subagent_total_input_tokens,
+            "subagent_total_output_tokens": self.session.subagent_total_output_tokens,
+            "subagent_total_cache_creation_input_tokens": self.session.subagent_total_cache_creation_input_tokens,
+            "subagent_total_cache_read_input_tokens": self.session.subagent_total_cache_read_input_tokens,
             "last_input_tokens": self.session.last_input_tokens,
             "total_estimated_cost_usd": self.session.total_estimated_cost_usd,
+            "subagent_total_estimated_cost_usd": self.session.subagent_total_estimated_cost_usd,
+            "usage_by_model": normalize_usage_by_model(self.session.usage_by_model),
             "session_memory_last_extracted_message_count": self.session.session_memory_last_extracted_message_count,
             "session_memory_last_extracted_tool_call_count": self.session.session_memory_last_extracted_tool_call_count,
         }
@@ -2301,8 +2339,14 @@ class OpenHApp:
         self.session.total_output_tokens = 0
         self.session.total_cache_creation_input_tokens = 0
         self.session.total_cache_read_input_tokens = 0
+        self.session.subagent_total_input_tokens = 0
+        self.session.subagent_total_output_tokens = 0
+        self.session.subagent_total_cache_creation_input_tokens = 0
+        self.session.subagent_total_cache_read_input_tokens = 0
         self.session.last_input_tokens = 0
         self.session.total_estimated_cost_usd = 0.0
+        self.session.subagent_total_estimated_cost_usd = 0.0
+        self.session.usage_by_model = {}
         self.session.session_memory_last_extracted_message_count = 0
         self.session.session_memory_last_extracted_tool_call_count = 0
         self.session.session_id = new_session_uuid()
@@ -2553,6 +2597,18 @@ class OpenHApp:
         self.session.total_cache_read_input_tokens = int(
             metadata.get("total_cache_read_input_tokens", 0) or 0
         )
+        self.session.subagent_total_input_tokens = int(
+            metadata.get("subagent_total_input_tokens", 0) or 0
+        )
+        self.session.subagent_total_output_tokens = int(
+            metadata.get("subagent_total_output_tokens", 0) or 0
+        )
+        self.session.subagent_total_cache_creation_input_tokens = int(
+            metadata.get("subagent_total_cache_creation_input_tokens", 0) or 0
+        )
+        self.session.subagent_total_cache_read_input_tokens = int(
+            metadata.get("subagent_total_cache_read_input_tokens", 0) or 0
+        )
         self.session.last_input_tokens = int(metadata.get("last_input_tokens", 0) or 0)
         self.session.session_memory_last_extracted_message_count = int(
             metadata.get("session_memory_last_extracted_message_count", 0) or 0
@@ -2560,16 +2616,30 @@ class OpenHApp:
         self.session.session_memory_last_extracted_tool_call_count = int(
             metadata.get("session_memory_last_extracted_tool_call_count", 0) or 0
         )
+        restored_usage_by_model = normalize_usage_by_model(
+            metadata.get("usage_by_model", {})
+        )
+        restored_usage_cost = sum(
+            float(entry.get("cost_usd", 0.0) or 0.0)
+            for entry in restored_usage_by_model.values()
+        )
         self.session.total_estimated_cost_usd = float(
             metadata.get(
                 "total_estimated_cost_usd",
-                estimate_cost_usd(
+                restored_usage_cost
+                or estimate_cost_usd(
                     getattr(self.session.provider, "model", ""),
                     self.session.total_input_tokens,
                     self.session.total_output_tokens,
+                    self.session.total_cache_creation_input_tokens,
+                    self.session.total_cache_read_input_tokens,
                 ),
             ) or 0.0
         )
+        self.session.subagent_total_estimated_cost_usd = float(
+            metadata.get("subagent_total_estimated_cost_usd", 0.0) or 0.0
+        )
+        self.session.usage_by_model = restored_usage_by_model
         target_cwd = metadata.get("session_cwd") or metadata.get("cwd")
         if target_cwd:
             self._set_runtime_cwd(target_cwd, save=False)
@@ -2705,8 +2775,14 @@ class OpenHApp:
             total_output_tokens=self.session.total_output_tokens,
             total_cache_creation_input_tokens=self.session.total_cache_creation_input_tokens,
             total_cache_read_input_tokens=self.session.total_cache_read_input_tokens,
+            subagent_total_input_tokens=self.session.subagent_total_input_tokens,
+            subagent_total_output_tokens=self.session.subagent_total_output_tokens,
+            subagent_total_cache_creation_input_tokens=self.session.subagent_total_cache_creation_input_tokens,
+            subagent_total_cache_read_input_tokens=self.session.subagent_total_cache_read_input_tokens,
             last_input_tokens=self.session.last_input_tokens,
             total_estimated_cost_usd=self.session.total_estimated_cost_usd,
+            subagent_total_estimated_cost_usd=self.session.subagent_total_estimated_cost_usd,
+            usage_by_model=self.session.usage_by_model,
             session_cwd=self.session.cwd,
             prompt_override=self.session.prompt_override or None,
             profile_id=self.session.profile_id if self.session.profile_id != "default" else None,
@@ -2796,23 +2872,102 @@ class OpenHApp:
         provider: Any,
     ) -> None:
         try:
-            memories = await extract_memories(snapshot, provider, cwd)
+            memories, usage = await extract_memories(snapshot, provider, cwd)
             if memories:
                 await persist_memories(memories, project_agents_path(cwd))
 
             visible_count = count_visible_messages(snapshot)
             tool_call_count = count_tool_calls(snapshot)
             meta_path = session_jsonl_path(cwd, session_id)
-            save_session_meta(
-                meta_path,
-                session_memory_last_extracted_message_count=visible_count,
-                session_memory_last_extracted_tool_call_count=tool_call_count,
+            usage_cost = estimate_cost_usd(
+                getattr(provider, "model", ""),
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_creation_input_tokens,
+                usage.cache_read_input_tokens,
+            )
+            usage_present = any(
+                (
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.cache_creation_input_tokens,
+                    usage.cache_read_input_tokens,
+                )
             )
 
             if self.session.session_id == session_id:
+                if usage_present:
+                    self.session.add_tokens(
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cache_creation_input_tokens,
+                        usage.cache_read_input_tokens,
+                        model=getattr(provider, "model", ""),
+                        update_last_input=False,
+                    )
                 self.session.session_memory_last_extracted_message_count = visible_count
                 self.session.session_memory_last_extracted_tool_call_count = tool_call_count
+                save_session_meta(
+                    meta_path,
+                    total_input_tokens=self.session.total_input_tokens,
+                    total_output_tokens=self.session.total_output_tokens,
+                    total_cache_creation_input_tokens=self.session.total_cache_creation_input_tokens,
+                    total_cache_read_input_tokens=self.session.total_cache_read_input_tokens,
+                    subagent_total_input_tokens=self.session.subagent_total_input_tokens,
+                    subagent_total_output_tokens=self.session.subagent_total_output_tokens,
+                    subagent_total_cache_creation_input_tokens=self.session.subagent_total_cache_creation_input_tokens,
+                    subagent_total_cache_read_input_tokens=self.session.subagent_total_cache_read_input_tokens,
+                    last_input_tokens=self.session.last_input_tokens,
+                    total_estimated_cost_usd=self.session.total_estimated_cost_usd,
+                    subagent_total_estimated_cost_usd=self.session.subagent_total_estimated_cost_usd,
+                    usage_by_model=self.session.usage_by_model,
+                    session_memory_last_extracted_message_count=visible_count,
+                    session_memory_last_extracted_tool_call_count=tool_call_count,
+                )
                 self._cache_current_session()
+                self._refresh_status_bar()
+            else:
+                metadata = read_session_meta(meta_path)
+                total_input_tokens = int(metadata.get("total_input_tokens", 0) or 0)
+                total_output_tokens = int(metadata.get("total_output_tokens", 0) or 0)
+                total_cache_creation_input_tokens = int(
+                    metadata.get("total_cache_creation_input_tokens", 0) or 0
+                )
+                total_cache_read_input_tokens = int(
+                    metadata.get("total_cache_read_input_tokens", 0) or 0
+                )
+                total_estimated_cost_usd = float(
+                    metadata.get("total_estimated_cost_usd", 0.0) or 0.0
+                )
+                usage_by_model = normalize_usage_by_model(
+                    metadata.get("usage_by_model", {})
+                )
+                if usage_present:
+                    total_input_tokens += usage.input_tokens
+                    total_output_tokens += usage.output_tokens
+                    total_cache_creation_input_tokens += usage.cache_creation_input_tokens
+                    total_cache_read_input_tokens += usage.cache_read_input_tokens
+                    total_estimated_cost_usd += usage_cost
+                    record_usage_by_model(
+                        usage_by_model,
+                        getattr(provider, "model", ""),
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cache_creation_input_tokens,
+                        usage.cache_read_input_tokens,
+                        cost_usd=usage_cost,
+                    )
+                save_session_meta(
+                    meta_path,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    total_cache_creation_input_tokens=total_cache_creation_input_tokens,
+                    total_cache_read_input_tokens=total_cache_read_input_tokens,
+                    total_estimated_cost_usd=total_estimated_cost_usd,
+                    usage_by_model=usage_by_model,
+                    session_memory_last_extracted_message_count=visible_count,
+                    session_memory_last_extracted_tool_call_count=tool_call_count,
+                )
         except Exception:
             pass
         finally:
@@ -2835,6 +2990,10 @@ class OpenHApp:
                     self._flush_message_column()
                 except (ValueError, Exception):
                     pass
+        if self._busy:
+            self._refresh_top_bar(note="thinking…")
+        else:
+            self._refresh_top_bar()
         self._refresh_input()
 
     def _on_attach(self) -> None:

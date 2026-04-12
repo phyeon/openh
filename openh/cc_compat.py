@@ -589,8 +589,14 @@ def save_session_meta(
     total_output_tokens: int | None = None,
     total_cache_creation_input_tokens: int | None = None,
     total_cache_read_input_tokens: int | None = None,
+    subagent_total_input_tokens: int | None = None,
+    subagent_total_output_tokens: int | None = None,
+    subagent_total_cache_creation_input_tokens: int | None = None,
+    subagent_total_cache_read_input_tokens: int | None = None,
     last_input_tokens: int | None = None,
     total_estimated_cost_usd: float | None = None,
+    subagent_total_estimated_cost_usd: float | None = None,
+    usage_by_model: dict[str, dict[str, int | float]] | None = None,
     session_cwd: str | None = None,
     prompt_override: str | None = None,
     profile_id: str | None = None,
@@ -609,10 +615,45 @@ def save_session_meta(
         meta["total_cache_creation_input_tokens"] = total_cache_creation_input_tokens
     if total_cache_read_input_tokens is not None:
         meta["total_cache_read_input_tokens"] = total_cache_read_input_tokens
+    if subagent_total_input_tokens is not None:
+        meta["subagent_total_input_tokens"] = subagent_total_input_tokens
+    if subagent_total_output_tokens is not None:
+        meta["subagent_total_output_tokens"] = subagent_total_output_tokens
+    if subagent_total_cache_creation_input_tokens is not None:
+        meta["subagent_total_cache_creation_input_tokens"] = (
+            subagent_total_cache_creation_input_tokens
+        )
+    if subagent_total_cache_read_input_tokens is not None:
+        meta["subagent_total_cache_read_input_tokens"] = (
+            subagent_total_cache_read_input_tokens
+        )
     if last_input_tokens is not None:
         meta["last_input_tokens"] = last_input_tokens
     if total_estimated_cost_usd is not None:
         meta["total_estimated_cost_usd"] = round(total_estimated_cost_usd, 8)
+    if subagent_total_estimated_cost_usd is not None:
+        meta["subagent_total_estimated_cost_usd"] = round(
+            subagent_total_estimated_cost_usd,
+            8,
+        )
+    if usage_by_model is not None:
+        sanitized: dict[str, dict[str, int | float]] = {}
+        for model_name, entry in usage_by_model.items():
+            if not isinstance(model_name, str) or not isinstance(entry, dict):
+                continue
+            sanitized[model_name] = {
+                "input_tokens": int(entry.get("input_tokens", 0) or 0),
+                "output_tokens": int(entry.get("output_tokens", 0) or 0),
+                "cache_creation_input_tokens": int(
+                    entry.get("cache_creation_input_tokens", 0) or 0
+                ),
+                "cache_read_input_tokens": int(
+                    entry.get("cache_read_input_tokens", 0) or 0
+                ),
+                "cost_usd": round(float(entry.get("cost_usd", 0.0) or 0.0), 8),
+                "requests": int(entry.get("requests", 0) or 0),
+            }
+        meta["usage_by_model"] = sanitized
     if session_cwd is not None:
         meta["session_cwd"] = session_cwd
     if prompt_override is not None:

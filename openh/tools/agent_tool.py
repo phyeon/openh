@@ -388,6 +388,7 @@ class AgentTool(Tool):
         sub.managed_max_concurrent_executors = parent.managed_max_concurrent_executors
         sub.managed_executor_isolation = parent.managed_executor_isolation
         setattr(sub, "_coordination_root", get_coordination_root(parent))
+        setattr(sub, "_usage_parent", get_coordination_root(parent))
 
         collected: list[str] = []
 

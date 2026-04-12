@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .messages import Message, TextBlock, TextDelta, ToolUseBlock
+from .messages import Message, TextBlock, TextDelta, ToolUseBlock, Usage
 from .providers.base import Provider
 
 MIN_MESSAGES_TO_EXTRACT = 20
@@ -86,13 +86,14 @@ async def extract_memories(
     messages: list[Message],
     provider: Provider,
     cwd: str,
-) -> list[ExtractedMemory]:
+) -> tuple[list[ExtractedMemory], Usage]:
     transcript = _build_transcript(messages)
     if not transcript.strip():
-        return []
+        return [], Usage(input_tokens=0, output_tokens=0)
 
     prompt = _build_extraction_prompt(transcript, cwd)
     response_parts: list[str] = []
+    usage = Usage(input_tokens=0, output_tokens=0)
     extraction_messages = [Message(role="user", content=[TextBlock(text=prompt)])]
 
     async for event in provider.stream(
@@ -102,8 +103,13 @@ async def extract_memories(
     ):
         if isinstance(event, TextDelta):
             response_parts.append(event.text)
+        elif isinstance(event, Usage):
+            usage.input_tokens += event.input_tokens
+            usage.output_tokens += event.output_tokens
+            usage.cache_creation_input_tokens += event.cache_creation_input_tokens
+            usage.cache_read_input_tokens += event.cache_read_input_tokens
 
-    return _parse_response("".join(response_parts))
+    return _parse_response("".join(response_parts)), usage
 
 
 async def persist_memories(memories: list[ExtractedMemory], target_path: Path) -> None:

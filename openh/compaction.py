@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from .messages import (
     DocumentBlock,
@@ -12,6 +13,7 @@ from .messages import (
     TextDelta,
     ToolResultBlock,
     ToolUseBlock,
+    Usage,
 )
 
 KEEP_RECENT_MESSAGES = 10
@@ -83,6 +85,7 @@ async def compact_messages(
     messages: list[Message],
     provider: object = None,
     keep_recent: int = KEEP_RECENT_MESSAGES,
+    session: "AgentSession | None" = None,
 ) -> list[Message]:
     """Summarize the older head of the conversation and keep the recent tail."""
     if len(messages) <= keep_recent:
@@ -96,7 +99,7 @@ async def compact_messages(
         return _fallback_compaction(messages, keep_recent)
 
     try:
-        return await _summarise_head(messages, split_at, provider)
+        return await _summarise_head(messages, split_at, provider, session=session)
     except Exception:
         return _fallback_compaction(messages, keep_recent)
 
@@ -105,6 +108,7 @@ async def _summarise_head(
     messages: list[Message],
     split_at: int,
     provider: object,
+    session: "AgentSession | None" = None,
 ) -> list[Message]:
     head = messages[:split_at]
     tail = messages[split_at:]
@@ -130,6 +134,16 @@ async def _summarise_head(
     async for event in stream:
         if isinstance(event, TextDelta):
             chunks.append(event.text)
+        elif isinstance(event, Usage):
+            if session is not None:
+                session.add_tokens(
+                    event.input_tokens,
+                    event.output_tokens,
+                    event.cache_creation_input_tokens,
+                    event.cache_read_input_tokens,
+                    model=getattr(provider, "model", ""),
+                    update_last_input=False,
+                )
         elif isinstance(event, MessageStop):
             break
 
@@ -223,3 +237,7 @@ def _fallback_compaction(messages: list[Message], keep_recent: int) -> list[Mess
         ],
     )
     return [marker] + recent
+
+
+if TYPE_CHECKING:
+    from .session import AgentSession

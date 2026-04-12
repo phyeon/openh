@@ -113,19 +113,60 @@ def _cmd_model(args: list[str], ctx: CommandContext) -> CommandResult:
 
 def _cmd_tokens(args: list[str], ctx: CommandContext) -> CommandResult:
     s = ctx.session
+    total_tokens = (
+        s.total_input_tokens
+        + s.total_output_tokens
+        + s.total_cache_creation_input_tokens
+        + s.total_cache_read_input_tokens
+    )
+    subagent_tokens = (
+        s.subagent_total_input_tokens
+        + s.subagent_total_output_tokens
+        + s.subagent_total_cache_creation_input_tokens
+        + s.subagent_total_cache_read_input_tokens
+    )
     return CommandResult(
         handled=True,
-        output=f"in={s.total_input_tokens:,} out={s.total_output_tokens:,} messages={len(s.messages)}",
+        output=(
+            f"total={total_tokens:,} "
+            f"in={s.total_input_tokens:,} "
+            f"out={s.total_output_tokens:,} "
+            f"cache={s.total_cache_creation_input_tokens:,}/{s.total_cache_read_input_tokens:,} "
+            f"subagents={subagent_tokens:,} "
+            f"cost=${s.total_estimated_cost_usd:.4f} "
+            f"messages={len(s.messages)}"
+        ),
     )
 
 
 def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
     s = ctx.session
+    total_tokens = (
+        s.total_input_tokens
+        + s.total_output_tokens
+        + s.total_cache_creation_input_tokens
+        + s.total_cache_read_input_tokens
+    )
+    subagent_tokens = (
+        s.subagent_total_input_tokens
+        + s.subagent_total_output_tokens
+        + s.subagent_total_cache_creation_input_tokens
+        + s.subagent_total_cache_read_input_tokens
+    )
     lines = [
         f"provider: {s.provider.name}:{s.provider.model}",
         f"cwd: {s.cwd}",
         f"messages: {len(s.messages)}",
-        f"tokens: in={s.total_input_tokens:,} out={s.total_output_tokens:,}",
+        (
+            "tokens: "
+            f"total={total_tokens:,} "
+            f"in={s.total_input_tokens:,} "
+            f"out={s.total_output_tokens:,} "
+            f"cache_create={s.total_cache_creation_input_tokens:,} "
+            f"cache_read={s.total_cache_read_input_tokens:,}"
+        ),
+        f"subagent_tokens: {subagent_tokens:,}",
+        f"cost: ${s.total_estimated_cost_usd:.4f}",
         f"tools: {len(s.tools)}",
         f"session_id: {s.session_id}",
     ]
