@@ -13,7 +13,7 @@ from .. import prompts as prompts_mod
 from ..config import load_system_prompt
 from ..providers import get_provider
 from ..session import AgentSession
-from ..system_prompt import build_runtime_system_prompt, merge_base_prompt
+from ..system_prompt import build_runtime_system_prompt
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 _COORDINATOR_ONLY_TOOLS = {"Agent"}
@@ -361,8 +361,9 @@ class AgentTool(Tool):
         tool_names = input.get("tools")
         sub_tools = self._select_tools(parent.tools, tool_names, mode)
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
+        isolation_supplied = "isolation" in input
         isolation = str(input.get("isolation") or "").strip().lower()
-        if not isolation and getattr(parent, "managed_executor_isolation", False):
+        if not isolation and not isolation_supplied and getattr(parent, "managed_executor_isolation", False):
             isolation = "worktree"
         sub_cwd = parent.cwd
         worktree_dir: Path | None = None
@@ -391,6 +392,7 @@ class AgentTool(Tool):
         sub.managed_executor_max_turns = parent.managed_executor_max_turns
         sub.managed_max_concurrent_executors = parent.managed_max_concurrent_executors
         sub.managed_executor_isolation = parent.managed_executor_isolation
+        setattr(sub, "bash_read_only", bool(input.get("_bash_read_only")))
         setattr(sub, "_coordination_root", get_coordination_root(parent))
         setattr(sub, "_usage_parent", get_coordination_root(parent))
 
@@ -538,16 +540,12 @@ class AgentTool(Tool):
         system_override: str,
         cwd: str,
     ) -> str:
-        base_prompt = merge_base_prompt(
-            load_system_prompt(),
-            cls._session_custom_prompt_text(parent),
-        )
         mode_prompt = _MODE_PROMPTS[mode]
-        merged = merge_base_prompt(base_prompt, mode_prompt)
-        if system_override:
-            merged = merge_base_prompt(merged, system_override)
         return build_runtime_system_prompt(
-            merged,
+            load_system_prompt(),
             cwd,
             date.today().isoformat(),
+            custom_prompt=cls._session_custom_prompt_text(parent),
+            managed_prompt=mode_prompt,
+            append_system_prompt=system_override,
         )

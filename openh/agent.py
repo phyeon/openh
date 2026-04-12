@@ -179,6 +179,66 @@ class Agent:
         if new_messages is not None:
             self.session.model_messages = new_messages
 
+    async def _maybe_trigger_auto_dream(self) -> None:
+        import asyncio
+        import json
+
+        from .auto_dream import AutoDream
+        from .tools.agent_tool import AgentTool, get_coordination_root, get_subagent_registry
+        from .tools.base import ToolContext
+
+        if get_coordination_root(self.session) is not self.session:
+            return
+
+        cwd = (self.session.cwd or "").strip()
+        if not cwd:
+            return
+
+        dreamer = AutoDream.for_project(cwd)
+        try:
+            task = await dreamer.maybe_trigger()
+        except Exception:
+            return
+        if task is None:
+            return
+
+        tool = AgentTool()
+        ctx = ToolContext(session=self.session, request_permission=self.permission_cb)
+        payload = {
+            "description": "memory consolidation",
+            "prompt": task.prompt,
+            "max_turns": 20,
+            "system_prompt": (
+                "You are performing automatic memory consolidation. "
+                "Complete the task and return a brief summary."
+            ),
+            "run_in_background": True,
+            "isolation": None,
+            "_bash_read_only": True,
+        }
+        try:
+            result = await tool.run(payload, ctx)
+            data = json.loads(result)
+            agent_id = str(data.get("agent_id") or "").strip()
+        except Exception:
+            await AutoDream.finish_consolidation(task)
+            return
+
+        registry = get_subagent_registry(self.session)
+        entry = registry.get(agent_id)
+        running_task = entry.get("task") if isinstance(entry, dict) else None
+        if running_task is None:
+            await AutoDream.finish_consolidation(task)
+            return
+
+        async def finalize() -> None:
+            try:
+                await asyncio.shield(running_task)
+            finally:
+                await AutoDream.finish_consolidation(task)
+
+        asyncio.create_task(finalize())
+
     async def _drive_loop(self) -> None:
         """Drive the provider ↔ tool loop using whatever is already in session.messages."""
         import asyncio
@@ -308,6 +368,8 @@ class Agent:
                             include_in_model=True,
                         )
                         continue
+                if stop_reason == "end_turn":
+                    await self._maybe_trigger_auto_dream()
                 return
 
             max_tokens_recovery_count = 0

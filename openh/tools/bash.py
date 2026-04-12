@@ -14,6 +14,7 @@ import asyncio
 import os
 import re
 import signal
+import shlex
 import subprocess as _subprocess
 import time
 import uuid
@@ -46,6 +47,16 @@ _BG_SHELLS: dict[str, "BackgroundShell"] = {}
 
 # Completion callbacks: shell_id -> coroutine to call with summary
 _COMPLETION_CALLBACKS: dict[str, Any] = {}
+_READ_ONLY_BASH_COMMANDS = {
+    "cat",
+    "find",
+    "grep",
+    "head",
+    "ls",
+    "stat",
+    "tail",
+    "wc",
+}
 
 
 @dataclass
@@ -215,6 +226,13 @@ class BashTool(Tool):
         from .bash_classifier import classify, RiskLevel
 
         command = input.get("command", "")
+        if getattr(ctx.session, "bash_read_only", False) and not _is_allowed_read_only_bash(
+            command
+        ):
+            return PermissionDecision(
+                behavior="deny",
+                reason="AutoDream only allows read-only Bash commands during memory consolidation",
+            )
         level = classify(command)
 
         # Critical → unconditionally blocked (CC pattern)
@@ -488,6 +506,28 @@ def register_completion_callback(shell_id: str, callback) -> None:
     callback signature: async def cb(shell_id: str, exit_code: int, summary: str)
     """
     _COMPLETION_CALLBACKS[shell_id] = callback
+
+
+def _is_allowed_read_only_bash(command: str) -> bool:
+    raw = (command or "").strip()
+    if not raw:
+        return False
+    if any(token in raw for token in (">", ">>", "<<", "| tee", " tee ", "sudo ")):
+        return False
+    segments = re.split(r"\s*(?:&&|\|\||;|\|)\s*", raw)
+    for segment in segments:
+        piece = segment.strip()
+        if not piece:
+            continue
+        try:
+            tokens = shlex.split(piece)
+        except ValueError:
+            return False
+        if not tokens:
+            continue
+        if tokens[0] not in _READ_ONLY_BASH_COMMANDS:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------

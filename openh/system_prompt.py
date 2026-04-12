@@ -1,19 +1,44 @@
-"""Runtime system prompt assembly.
-
-Keeps the user-editable/base prompt separate from dynamic session context
-such as environment details and project memory.
-"""
+"""Runtime system prompt assembly with static/dynamic section separation."""
 from __future__ import annotations
 
 import os
 import platform
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import memdir
 from .memory import load_memory
 
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
+_SECTION_CACHE: dict[str, str | None] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class SystemPromptSection:
+    tag: str
+    content: str | None
+    cache_break: bool = False
+
+
+def clear_system_prompt_sections() -> None:
+    _SECTION_CACHE.clear()
+
+
+def _cached_section(tag: str, content: str | None) -> SystemPromptSection:
+    normalized = (content or "").strip() or None
+    if normalized is None:
+        _SECTION_CACHE[tag] = None
+        return SystemPromptSection(tag=tag, content=None, cache_break=False)
+    cached = _SECTION_CACHE.get(tag)
+    if cached != normalized:
+        _SECTION_CACHE[tag] = normalized
+    return SystemPromptSection(tag=tag, content=_SECTION_CACHE.get(tag), cache_break=False)
+
+
+def _dynamic_section(tag: str, content: str | None) -> SystemPromptSection:
+    normalized = (content or "").strip() or None
+    return SystemPromptSection(tag=tag, content=normalized, cache_break=True)
 
 
 def merge_base_prompt(default_prompt: str, custom_prompt: str) -> str:
@@ -35,30 +60,57 @@ def merge_base_prompt(default_prompt: str, custom_prompt: str) -> str:
 
 
 def build_runtime_system_prompt(
-    base_prompt: str,
+    default_prompt: str,
     cwd: str,
     date_str: str,
+    *,
+    custom_prompt: str = "",
+    append_system_prompt: str = "",
+    managed_prompt: str = "",
+    replace_system_prompt: bool = False,
+    skip_env_info: bool = False,
 ) -> str:
-    """Combine the editable base prompt with dynamic runtime context."""
-    parts: list[str] = []
-    base = (base_prompt or "").strip()
-    if base:
-        parts.append(base)
+    """Assemble the prompt with cacheable static sections before the boundary."""
+    static_sections: list[SystemPromptSection] = []
+    dynamic_sections: list[SystemPromptSection] = []
+    base = (default_prompt or "").strip()
+    custom = (custom_prompt or "").strip()
+    managed = (managed_prompt or "").strip()
+    append = (append_system_prompt or "").strip()
 
-    parts.append(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+    if replace_system_prompt and custom:
+        static_sections.append(_cached_section("replace_system_prompt", custom))
+    else:
+        static_sections.append(_cached_section("default_prompt", base))
+        if managed:
+            static_sections.append(_cached_section("managed_prompt", managed))
+        if custom and custom != base:
+            static_sections.append(
+                _cached_section(
+                    "custom_prompt",
+                    f"<custom_instructions>\n{custom}\n</custom_instructions>",
+                )
+            )
 
-    env_info = build_env_info_section(cwd, date_str)
-    if env_info:
-        parts.append(env_info)
-
+    if not skip_env_info:
+        dynamic_sections.append(
+            _dynamic_section("env_info", build_env_info_section(cwd, date_str))
+        )
     if cwd:
-        parts.append(f"<working_directory>{cwd}</working_directory>")
+        dynamic_sections.append(
+            _dynamic_section("working_directory", f"<working_directory>{cwd}</working_directory>")
+        )
 
     memory_block = build_memory_section(cwd)
     if memory_block:
-        parts.append(memory_block)
+        dynamic_sections.append(_dynamic_section("memory", memory_block))
+    if append:
+        dynamic_sections.append(_dynamic_section("append_system_prompt", append))
 
-    return "\n\n".join(part for part in parts if part.strip())
+    static_parts = [section.content for section in static_sections if section.content]
+    dynamic_parts = [section.content for section in dynamic_sections if section.content]
+    parts = static_parts + [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] + dynamic_parts
+    return "\n\n".join(part for part in parts if part and part.strip())
 
 
 def build_managed_agent_prompt(

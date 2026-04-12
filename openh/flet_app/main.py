@@ -31,6 +31,7 @@ from .settings_dialog import SettingsDialog
 from ..system_prompt import (
     build_managed_agent_prompt,
     build_runtime_system_prompt,
+    clear_system_prompt_sections,
     merge_base_prompt,
 )
 from ..messages import (
@@ -618,9 +619,11 @@ class OpenHApp:
         from datetime import date
 
         return build_runtime_system_prompt(
-            self._get_base_system_prompt(),
+            load_system_prompt(),
             self.session.cwd,
             date.today().isoformat(),
+            custom_prompt=self._get_custom_prompt_text(),
+            managed_prompt=self._get_managed_prompt_text(),
         )
 
     def _refresh_top_bar(self, note: str = "") -> None:
@@ -1894,6 +1897,7 @@ class OpenHApp:
                 self.session.provider,
                 session=self.session,
             )
+            clear_system_prompt_sections()
         except Exception as exc:  # noqa: BLE001
             self._append_to_messages(
                 widgets.error_panel(f"compact failed: {exc}")
@@ -2431,6 +2435,7 @@ class OpenHApp:
         self.session.prompt_override = ""
         self.session.tools = default_tools()
         self._sync_session_managed_agent_config()
+        clear_system_prompt_sections()
         self._current_title = ""
         self._queued_turns = []
         self._reset_live_tool_stack()
