@@ -102,9 +102,18 @@ class Agent:
             except Exception:
                 pass
 
+    MAX_TOOL_LOOP_ITERATIONS = 40
+
     async def _drive_loop(self) -> None:
         """Drive the provider ↔ tool loop using whatever is already in session.messages."""
+        iterations = 0
         while True:
+            iterations += 1
+            if iterations > self.MAX_TOOL_LOOP_ITERATIONS:
+                await self._emit(TextDelta(
+                    text=f"\n\n[agent: tool loop hit {self.MAX_TOOL_LOOP_ITERATIONS} iterations — stopping to prevent infinite loop]"
+                ))
+                return
             assistant_blocks: list[Block] = []
             current_text: list[str] = []
             tool_uses: list[ToolUseBlock] = []
