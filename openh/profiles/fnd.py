@@ -6,7 +6,12 @@ from pathlib import Path
 
 from . import ProfileSpec, register
 
-WIFI_REPO = Path.home() / "Projects" / "wifi" / "wifi-hack-demo"
+import platform as _platform
+
+if _platform.system() == "Windows":
+    WIFI_REPO = Path("I:/CODE/project/trader/BLUE/wifi")
+else:
+    WIFI_REPO = Path.home() / "Projects" / "wifi" / "wifi-hack-demo"
 
 
 def _read_file(path: Path, max_lines: int = 0) -> str:

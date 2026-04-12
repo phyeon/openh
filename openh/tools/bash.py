@@ -23,6 +23,22 @@ DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600  # 10 minutes hard cap (CC pattern)
 MAX_OUTPUT_CHARS = 100_000  # CC uses 100K
 
+import platform as _platform
+import shutil as _shutil
+
+def _find_bash() -> str:
+    """Return the best bash executable path.
+
+    On Windows, prefer Git Bash over WSL bash (System32\\bash.exe).
+    """
+    if _platform.system() == "Windows":
+        git_bash = r"C:\Program Files\Git\bin\bash.exe"
+        if os.path.isfile(git_bash):
+            return git_bash
+    return _shutil.which("bash") or "bash"
+
+_BASH = _find_bash()
+
 _BG_SHELLS: dict[str, "BackgroundShell"] = {}
 
 # Completion callbacks: shell_id -> coroutine to call with summary
@@ -193,7 +209,7 @@ class BashTool(Tool):
         )
         try:
             proc = await asyncio.create_subprocess_exec(
-                "bash", "-c", wrapped,
+                _BASH, "-c", wrapped,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.DEVNULL,

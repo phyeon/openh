@@ -103,7 +103,7 @@ class OpenHApp:
         ):
             page.add(
                 widgets.error_panel(
-                    "No API keys found in /Users/hyeon/Projects/.env. "
+                    "No API keys found in .env. "
                     "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, and/or GEMINI_API_KEY."
                 )
             )

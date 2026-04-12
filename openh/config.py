@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-DOTENV_PATH = Path("/Users/hyeon/Projects/.env")
+DOTENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 OPENH_DIR = Path.home() / ".openh"
 SYSTEM_PROMPT_FILE = OPENH_DIR / "system_prompt.md"
 

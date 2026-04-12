@@ -32,7 +32,7 @@ class SettingsDialog:
         self.on_save = on_save
         self._session = session
         self.dialog: ft.AlertDialog | None = None
-        self._env_path = Path("/Users/hyeon/Projects/.env")
+        self._env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 
         # Prompt editor state
         self._presets = prompts.list_presets()

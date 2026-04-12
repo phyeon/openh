@@ -60,7 +60,7 @@ def path_hash(cwd: str) -> str:
     /Users/hyeon/Projects -> -Users-hyeon-Projects
     """
     abs_path = os.path.abspath(cwd)
-    return abs_path.replace(os.sep, "-")
+    return abs_path.replace(os.sep, "-").replace(":", "")
 
 
 def project_dir(cwd: str) -> Path:
