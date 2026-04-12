@@ -68,7 +68,7 @@ def match_session_mode(stored_coordinator: bool) -> str | None:
         return None
     if stored_coordinator:
         os.environ[COORDINATOR_ENV_VAR] = "1"
+        return "Entered coordinator mode to match resumed session."
     else:
         os.environ.pop(COORDINATOR_ENV_VAR, None)
-    label = "coordinator" if stored_coordinator else "standard"
-    return f"Session was created in {label} mode, switching to match."
+        return "Exited coordinator mode to match resumed session."

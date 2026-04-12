@@ -610,6 +610,11 @@ def save_session_meta(
     session_cwd: str | None = None,
     prompt_override: str | None = None,
     profile_id: str | None = None,
+    output_style: str | None = None,
+    output_style_prompt: str | None = None,
+    append_system_prompt: str | None = None,
+    replace_system_prompt: bool | None = None,
+    coordinator_mode: bool | None = None,
     session_memory_last_extracted_message_uuid: str | None = None,
     session_memory_last_extracted_message_count: int | None = None,
     session_memory_last_extracted_tool_call_count: int | None = None,
@@ -671,6 +676,16 @@ def save_session_meta(
         meta["prompt_override"] = prompt_override
     if profile_id is not None and profile_id != "default":
         meta["profile_id"] = profile_id
+    if output_style is not None:
+        meta["output_style"] = output_style
+    if output_style_prompt is not None:
+        meta["output_style_prompt"] = output_style_prompt
+    if append_system_prompt is not None:
+        meta["append_system_prompt"] = append_system_prompt
+    if replace_system_prompt is not None:
+        meta["replace_system_prompt"] = bool(replace_system_prompt)
+    if coordinator_mode is not None:
+        meta["coordinator_mode"] = bool(coordinator_mode)
     if session_memory_last_extracted_message_uuid is not None:
         meta["session_memory_last_extracted_message_uuid"] = (
             session_memory_last_extracted_message_uuid

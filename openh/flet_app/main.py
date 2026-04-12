@@ -24,7 +24,7 @@ import flet as ft
 from ..agent import Agent
 from ..commands import CommandContext, CommandDispatcher
 from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
-from ..coordinator import is_coordinator_mode
+from ..coordinator import coordinator_user_context, is_coordinator_mode, match_session_mode
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
 from ..permission_rules import derive_rule_pattern, remember_persistent_rule
@@ -601,6 +601,50 @@ class OpenHApp:
             executor_isolation=bool(self.session.managed_executor_isolation),
         )
 
+    def _get_mcp_server_names(self) -> list[str]:
+        names: set[str] = set()
+        try:
+            from ..mcp import load_mcp_config
+
+            cfg = load_mcp_config()
+            servers = (cfg.get("servers") or {})
+            for name in servers:
+                if isinstance(name, str) and name.strip():
+                    names.add(name.strip())
+        except Exception:
+            pass
+
+        for tool in self.session.tools:
+            name = str(getattr(tool, "name", "") or "").strip()
+            if "." not in name:
+                continue
+            server = name.split(".", 1)[0].strip()
+            if server:
+                names.add(server)
+        return sorted(names)
+
+    def _get_coordinator_user_context_text(self) -> str:
+        tool_names = [
+            str(getattr(tool, "name", "") or "").strip()
+            for tool in self.session.tools
+            if str(getattr(tool, "name", "") or "").strip()
+        ]
+        return coordinator_user_context(tool_names, self._get_mcp_server_names()).strip()
+
+    def _get_runtime_append_system_prompt(self) -> str:
+        parts: list[str] = []
+        base_append = str(getattr(self.session, "append_system_prompt", "") or "").strip()
+        if base_append:
+            parts.append(base_append)
+        managed_prompt = self._get_managed_prompt_text()
+        if managed_prompt:
+            parts.append(managed_prompt)
+        if is_coordinator_mode():
+            coordinator_ctx = self._get_coordinator_user_context_text()
+            if coordinator_ctx:
+                parts.append(coordinator_ctx)
+        return "\n\n".join(part for part in parts if part).strip()
+
     def _get_base_system_prompt(self) -> str:
         """Return the effective base prompt sent to the model before runtime context."""
         base_prompt = merge_base_prompt(
@@ -624,14 +668,12 @@ class OpenHApp:
             self.session.cwd,
             date.today().isoformat(),
             custom_prompt=self._get_custom_prompt_text(),
-            append_system_prompt=getattr(self.session, "append_system_prompt", ""),
+            append_system_prompt=self._get_runtime_append_system_prompt(),
             replace_system_prompt=bool(getattr(self.session, "replace_system_prompt", False)),
             output_style=getattr(self.session, "output_style", "default"),
             custom_output_style_prompt=getattr(self.session, "output_style_prompt", ""),
             is_non_interactive=bool(getattr(self.session, "is_non_interactive", False)),
-            coordinator_mode=bool(
-                getattr(self.session, "managed_agent_enabled", False) or is_coordinator_mode()
-            ),
+            coordinator_mode=is_coordinator_mode(),
         )
 
     def _refresh_top_bar(self, note: str = "") -> None:
@@ -2279,6 +2321,11 @@ class OpenHApp:
             "session_cwd": self.session.cwd,
             "prompt_override": self.session.prompt_override,
             "profile_id": self.session.profile_id,
+            "output_style": self.session.output_style,
+            "output_style_prompt": self.session.output_style_prompt,
+            "append_system_prompt": self.session.append_system_prompt,
+            "replace_system_prompt": self.session.replace_system_prompt,
+            "coordinator_mode": is_coordinator_mode(),
             "total_input_tokens": self.session.total_input_tokens,
             "total_output_tokens": self.session.total_output_tokens,
             "total_cache_creation_input_tokens": self.session.total_cache_creation_input_tokens,
@@ -2441,6 +2488,11 @@ class OpenHApp:
         self.session.title = ""
         self.session.profile_id = "default"
         self.session.prompt_override = ""
+        self.session.output_style = "default"
+        self.session.output_style_prompt = ""
+        self.session.append_system_prompt = ""
+        self.session.replace_system_prompt = False
+        self.session.is_non_interactive = False
         self.session.tools = default_tools()
         self._sync_session_managed_agent_config()
         clear_system_prompt_sections()
@@ -2884,7 +2936,17 @@ class OpenHApp:
         if target_cwd:
             self._set_runtime_cwd(target_cwd, save=False)
         self.session.prompt_override = metadata.get("prompt_override", "")
+        self.session.output_style = str(metadata.get("output_style", "default") or "default")
+        self.session.output_style_prompt = str(metadata.get("output_style_prompt", "") or "")
+        self.session.append_system_prompt = str(metadata.get("append_system_prompt", "") or "")
+        self.session.replace_system_prompt = bool(metadata.get("replace_system_prompt", False))
         self.session.profile_id = metadata.get("profile_id", "default")
+        mode_warning: str | None = None
+        if "coordinator_mode" in metadata:
+            try:
+                mode_warning = match_session_mode(bool(metadata.get("coordinator_mode")))
+            except Exception:
+                mode_warning = None
         # Restore profile state: regenerate system prompt + extra tools + theme
         restored_profile = get_profile(self.session.profile_id)
         if restored_profile is not None and self.session.profile_id != "default":
@@ -2943,6 +3005,8 @@ class OpenHApp:
         self._refresh_input()
         self._refresh_sidebar()
         self._full_update()
+        if mode_warning:
+            self._append_to_messages(widgets.system_note(mode_warning))
         self._stick_to_bottom = True
         self._remember_current_session()
         self._scroll_to_end(force=True)
@@ -3026,6 +3090,11 @@ class OpenHApp:
             session_cwd=self.session.cwd,
             prompt_override=self.session.prompt_override or None,
             profile_id=self.session.profile_id if self.session.profile_id != "default" else None,
+            output_style=self.session.output_style,
+            output_style_prompt=self.session.output_style_prompt,
+            append_system_prompt=self.session.append_system_prompt,
+            replace_system_prompt=self.session.replace_system_prompt,
+            coordinator_mode=is_coordinator_mode(),
             session_memory_last_extracted_message_uuid=self.session.session_memory_last_extracted_message_uuid,
             session_memory_last_extracted_message_count=self.session.session_memory_last_extracted_message_count,
             session_memory_last_extracted_tool_call_count=self.session.session_memory_last_extracted_tool_call_count,
@@ -3175,6 +3244,11 @@ class OpenHApp:
                     total_estimated_cost_usd=self.session.total_estimated_cost_usd,
                     subagent_total_estimated_cost_usd=self.session.subagent_total_estimated_cost_usd,
                     usage_by_model=self.session.usage_by_model,
+                    output_style=self.session.output_style,
+                    output_style_prompt=self.session.output_style_prompt,
+                    append_system_prompt=self.session.append_system_prompt,
+                    replace_system_prompt=self.session.replace_system_prompt,
+                    coordinator_mode=is_coordinator_mode(),
                     session_memory_last_extracted_message_uuid=last_visible_uuid,
                     session_memory_last_extracted_message_count=visible_count,
                     session_memory_last_extracted_tool_call_count=tool_call_count,
@@ -3220,6 +3294,11 @@ class OpenHApp:
                     total_cache_read_input_tokens=total_cache_read_input_tokens,
                     total_estimated_cost_usd=total_estimated_cost_usd,
                     usage_by_model=usage_by_model,
+                    output_style=str(metadata.get("output_style", "default") or "default"),
+                    output_style_prompt=str(metadata.get("output_style_prompt", "") or ""),
+                    append_system_prompt=str(metadata.get("append_system_prompt", "") or ""),
+                    replace_system_prompt=bool(metadata.get("replace_system_prompt", False)),
+                    coordinator_mode=bool(metadata.get("coordinator_mode", False)),
                     session_memory_last_extracted_message_uuid=last_visible_uuid,
                     session_memory_last_extracted_message_count=visible_count,
                     session_memory_last_extracted_tool_call_count=tool_call_count,
