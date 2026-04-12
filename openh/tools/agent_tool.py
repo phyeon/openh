@@ -11,12 +11,13 @@ from typing import Any, ClassVar
 
 from .. import prompts as prompts_mod
 from ..config import load_system_prompt
+from ..coordinator import INTERNAL_COORDINATOR_TOOLS
 from ..providers import get_provider
 from ..session import AgentSession
 from ..system_prompt import build_runtime_system_prompt
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
-_COORDINATOR_ONLY_TOOLS = {"Agent"}
+_COORDINATOR_ONLY_TOOLS = set(INTERNAL_COORDINATOR_TOOLS)
 _SEARCH_ONLY_TOOLS = {"LS", "Read", "Glob", "Grep", "ToolSearch", "WebFetch", "WebSearch", "Skill"}
 _MODE_PROMPTS = {
     "build": "You are the build agent. You have full tool access. Focus on implementing the requested changes completely and correctly.",
@@ -383,6 +384,11 @@ class AgentTool(Tool):
         sub.always_deny = set(parent.always_deny)
         sub.permission_mode = parent.permission_mode
         sub.permission_handler_kind = parent.permission_handler_kind
+        sub.output_style = parent.output_style
+        sub.output_style_prompt = parent.output_style_prompt
+        sub.append_system_prompt = parent.append_system_prompt
+        sub.replace_system_prompt = parent.replace_system_prompt
+        sub.is_non_interactive = True
         sub.prompt_override = parent.prompt_override
         sub.prompt_preset = parent.prompt_preset
         sub.profile_id = parent.profile_id
@@ -540,12 +546,13 @@ class AgentTool(Tool):
         system_override: str,
         cwd: str,
     ) -> str:
-        mode_prompt = _MODE_PROMPTS[mode]
         return build_runtime_system_prompt(
             load_system_prompt(),
             cwd,
             date.today().isoformat(),
             custom_prompt=cls._session_custom_prompt_text(parent),
-            managed_prompt=mode_prompt,
             append_system_prompt=system_override,
+            is_non_interactive=True,
+            output_style=getattr(parent, "output_style", "default"),
+            custom_output_style_prompt=getattr(parent, "output_style_prompt", ""),
         )

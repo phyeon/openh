@@ -46,6 +46,11 @@ class AgentSession:
     shell_env: dict[str, str] = field(default_factory=dict)  # persisted env vars (CC pattern)
     permission_mode: str = "default"
     permission_handler_kind: str = "interactive"
+    output_style: str = "default"
+    output_style_prompt: str = ""
+    append_system_prompt: str = ""
+    replace_system_prompt: bool = False
+    is_non_interactive: bool = False
     max_turns: int = 10
     tool_result_budget: int = 50_000
     max_budget_usd: float | None = None

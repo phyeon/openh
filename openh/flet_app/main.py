@@ -24,6 +24,7 @@ import flet as ft
 from ..agent import Agent
 from ..commands import CommandContext, CommandDispatcher
 from ..config import SYSTEM_PROMPT, load_config, load_system_prompt
+from ..coordinator import is_coordinator_mode
 from .. import prompts as prompts_mod
 from ..settings import Settings, load_settings, save_settings
 from ..permission_rules import derive_rule_pattern, remember_persistent_rule
@@ -623,7 +624,14 @@ class OpenHApp:
             self.session.cwd,
             date.today().isoformat(),
             custom_prompt=self._get_custom_prompt_text(),
-            managed_prompt=self._get_managed_prompt_text(),
+            append_system_prompt=getattr(self.session, "append_system_prompt", ""),
+            replace_system_prompt=bool(getattr(self.session, "replace_system_prompt", False)),
+            output_style=getattr(self.session, "output_style", "default"),
+            custom_output_style_prompt=getattr(self.session, "output_style_prompt", ""),
+            is_non_interactive=bool(getattr(self.session, "is_non_interactive", False)),
+            coordinator_mode=bool(
+                getattr(self.session, "managed_agent_enabled", False) or is_coordinator_mode()
+            ),
         )
 
     def _refresh_top_bar(self, note: str = "") -> None:
