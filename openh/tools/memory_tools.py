@@ -1,6 +1,7 @@
 """Memory tools: let the model read, save, and delete memdir entries."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, ClassVar
 
 from .. import memdir
@@ -76,9 +77,27 @@ class MemoryListTool(Tool):
         mems = memdir.list_memories(ctx.session.cwd)
         if not mems:
             return "(no memories stored in this workspace)"
+        meta_by_filename = {
+            meta.filename: meta
+            for meta in memdir.scan_memory_dir(memdir.memory_dir(ctx.session.cwd))
+        }
         lines = [f"{len(mems)} memories:"]
         for m in mems:
-            lines.append(f"  [{m.type}] {m.name} — {m.description}")
+            filename = ""
+            freshness = ""
+            if m.path is not None:
+                try:
+                    filename = m.path.relative_to(memdir.memory_dir(ctx.session.cwd)).as_posix()
+                except ValueError:
+                    filename = Path(m.path).name
+            meta = meta_by_filename.get(filename) if filename else None
+            if meta is not None and meta.modified_secs:
+                freshness = f" ({memdir.memory_age(meta.modified_secs)})"
+            prefix = f"[{m.type}] {m.name}"
+            if filename:
+                prefix += f" [{filename}]"
+            description = m.description or "(no description)"
+            lines.append(f"  - {prefix}{freshness} — {description}")
         return "\n".join(lines)
 
 

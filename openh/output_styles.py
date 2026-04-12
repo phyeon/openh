@@ -12,6 +12,8 @@ PROJECT_OUTPUT_STYLES_DIRNAME = ".claurst/output-styles"
 GLOBAL_OUTPUT_STYLES_DIR = OPENH_DIR / "output-styles"
 _RUNTIME_STYLES: list["OutputStyleDef"] = []
 _RUNTIME_STYLES_LOCK = Lock()
+_PLUGIN_STYLE_SCAN_LOCK = Lock()
+_PLUGIN_STYLE_CACHE: list["OutputStyleDef"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +174,75 @@ def register_runtime_style(style: OutputStyleDef) -> None:
         _RUNTIME_STYLES.append(style)
 
 
+def _plugin_search_roots() -> list[Path]:
+    home = Path.home()
+    roots = [
+        home / ".codex" / ".tmp" / "plugins" / "plugins",
+        home / ".codex" / "plugins",
+    ]
+    existing: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        resolved = root.resolve(strict=False)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        existing.append(root)
+    return existing
+
+
+def _discover_plugin_output_style_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+    for root in _plugin_search_roots():
+        try:
+            manifests = root.rglob("plugin.json")
+        except OSError:
+            continue
+        for manifest in manifests:
+            if manifest.parent.name != ".codex-plugin":
+                continue
+            plugin_dir = manifest.parent.parent
+            styles_dir = plugin_dir / "output-styles"
+            if not styles_dir.exists() or not styles_dir.is_dir():
+                continue
+            resolved = styles_dir.resolve(strict=False)
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            dirs.append(styles_dir)
+    dirs.sort(key=lambda item: str(item))
+    return dirs
+
+
+def _plugin_runtime_styles() -> list[OutputStyleDef]:
+    global _PLUGIN_STYLE_CACHE
+    with _PLUGIN_STYLE_SCAN_LOCK:
+        if _PLUGIN_STYLE_CACHE is not None:
+            return list(_PLUGIN_STYLE_CACHE)
+
+        styles: list[OutputStyleDef] = []
+        seen_names: set[str] = set()
+        for styles_dir in _discover_plugin_output_style_dirs():
+            for style in load_output_styles_dir(styles_dir):
+                if style.name in seen_names:
+                    continue
+                seen_names.add(style.name)
+                styles.append(style)
+        _PLUGIN_STYLE_CACHE = styles
+        return list(styles)
+
+
 def runtime_styles() -> list[OutputStyleDef]:
     with _RUNTIME_STYLES_LOCK:
-        return list(_RUNTIME_STYLES)
+        manual = list(_RUNTIME_STYLES)
+    merged: list[OutputStyleDef] = []
+    seen_names: set[str] = set()
+    for style in manual + _plugin_runtime_styles():
+        if style.name in seen_names:
+            continue
+        seen_names.add(style.name)
+        merged.append(style)
+    return merged

@@ -38,7 +38,7 @@ Status legend:
 | `[~]` | `openh/messages.py` | `crates/core/src/lib.rs` | Reviewed. Message UUID added. Broader message type parity still needs continued audit. |
 | `[~]` | `openh/memory.py` | `crates/core/src/claudemd.rs`, `crates/core/src/memdir.rs` | Reviewed again this pass. AGENTS/CLAUDE loading now follows the public scope order more closely (`managed -> user -> project -> local`), strips frontmatter, and expands `@include` directives with recursion/size guards. Still no mtime cache or richer metadata surface. |
 | `[~]` | `openh/memdir.py` | `crates/core/src/memdir.rs` | Reviewed this pass. Recursive memory scanning, quick frontmatter parsing, MEMORY.md truncation, and index-only prompt injection now track the public memdir flow much more closely. Still does not expose the full public relevance-search helper surface. |
-| `[~]` | `openh/output_styles.py` | `crates/core/src/output_styles.rs` | Reviewed for runtime style resolution. Plugin discovery path still incomplete. |
+| `[~]` | `openh/output_styles.py` | `crates/core/src/output_styles.rs` | Reviewed again this pass. Runtime styles now also discover plugin-contributed `output-styles/` directories from installed Codex plugin roots, approximating the public plugin registry flow. Still no formal enabled-plugin registry or cache invalidation graph. |
 | `[~]` | `openh/prompts.py` | `crates/core/src/output_styles.rs` and command/prompt surfaces | Reviewed this pass. Preset storage now separates stable slug from display label, writes explicit name metadata, and resolves old slug-based presets without breaking existing settings. Still an OpenH-local preset system, not a direct public prompt-history port. |
 | `[~]` | `openh/settings.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Reviewed this pass. Settings now normalize/coerce persisted values and preserve unknown JSON keys on save so local writes do not clobber future settings fields. Still a flatter OpenH-only schema than the public nested `Settings.config` graph. |
 
@@ -75,7 +75,7 @@ Status legend:
 | `[~]` | `openh/tools/worktree.py` | `crates/tools/src/worktree.rs` | Reviewed this pass. Schema, timestamped branch naming, `post_create_command`, `discard_changes`, and keep/remove exit semantics now track the public flow. Local runtime keeps worktree session state per OpenH session instead of a single global slot. |
 | `[-]` | `openh/tools/ls.py` | none | Legacy local helper. Public built-in parity target does not include it. Kept in tree for compatibility, but no longer exposed by default. |
 | `[-]` | `openh/tools/serial_tool.py` | none | FnD/local-only extension, not parity target. |
-| `[-]` | `openh/tools/memory_tools.py` | none | OpenH-local helper surface. |
+| `[~]` | `openh/tools/memory_tools.py` | none | OpenH-local helper surface. Reviewed this pass to better align with the memdir stack: memory listings now include filename and freshness metadata so the model can reason about stored memories with less ambiguity. Still not a public parity target. |
 
 ## 5. Providers / Usage / Cache Wiring
 
@@ -113,8 +113,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `tools/memory_tools.py`
-2. `output_styles.py` plugin discovery follow-up
-3. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
-4. `flet_app/main.py`, `flet_app/widgets.py` final regression sweep
-5. `flet_app/permission_dialog.py`
+1. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
+2. `flet_app/main.py`, `flet_app/widgets.py` final regression sweep
+3. `flet_app/permission_dialog.py`
+4. `permission_rules.py` exact-manager follow-up
+5. `coordinator.py` / managed runtime exact pass
