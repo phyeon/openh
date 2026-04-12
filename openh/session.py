@@ -32,6 +32,7 @@ class AgentSession:
     prompt_preset: str = ""       # per-session preset name (empty = global)
     prompt_override: str = ""     # per-session custom prompt text (empty = use preset)
     profile_id: str = "default"   # session profile ("default", "fnd", ...)
+    shell_env: dict[str, str] = field(default_factory=dict)  # persisted env vars (CC pattern)
     _cwd: str = ""
 
     @property

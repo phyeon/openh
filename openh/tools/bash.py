@@ -1,10 +1,21 @@
-"""Bash tool — execute shell commands with optional background mode."""
+"""Bash tool — execute shell commands with optional background mode.
+
+CC-aligned implementation:
+- stdin=DEVNULL to prevent hangs
+- Sentinel-based cwd + env var tracking across invocations
+- ANSI escape stripping for ncurses/interactive output
+- Output truncation at 100K chars with 50/50 head/tail split
+- Timeout cap at 600s (10 min)
+- notify_on_complete for background tasks
+"""
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar
 
 from .base import PermissionDecision, Tool, ToolContext
 
@@ -13,6 +24,9 @@ MAX_TIMEOUT = 600  # 10 minutes hard cap (CC pattern)
 MAX_OUTPUT_CHARS = 100_000  # CC uses 100K
 
 _BG_SHELLS: dict[str, "BackgroundShell"] = {}
+
+# Completion callbacks: shell_id -> coroutine to call with summary
+_COMPLETION_CALLBACKS: dict[str, Any] = {}
 
 
 @dataclass
@@ -30,15 +44,72 @@ class BackgroundShell:
     _reader_task: "asyncio.Task | None" = None
 
 
+# ---------------------------------------------------------------------------
+#  ANSI stripping
+# ---------------------------------------------------------------------------
+
+_ANSI_RE = re.compile(r"""
+    \x1b
+    (?:
+        \[ [0-9;?]* [A-Za-z]
+    |   \] .*? (?:\x07|\x1b\\)
+    |   [()][AB012]
+    |   [=>Nno|~}]
+    )
+""", re.VERBOSE)
+
+_JUNK_RE = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")
+
+
+def _strip_ansi(text: str) -> str:
+    text = _ANSI_RE.sub("", text)
+    text = _JUNK_RE.sub("", text)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text
+
+
+def _truncate(text: str) -> str:
+    text = _strip_ansi(text)
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    half = MAX_OUTPUT_CHARS // 2
+    return (
+        text[:half]
+        + f"\n\n… ({len(text) - MAX_OUTPUT_CHARS:,} chars truncated) …\n\n"
+        + text[-half:]
+    )
+
+
+def _shell_quote(s: str) -> str:
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+# Env vars to skip when persisting (CC pattern)
+_SKIP_ENV = frozenset({
+    "SHLVL", "BASH_LINENO", "BASH_SOURCE", "FUNCNAME",
+    "PIPESTATUS", "OLDPWD", "PWD", "SHELL", "HOME",
+    "USER", "LOGNAME", "PATH", "TERM", "LANG", "LC_ALL",
+    "TMPDIR", "DISPLAY", "SSH_AUTH_SOCK", "XPC_FLAGS",
+    "XPC_SERVICE_NAME", "COLORTERM", "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION", "ITERM_SESSION_ID",
+    "__openh_rc", "_",
+})
+
+
+# ---------------------------------------------------------------------------
+#  BashTool
+# ---------------------------------------------------------------------------
+
 class BashTool(Tool):
     name: ClassVar[str] = "Bash"
     description: ClassVar[str] = (
         "Executes a given bash command and returns its output. "
         "IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, grep, or find "
         "— use the dedicated Read, Edit, Glob, and Grep tools instead. "
-        "The working directory persists between commands, but shell state does not. "
-        "Default timeout 2 minutes. Set run_in_background=true to start the command "
-        "in the background. Always quote file paths that contain spaces."
+        "The working directory and environment variables persist between commands. "
+        "Default timeout 2 minutes (max 10 minutes). "
+        "Set run_in_background=true to start the command in the background. "
+        "Always quote file paths that contain spaces."
     )
     input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -50,7 +121,7 @@ class BashTool(Tool):
             },
             "timeout": {
                 "type": "integer",
-                "description": "Timeout in seconds (foreground only). Defaults to 120.",
+                "description": "Timeout in seconds (foreground only). Default 120, max 600.",
             },
             "run_in_background": {
                 "type": "boolean",
@@ -84,13 +155,17 @@ class BashTool(Tool):
     ) -> str:
         timeout = min(int(input.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
 
-        # Wrap command to track cwd changes (CC sentinel pattern)
+        # CC sentinel pattern: restore env, run command, capture cwd+env
         sentinel = "__OPENH_STATE__"
+        env_restore = ""
+        for k, v in getattr(ctx.session, "shell_env", {}).items():
+            env_restore += f"export {k}={_shell_quote(v)}\n"
         wrapped = (
             f"cd {_shell_quote(ctx.session.cwd)} 2>/dev/null\n"
+            f"{env_restore}"
             f"{command}\n"
             f"__openh_rc=$?\n"
-            f"echo\necho '{sentinel}'\npwd\n"
+            f"echo\necho '{sentinel}'\npwd\nenv\n"
             f"exit $__openh_rc"
         )
         try:
@@ -98,14 +173,16 @@ class BashTool(Tool):
                 "bash", "-c", wrapped,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,  # CC: prevent stdin hangs
+                stdin=asyncio.subprocess.DEVNULL,
                 cwd=ctx.session.cwd,
             )
         except OSError as exc:
             return f"error: failed to start: {exc}"
 
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
         except asyncio.TimeoutError:
             proc.kill()
             try:
@@ -118,17 +195,30 @@ class BashTool(Tool):
         stderr_text = _truncate(stderr_b.decode("utf-8", errors="replace"))
         rc = proc.returncode
 
-        # Extract new cwd from sentinel (CC pattern)
+        # Extract cwd + env from sentinel
         stdout_text = raw_stdout
         if sentinel in raw_stdout:
             parts = raw_stdout.rsplit(sentinel, 1)
             stdout_text = parts[0]
             state_lines = parts[1].strip().splitlines()
             if state_lines:
-                import os
                 new_cwd = state_lines[0].strip()
                 if os.path.isdir(new_cwd):
                     ctx.session.cwd = new_cwd
+                # Parse env vars
+                if hasattr(ctx.session, "shell_env"):
+                    new_env: dict[str, str] = {}
+                    for line in state_lines[1:]:
+                        if "=" not in line:
+                            continue
+                        k, _, v = line.partition("=")
+                        if k.startswith("_") or k in _SKIP_ENV:
+                            continue
+                        new_env[k] = v
+                    inherited = os.environ
+                    for k, v in new_env.items():
+                        if k not in inherited or inherited[k] != v:
+                            ctx.session.shell_env[k] = v
 
         stdout_text = _truncate(stdout_text)
 
@@ -142,11 +232,6 @@ class BashTool(Tool):
         if not stdout_text and not stderr_text:
             out_lines.append("(no output)")
         return "\n".join(out_lines)
-
-
-def _shell_quote(s: str) -> str:
-    """Single-quote a string for shell (CC pattern)."""
-    return "'" + s.replace("'", "'\\''") + "'"
 
     async def _run_background(
         self, command: str, description: str, ctx: ToolContext
@@ -178,6 +263,10 @@ def _shell_quote(s: str) -> str:
         )
 
 
+# ---------------------------------------------------------------------------
+#  Background shell drain + notify
+# ---------------------------------------------------------------------------
+
 async def _drain(shell: BackgroundShell) -> None:
     proc = shell.process
     assert proc.stdout is not None
@@ -198,53 +287,28 @@ async def _drain(shell: BackgroundShell) -> None:
     finally:
         shell.exit_code = await proc.wait()
         shell.done = True
+        # notify_on_complete (CC pattern)
+        cb = _COMPLETION_CALLBACKS.pop(shell.shell_id, None)
+        if cb is not None:
+            try:
+                combined = "".join(shell.stdout_buffer) + "".join(shell.stderr_buffer)
+                summary = _truncate(combined[-2000:])  # last 2000 chars (CC uses this)
+                await cb(shell.shell_id, shell.exit_code, summary)
+            except Exception:
+                pass
 
 
-import re
+def register_completion_callback(shell_id: str, callback) -> None:
+    """Register a coroutine to be called when a background shell completes.
 
-# ANSI escape sequences: CSI (ESC[...), OSC (ESC]...), and single ESC+char
-_ANSI_RE = re.compile(r"""
-    \x1b       # ESC
-    (?:
-        \[     # CSI
-        [0-9;?]*  # params
-        [A-Za-z]  # final byte
-    |
-        \]     # OSC
-        .*?    # payload
-        (?:\x07|\x1b\\)  # ST
-    |
-        [()][AB012]  # charset select
-    |
-        [=>Nno|~}]   # misc single-char
-    )
-""", re.VERBOSE)
-
-# Cursor movement / screen control that produce no visible content
-_JUNK_RE = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")
+    callback signature: async def cb(shell_id: str, exit_code: int, summary: str)
+    """
+    _COMPLETION_CALLBACKS[shell_id] = callback
 
 
-def _strip_ansi(text: str) -> str:
-    """Remove ANSI escape sequences and control chars (like Claude Code does)."""
-    text = _ANSI_RE.sub("", text)
-    text = _JUNK_RE.sub("", text)
-    # Collapse runs of blank lines
-    text = re.sub(r"\n{4,}", "\n\n\n", text)
-    return text
-
-
-def _truncate(text: str) -> str:
-    text = _strip_ansi(text)
-    if len(text) <= MAX_OUTPUT_CHARS:
-        return text
-    # CC pattern: 50/50 head/tail split
-    half = MAX_OUTPUT_CHARS // 2
-    return (
-        text[:half]
-        + f"\n\n… ({len(text) - MAX_OUTPUT_CHARS:,} chars truncated) …\n\n"
-        + text[-half:]
-    )
-
+# ---------------------------------------------------------------------------
+#  BashOutputTool
+# ---------------------------------------------------------------------------
 
 class BashOutputTool(Tool):
     name: ClassVar[str] = "BashOutput"
@@ -297,6 +361,10 @@ class BashOutputTool(Tool):
         return "\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+#  KillShellTool
+# ---------------------------------------------------------------------------
+
 class KillShellTool(Tool):
     name: ClassVar[str] = "KillShell"
     description: ClassVar[str] = (
@@ -330,4 +398,5 @@ class KillShellTool(Tool):
         except Exception as exc:  # noqa: BLE001
             return f"error: kill failed: {exc}"
         _BG_SHELLS.pop(shell_id, None)
+        _COMPLETION_CALLBACKS.pop(shell_id, None)
         return f"killed {shell_id}"
