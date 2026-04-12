@@ -36,6 +36,20 @@ class OpenAIProvider:
         converted: list[dict[str, Any]] = [
             {"role": "system", "content": system},
         ]
+
+        def _tool_result_messages(blocks: list[Any]) -> list[dict[str, Any]]:
+            tool_messages: list[dict[str, Any]] = []
+            for block in blocks:
+                if isinstance(block, ToolResultBlock):
+                    tool_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": block.tool_use_id,
+                            "content": block.content or "",
+                        }
+                    )
+            return tool_messages
+
         for msg in messages:
             if msg.role == "assistant":
                 text_chunks: list[str] = []
@@ -58,15 +72,16 @@ class OpenAIProvider:
                 if text_chunks or tool_calls:
                     assistant_message: dict[str, Any] = {
                         "role": "assistant",
-                        "content": "\n".join(text_chunks) if text_chunks else None,
+                        "content": "".join(text_chunks) if text_chunks else None,
                     }
                     if tool_calls:
                         assistant_message["tool_calls"] = tool_calls
                     converted.append(assistant_message)
+                converted.extend(_tool_result_messages(msg.content))
                 continue
 
             user_parts: list[dict[str, Any]] = []
-            tool_messages: list[dict[str, Any]] = []
+            tool_messages = _tool_result_messages(msg.content)
             for block in msg.content:
                 if isinstance(block, TextBlock):
                     if block.text:
@@ -85,14 +100,6 @@ class OpenAIProvider:
                         {
                             "type": "text",
                             "text": "[Attached PDF omitted: OpenAI provider does not forward PDF blocks yet.]",
-                        }
-                    )
-                elif isinstance(block, ToolResultBlock):
-                    tool_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": block.tool_use_id,
-                            "content": block.content or "",
                         }
                     )
             if user_parts:

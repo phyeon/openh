@@ -37,6 +37,17 @@ class GeminiProvider:
     def _next_tool_id(self) -> str:
         return f"gem_{next(self._tool_id_counter)}"
 
+    @staticmethod
+    def _tool_use_id_for_name(name: str, occurrence: int) -> str:
+        sanitized = "".join(
+            ch if ch.isascii() and (ch.isalnum() or ch in {"_", "-"}) else "_"
+            for ch in str(name or "")
+        )
+        base = sanitized or "tool"
+        if occurrence == 0:
+            return f"call_{base}"
+        return f"call_{base}_{occurrence + 1}"
+
     def _to_gemini_contents(self, messages: list[Message]) -> list[gtypes.Content]:
         """Translate canonical Anthropic-format messages into Gemini Content list.
 
@@ -159,6 +170,8 @@ class GeminiProvider:
         stop_reason = "end_turn"
         emitted_tool_use = False
         emitted_text = False
+        tool_name_counts: dict[str, int] = {}
+        open_tool_ids: dict[int, tuple[str, str]] = {}
 
         # Retry on transient errors (503, 429, etc.)
         import asyncio as _aio
@@ -197,7 +210,7 @@ class GeminiProvider:
                 content = getattr(cand, "content", None)
                 if content is None:
                     continue
-                for part in (content.parts or []):
+                for part_idx, part in enumerate(content.parts or []):
                     text = getattr(part, "text", None)
                     fc = getattr(part, "function_call", None)
                     if text:
@@ -205,13 +218,21 @@ class GeminiProvider:
                         yield TextDelta(text=text)
                     if fc is not None:
                         emitted_tool_use = True
-                        tool_id = self._next_tool_id()
+                        name = getattr(fc, "name", "") or "tool"
+                        existing = open_tool_ids.get(part_idx)
+                        if existing is not None and existing[1] == name:
+                            tool_id = existing[0]
+                        else:
+                            occurrence = tool_name_counts.get(name, 0)
+                            tool_id = self._tool_use_id_for_name(name, occurrence)
+                            tool_name_counts[name] = occurrence + 1
+                            open_tool_ids[part_idx] = (tool_id, name)
                         try:
                             args = dict(fc.args) if fc.args else {}
                         except Exception:
                             args = {}
-                        yield ToolUseStart(id=tool_id, name=fc.name)
-                        yield ToolUseEnd(id=tool_id, name=fc.name, input=args, _raw_part=part)
+                        yield ToolUseStart(id=tool_id, name=name)
+                        yield ToolUseEnd(id=tool_id, name=name, input=args, _raw_part=part)
 
         if stop_reason == "end_turn" and emitted_tool_use and not emitted_text:
             stop_reason = "tool_use"
@@ -226,15 +247,47 @@ def _clean_schema_for_gemini(schema: dict[str, Any]) -> dict[str, Any]:
     """Strip JSON-Schema fields Gemini does not accept."""
     if not isinstance(schema, dict):
         return schema
-    cleaned: dict[str, Any] = {}
-    skip = {"$schema", "additionalProperties", "title", "examples", "default"}
-    for k, v in schema.items():
-        if k in skip:
-            continue
-        if k == "properties" and isinstance(v, dict):
-            cleaned[k] = {pk: _clean_schema_for_gemini(pv) for pk, pv in v.items()}
-        elif k == "items" and isinstance(v, dict):
-            cleaned[k] = _clean_schema_for_gemini(v)
-        else:
-            cleaned[k] = v
+
+    cleaned = dict(schema)
+    for key in ("additionalProperties", "$schema", "default", "examples", "title"):
+        cleaned.pop(key, None)
+
+    schema_type = cleaned.get("type")
+    if isinstance(schema_type, str):
+        schema_type = schema_type.lower()
+    else:
+        schema_type = None
+
+    enum_values = cleaned.get("enum")
+    if isinstance(enum_values, list) and any(isinstance(item, (int, float)) for item in enum_values):
+        cleaned["enum"] = [str(item) for item in enum_values]
+        cleaned["type"] = "string"
+        schema_type = "string"
+
+    if schema_type == "object":
+        props = cleaned.get("properties")
+        if isinstance(props, dict):
+            cleaned["properties"] = {
+                key: _clean_schema_for_gemini(value)
+                for key, value in props.items()
+            }
+        prop_keys = set(cleaned.get("properties", {}).keys()) if isinstance(cleaned.get("properties"), dict) else set()
+        required = cleaned.get("required")
+        if isinstance(required, list):
+            cleaned["required"] = [
+                key for key in required
+                if isinstance(key, str) and key in prop_keys
+            ]
+    else:
+        cleaned.pop("properties", None)
+        cleaned.pop("required", None)
+
+    if schema_type == "array":
+        items = cleaned.get("items")
+        if isinstance(items, dict):
+            sanitized_items = _clean_schema_for_gemini(items)
+            if isinstance(sanitized_items, dict) and "type" not in sanitized_items:
+                sanitized_items["type"] = "string"
+            cleaned["items"] = sanitized_items
+
     return cleaned

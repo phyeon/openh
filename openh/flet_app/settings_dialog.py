@@ -36,7 +36,9 @@ class SettingsDialog:
         session: "Any | None" = None,
     ) -> None:
         self.page = page
-        self.settings = Settings(**{k: getattr(current, k) for k in current.__dataclass_fields__})
+        self.settings = settings_mod.normalize_settings(
+            Settings(**{k: getattr(current, k) for k in current.__dataclass_fields__})
+        )
         self.on_save = on_save
         self._session = session
         self.dialog: ft.AlertDialog | None = None
@@ -47,10 +49,18 @@ class SettingsDialog:
 
         # Prompt editor state
         self._presets = prompts.list_presets()
-        self._active_preset_name = current.active_prompt
-        self._default_preset_name = current.active_prompt or prompts.BUILTIN_NAME
+        active = prompts.get_preset(current.active_prompt) if current.active_prompt else None
+        self._active_preset_name = active.slug if active else prompts.BUILTIN_NAME
+        self._default_preset_name = self._active_preset_name or prompts.BUILTIN_NAME
         self._prompt_dirty = False
         self._prompt_new_name: str = ""
+
+    def _preset_label(self, preset_name: str | None) -> str:
+        target = str(preset_name or "").strip()
+        if not target:
+            return prompts.BUILTIN_NAME
+        preset = prompts.get_preset(target)
+        return preset.name if preset is not None else target
 
     # ------------------------------------------------------------------ open
 
@@ -198,6 +208,21 @@ class SettingsDialog:
     # --------------------------------------------------------------- tab 1
 
     def _tab_models(self) -> ft.Control:
+        def _model_options(models: list[str], current: str) -> list[ft.dropdown.Option]:
+            ordered: list[str] = []
+            current_value = str(current or "").strip()
+            if current_value and current_value not in models:
+                ordered.append(current_value)
+            ordered.extend(models)
+            seen: set[str] = set()
+            result: list[ft.dropdown.Option] = []
+            for model in ordered:
+                if model in seen:
+                    continue
+                seen.add(model)
+                result.append(ft.dropdown.Option(model))
+            return result
+
         self._provider_radio = ft.RadioGroup(
             value=self.settings.active_provider,
             content=ft.Row(
@@ -212,7 +237,7 @@ class SettingsDialog:
 
         self._openai_dropdown = ft.Dropdown(
             value=self.settings.openai_model,
-            options=[ft.dropdown.Option(m) for m in OPENAI_MODELS],
+            options=_model_options(OPENAI_MODELS, self.settings.openai_model),
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
@@ -222,7 +247,7 @@ class SettingsDialog:
 
         self._anth_dropdown = ft.Dropdown(
             value=self.settings.anthropic_model,
-            options=[ft.dropdown.Option(m) for m in ANTHROPIC_MODELS],
+            options=_model_options(ANTHROPIC_MODELS, self.settings.anthropic_model),
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
@@ -232,7 +257,7 @@ class SettingsDialog:
 
         self._gem_dropdown = ft.Dropdown(
             value=self.settings.gemini_model,
-            options=[ft.dropdown.Option(m) for m in GEMINI_MODELS],
+            options=_model_options(GEMINI_MODELS, self.settings.gemini_model),
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
@@ -838,6 +863,10 @@ class SettingsDialog:
 
     def _tab_prompt(self) -> ft.Control:
         style_defs = output_styles.all_styles(self._session.cwd if self._session else None)
+        style_names = {style.name for style in style_defs}
+        current_style = getattr(self.settings, "output_style", "default") or "default"
+        if current_style not in style_names:
+            current_style = "default"
 
         def _style_help_text(name: str | None) -> str:
             active_name = str(name or "default").strip().lower() or "default"
@@ -858,8 +887,8 @@ class SettingsDialog:
                 pass
 
         self._output_style_dropdown = ft.Dropdown(
-            value=getattr(self.settings, "output_style", "default") or "default",
-            options=[ft.dropdown.Option(style.name) for style in style_defs],
+            value=current_style,
+            options=[ft.dropdown.Option(key=style.name, text=style.label) for style in style_defs],
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
@@ -876,7 +905,7 @@ class SettingsDialog:
 
         self._preset_dropdown = ft.Dropdown(
             value=self._active_preset_name,
-            options=[ft.dropdown.Option(p.name) for p in self._presets],
+            options=[ft.dropdown.Option(key=p.slug, text=p.name) for p in self._presets],
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             on_select=self._on_preset_change,
@@ -1028,6 +1057,7 @@ class SettingsDialog:
         selected_name = (self._active_preset_name or "").strip()
         default_name = self._default_preset_name or prompts.BUILTIN_NAME
         is_selected_default = bool(selected_name) and selected_name == default_name
+        default_label = self._preset_label(default_name)
 
         badge_bg = theme.ACCENT if selected_name and is_selected_default else theme.BG_HOVER
         badge_fg = theme.TEXT_ON_ACCENT if selected_name and is_selected_default else theme.TEXT_SECONDARY
@@ -1037,7 +1067,7 @@ class SettingsDialog:
             content=ft.Row(
                 [
                     ft.Icon(badge_icon, size=12, color=badge_fg),
-                    ft.Text(default_name, color=badge_fg, size=12, weight=ft.FontWeight.W_600),
+                    ft.Text(default_label, color=badge_fg, size=12, weight=ft.FontWeight.W_600),
                 ],
                 spacing=6,
                 tight=True,
@@ -1088,7 +1118,9 @@ class SettingsDialog:
         if not selected_name:
             return
         self._default_preset_name = selected_name
-        self._prompt_feedback.value = f"'{selected_name}' will be used as the app default when you save settings."
+        self._prompt_feedback.value = (
+            f"'{self._preset_label(selected_name)}' will be used as the app default when you save settings."
+        )
         self._refresh_default_preset_controls()
         try:
             self._prompt_feedback.update()
@@ -1114,7 +1146,7 @@ class SettingsDialog:
     def _on_copy_to_new(self, e) -> None:
         # Keep the current text, but switch out of read-only + clear active selection
         self._prompt_editor.read_only = False
-        base_name = self._active_preset_name or "copy"
+        base_name = self._preset_label(self._active_preset_name) or "copy"
         self._name_field.value = f"{base_name}-copy"
         self._active_preset_name = ""
         self._preset_dropdown.value = None
@@ -1135,7 +1167,7 @@ class SettingsDialog:
         if not name:
             # If editing a non-builtin preset with no new name, overwrite it
             if self._active_preset_name and not self._is_builtin_selected():
-                name = self._active_preset_name
+                name = self._preset_label(self._active_preset_name)
             else:
                 self._prompt_feedback.value = "Enter a name to save as a new preset."
                 try:
@@ -1154,9 +1186,9 @@ class SettingsDialog:
             return
         # Refresh dropdown
         self._presets = prompts.list_presets()
-        self._preset_dropdown.options = [ft.dropdown.Option(p.name) for p in self._presets]
-        self._preset_dropdown.value = preset.name
-        self._active_preset_name = preset.name
+        self._preset_dropdown.options = [ft.dropdown.Option(key=p.slug, text=p.name) for p in self._presets]
+        self._preset_dropdown.value = preset.slug
+        self._active_preset_name = preset.slug
         self._prompt_dirty = False
         self._name_field.value = ""
         self._prompt_feedback.value = f"Saved as '{preset.name}'."
@@ -1189,7 +1221,7 @@ class SettingsDialog:
             return
         deleted_name = self._active_preset_name
         self._presets = prompts.list_presets()
-        self._preset_dropdown.options = [ft.dropdown.Option(p.name) for p in self._presets]
+        self._preset_dropdown.options = [ft.dropdown.Option(key=p.slug, text=p.name) for p in self._presets]
         self._preset_dropdown.value = prompts.BUILTIN_NAME
         self._active_preset_name = prompts.BUILTIN_NAME
         if self._default_preset_name == deleted_name:

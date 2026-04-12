@@ -39,8 +39,8 @@ Status legend:
 | `[~]` | `openh/memory.py` | `crates/core/src/claudemd.rs`, `crates/core/src/memdir.rs` | Reviewed around AGENTS/CLAUDE memory loading. Still lighter than reference memory stack. |
 | `[~]` | `openh/memdir.py` | `crates/core/src/memdir.rs` | Reviewed this pass. Recursive memory scanning, quick frontmatter parsing, MEMORY.md truncation, and index-only prompt injection now track the public memdir flow much more closely. Still does not expose the full public relevance-search helper surface. |
 | `[~]` | `openh/output_styles.py` | `crates/core/src/output_styles.rs` | Reviewed for runtime style resolution. Plugin discovery path still incomplete. |
-| `[ ]` | `openh/prompts.py` | `crates/core/src/prompt_history.rs` and command surfaces | Partial checks only. |
-| `[ ]` | `openh/settings.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Partial checks only. |
+| `[~]` | `openh/prompts.py` | `crates/core/src/output_styles.rs` and command/prompt surfaces | Reviewed this pass. Preset storage now separates stable slug from display label, writes explicit name metadata, and resolves old slug-based presets without breaking existing settings. Still an OpenH-local preset system, not a direct public prompt-history port. |
+| `[~]` | `openh/settings.py` | `crates/core/src/lib.rs`, `crates/core/src/output_styles.rs` | Reviewed this pass. Settings now normalize/coerce persisted values and preserve unknown JSON keys on save so local writes do not clobber future settings fields. Still a flatter OpenH-only schema than the public nested `Settings.config` graph. |
 
 ## 3. Permission / Safety
 
@@ -83,8 +83,8 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
-| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed around tool-call reconstruction, stop-reason handling, and error surface. Request failures now bubble as errors instead of transcript text, and assistant tool-call messages now use `content=null` plus a closer finish-reason map. |
-| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed around tool-call reconstruction, usage, and error surface. Request failures/retries no longer emit transcript text, finish-reason mapping is closer to the public Google adapter, and tool-result name lookup now falls back from `call_*` ids. Runtime smoke still depends on local `google.genai` availability. |
+| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed again this pass. Assistant text/tool-call conversion is closer to the public adapter now: assistant text is concatenated without injected newlines and assistant-side tool results are emitted as separate tool messages. Still no exact Responses-API capability gate for GPT-5/o-series models. |
+| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed again this pass. Tool-call IDs now follow the public `call_<name>[_n]` pattern, and JSON-schema sanitizing is much closer to the public Google adapter (enum coercion, required filtering, array item typing). Runtime smoke still depends on local `google.genai` availability, and the streaming path is still simpler than the public SSE parser. |
 | `[~]` | `openh/providers/__init__.py` | provider registry surfaces | Reviewed this pass. Provider imports are now consistently lazy and missing-SDK failures surface as stable runtime errors instead of import crashes. Still a much smaller registry than the public provider module tree. |
 
 ## 6. UI / Desktop Runtime
@@ -96,7 +96,7 @@ These are not strict engine parity targets, but they still matter for behavior a
 | `[~]` | `openh/flet_app/main.py` | TUI/runtime surfaces only | Reviewed this pass for UI hot paths: top bar refresh, welcome/profile welcome flow, busy/input state, session switching, and theme rebuild. FnD welcome wordmark was simplified to remove oversized decorative layers. Still not a full file-wide audit. |
 | `[~]` | `openh/flet_app/widgets.py` | TUI/runtime surfaces only | Reviewed this pass for sidebar/top bar/welcome/input behavior. FnD welcome layouts now diverge between dark and light themes, and the sidebar new-chat button no longer swaps into a decorative emoji object. Still not a full file-wide audit. |
 | `[ ]` | `openh/flet_app/theme.py` | none | Local design system, not a direct public parity target. |
-| `[ ]` | `openh/flet_app/settings_dialog.py` | command/settings surfaces | Partial checks only. |
+| `[~]` | `openh/flet_app/settings_dialog.py` | `crates/tui/src/settings_screen.rs` and related settings surfaces | Reviewed this pass. Output-style picker now uses style labels, custom model values stay selectable instead of disappearing from the dropdown, and prompt preset UI follows stable slug/display-name separation. Still a desktop/Flet-specific UI, not a literal port of the TUI settings screen. |
 | `[ ]` | `openh/flet_app/permission_dialog.py` | TUI permission dialog surfaces | Not fully audited. |
 
 ## 7. Clearly remaining parity work
@@ -113,8 +113,8 @@ These are the main open deltas after the reviewed files above:
 
 Recommended next line-by-line audit batches:
 
-1. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
-2. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
-3. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep
-4. `memory.py`
-5. `tools/memory_tools.py`
+1. `flet_app/main.py`, `flet_app/widgets.py` second-pass polish + regression sweep
+2. `memory.py`
+3. `tools/memory_tools.py`
+4. `output_styles.py` plugin discovery follow-up
+5. `providers/openai.py`, `providers/gemini.py` final capability-gating follow-up
