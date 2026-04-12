@@ -22,6 +22,7 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "MemoryDelete": ("memory", "delete", "remove"),
     "MemoryList": ("memory", "list", "recall"),
     "MemorySave": ("memory", "save", "note", "remember"),
+    "monitor": ("monitor", "background", "task", "status", "output", "cancel"),
     "NotebookEdit": ("notebook", "jupyter", "ipynb", "cell"),
     "Read": ("read", "file", "content", "lines", "pdf", "image"),
     "SendMessage": ("message", "agent", "status", "follow-up", "resume"),

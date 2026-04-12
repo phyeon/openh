@@ -73,6 +73,7 @@ class BackgroundShell:
     stderr_offset: int = 0
     done: bool = False
     timed_out: bool = False
+    cancelled: bool = False
     exit_code: int | None = None
     _reader_task: "asyncio.Task | None" = None
     _timeout_task: "asyncio.Task | None" = None
@@ -210,6 +211,13 @@ class BashTool(Tool):
             "run_in_background": {
                 "type": "boolean",
                 "description": "Start in background; returns immediately with shell_id.",
+            },
+            "notify_on_complete": {
+                "type": "boolean",
+                "description": (
+                    "When true and run_in_background is also true, automatically inject "
+                    "a completion message on a later turn so polling is not required."
+                ),
             },
             "use_pty": {
                 "type": "boolean",
@@ -432,6 +440,7 @@ class BashTool(Tool):
         self, command: str, description: str, input: dict[str, Any], ctx: ToolContext
     ) -> str:
         timeout = min(int(input.get("timeout") or DEFAULT_TIMEOUT), MAX_TIMEOUT)
+        notify_on_complete = bool(input.get("notify_on_complete"))
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -455,11 +464,47 @@ class BashTool(Tool):
         _BG_SHELLS[shell_id] = shell
         shell._reader_task = asyncio.create_task(_drain(shell))
         shell._timeout_task = asyncio.create_task(_enforce_background_timeout(shell))
+        if notify_on_complete:
+            command_queue = getattr(ctx.session, "command_queue", None)
+            if command_queue is not None:
+                from ..command_queue import CommandPriority
+
+                async def _notify(done_shell_id: str, exit_code: int | None, summary: str) -> None:
+                    shell_state = _BG_SHELLS.get(done_shell_id)
+                    if shell_state is not None and shell_state.cancelled:
+                        exit_info = "cancelled"
+                    elif shell_state is not None and shell_state.timed_out:
+                        exit_info = "timed_out"
+                    elif exit_code is None:
+                        exit_info = "completed"
+                    else:
+                        exit_info = f"exit {exit_code}"
+                    message = (
+                        f"[Monitor] Background task {done_shell_id} completed ({exit_info}).\n"
+                        f"Command: {command}\n"
+                        "Output (last 2000 chars):\n"
+                        f"{summary or '(no output)'}"
+                    )
+                    command_queue.push_system_message(
+                        message,
+                        priority=CommandPriority.HIGH,
+                    )
+
+                register_completion_callback(shell_id, _notify)
+
+        if notify_on_complete:
+            return (
+                f"started background shell {shell_id}\n"
+                "notify_on_complete: enabled\n"
+                f"command: {command}\n"
+                f"timeout: {timeout}s\n"
+                "use monitor or BashOutput to inspect progress, KillShell to stop."
+            )
         return (
             f"started background shell {shell_id}\n"
             f"command: {command}\n"
             f"timeout: {timeout}s\n"
-            "use BashOutput to poll, KillShell to stop."
+            "use monitor or BashOutput to inspect progress, KillShell to stop."
         )
 
 
@@ -571,7 +616,7 @@ class BashOutputTool(Tool):
 
         parts = [
             f"shell_id: {shell_id}",
-            f"status: {'timed_out' if shell.timed_out else ('exited' if shell.done else 'running')}",
+            f"status: {'cancelled' if shell.cancelled else ('timed_out' if shell.timed_out else ('exited' if shell.done else 'running'))}",
         ]
         if shell.done and shell.exit_code is not None:
             parts.append(f"exit_code: {shell.exit_code}")
@@ -616,6 +661,7 @@ class KillShellTool(Tool):
         shell = _BG_SHELLS.get(shell_id)
         if shell is None:
             return f"error: no shell with id {shell_id}"
+        shell.cancelled = True
         try:
             await _kill_process_tree(shell.process)
         except Exception as exc:  # noqa: BLE001
@@ -623,3 +669,92 @@ class KillShellTool(Tool):
         _BG_SHELLS.pop(shell_id, None)
         _COMPLETION_CALLBACKS.pop(shell_id, None)
         return f"killed {shell_id}"
+
+
+class MonitorTool(Tool):
+    name: ClassVar[str] = "monitor"
+    permission_level = PermissionLevel.READ_ONLY
+    description: ClassVar[str] = (
+        "Monitor background tasks started with run_in_background=true. "
+        "List tasks, inspect status or output, or cancel a running task."
+    )
+    input_schema: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "status", "output", "cancel"],
+                "description": "Action to perform. Defaults to list.",
+            },
+            "task_id": {
+                "type": "string",
+                "description": "Background shell id to inspect or cancel.",
+            },
+        },
+    }
+    is_read_only: ClassVar[bool] = True
+
+    async def check_permissions(
+        self, input: dict[str, Any], ctx: ToolContext
+    ) -> PermissionDecision:
+        return PermissionDecision(behavior="allow")
+
+    async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
+        action = str(input.get("action") or "list").strip().lower() or "list"
+        task_id = str(input.get("task_id") or "").strip()
+
+        if action == "list":
+            if not _BG_SHELLS:
+                return "No background tasks."
+            lines = ["Background tasks:"]
+            for shell in _BG_SHELLS.values():
+                status = (
+                    "cancelled"
+                    if shell.cancelled
+                    else "timed_out"
+                    if shell.timed_out
+                    else "completed"
+                    if shell.done
+                    else "running"
+                )
+                lines.append(f"  {shell.shell_id} [{status}] {shell.command}")
+            return "\n".join(lines)
+
+        if not task_id:
+            return "error: task_id required for this action"
+
+        shell = _BG_SHELLS.get(task_id)
+        if shell is None:
+            return f"error: no shell with id {task_id}"
+
+        if action == "status":
+            status = (
+                "cancelled"
+                if shell.cancelled
+                else "timed_out"
+                if shell.timed_out
+                else "completed"
+                if shell.done
+                else "running"
+            )
+            lines = [
+                f"task_id: {shell.shell_id}",
+                f"status: {status}",
+                f"command: {shell.command}",
+            ]
+            if shell.exit_code is not None:
+                lines.append(f"exit_code: {shell.exit_code}")
+            output_lines = len("".join(shell.stdout_buffer + shell.stderr_buffer).splitlines())
+            lines.append(f"output_lines: {output_lines}")
+            return "\n".join(lines)
+
+        if action == "output":
+            output = "".join(shell.stdout_buffer + shell.stderr_buffer)
+            return _truncate(output) if output else "(no output yet)"
+
+        if action == "cancel":
+            shell.cancelled = True
+            await _kill_process_tree(shell.process)
+            return f"cancelled {task_id}"
+
+        return f"error: unsupported monitor action '{action}'"

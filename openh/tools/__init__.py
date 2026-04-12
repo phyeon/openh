@@ -4,7 +4,7 @@ from __future__ import annotations
 from .agent_tool import AgentTool
 from .ask_user import AskUserQuestionTool
 from .base import PermissionDecision, Tool, ToolContext
-from .bash import BashOutputTool, BashTool, KillShellTool
+from .bash import BashOutputTool, BashTool, KillShellTool, MonitorTool
 from .edit import EditTool
 from .glob import GlobTool
 from .grep import GrepTool
@@ -42,6 +42,7 @@ __all__ = [
     "BashTool",
     "BashOutputTool",
     "KillShellTool",
+    "MonitorTool",
     "GlobTool",
     "GrepTool",
     "LSTool",
@@ -88,6 +89,7 @@ def default_tools() -> list[Tool]:
         BashTool(),
         BashOutputTool(),
         KillShellTool(),
+        MonitorTool(),
         NotebookEditTool(),
         TodoWriteTool(),
         WebFetchTool(),
