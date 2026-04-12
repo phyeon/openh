@@ -58,7 +58,7 @@ class OpenAIProvider:
                 if text_chunks or tool_calls:
                     assistant_message: dict[str, Any] = {
                         "role": "assistant",
-                        "content": "\n".join(text_chunks) if text_chunks else "",
+                        "content": "\n".join(text_chunks) if text_chunks else None,
                     }
                     if tool_calls:
                         assistant_message["tool_calls"] = tool_calls
@@ -142,6 +142,18 @@ class OpenAIProvider:
             for tool in tools
         ]
 
+    @staticmethod
+    def _map_finish_reason(reason: str | None) -> str:
+        if reason in {"tool_calls", "function_call"}:
+            return "tool_use"
+        if reason == "length":
+            return "max_tokens"
+        if reason == "content_filter":
+            return "content_filtered"
+        if reason in {"stop", "end_turn", None, ""}:
+            return "end_turn"
+        return str(reason)
+
     async def stream(
         self,
         messages: list[Message],
@@ -207,12 +219,7 @@ class OpenAIProvider:
                         yield ToolUseDelta(id=buf["id"], partial_json=fn.arguments)
 
                 finish_reason = getattr(choice, "finish_reason", None)
-                if finish_reason == "tool_calls":
-                    stop_reason = "tool_use"
-                elif finish_reason == "length":
-                    stop_reason = "max_tokens"
-                elif finish_reason in {"stop", "end_turn"}:
-                    stop_reason = "end_turn"
+                stop_reason = self._map_finish_reason(finish_reason)
 
         for idx in sorted(tool_buffers):
             buf = tool_buffers[idx]

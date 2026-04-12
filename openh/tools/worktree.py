@@ -1,115 +1,319 @@
-"""EnterWorktree / ExitWorktree — git worktree isolation tools."""
+"""Worktree tools: create and exit git worktrees for isolated work sessions."""
 from __future__ import annotations
 
 import asyncio
 import os
-import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from .base import PermissionDecision, PermissionLevel, Tool, ToolContext
 
 
+@dataclass
+class WorktreeSession:
+    original_cwd: Path
+    worktree_path: Path
+    branch: str | None
+    original_head: str | None
+
+
+_WORKTREE_SESSIONS: dict[str, WorktreeSession] = {}
+
+
+def _session_key(ctx: ToolContext) -> str:
+    session_id = getattr(ctx.session, "session_id", "") or ""
+    return session_id.strip() or f"session-{id(ctx.session)}"
+
+
+async def _run_git(cwd: Path, args: list[str]) -> tuple[bool, str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return False, str(exc)
+
+    stdout_b, stderr_b = await proc.communicate()
+    stdout = stdout_b.decode("utf-8", errors="replace").strip()
+    stderr = stderr_b.decode("utf-8", errors="replace").strip()
+    if proc.returncode == 0:
+        return True, stdout
+    return False, stderr or stdout or f"git exited with {proc.returncode}"
+
+
+async def _run_shell(command: str, cwd: Path) -> tuple[bool, str]:
+    if os.name == "nt":
+        argv = ("cmd", "/C", command)
+    else:
+        argv = ("bash", "-lc", command)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return False, str(exc)
+
+    stdout_b, stderr_b = await proc.communicate()
+    stdout = stdout_b.decode("utf-8", errors="replace").strip()
+    stderr = stderr_b.decode("utf-8", errors="replace").strip()
+    if proc.returncode == 0:
+        return True, stdout
+    if stdout and stderr:
+        return False, f"{stderr}\n{stdout}"
+    return False, stderr or stdout or f"command exited with {proc.returncode}"
+
+
+def _default_branch_name() -> str:
+    now = datetime.now(timezone.utc)
+    return f"claurst-{now:%Y%m%d-%H%M%S}"
+
+
 class EnterWorktreeTool(Tool):
-    name = "EnterWorktree"
+    name: ClassVar[str] = "EnterWorktree"
     permission_level = PermissionLevel.WRITE
-    description = (
-        "Create an isolated git worktree so the agent works on a separate "
-        "copy of the repo. Useful for parallel work or risky experiments."
+    description: ClassVar[str] = (
+        "Create a new git worktree and switch the session's working directory to it. "
+        "This gives you an isolated environment to experiment or work on a feature "
+        "without affecting the main working tree. "
+        "Use ExitWorktree to return to the original directory."
     )
-    input_schema: dict[str, Any] = {
+    input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
-            "name": {
+            "branch": {
                 "type": "string",
-                "description": "Optional name for the worktree branch.",
+                "description": (
+                    "Branch name to create. Defaults to a timestamped name like "
+                    "claurst-20240101-120000."
+                ),
+            },
+            "path": {
+                "type": "string",
+                "description": (
+                    "Optional path for the worktree directory. Defaults to "
+                    ".worktrees/<branch>."
+                ),
+            },
+            "post_create_command": {
+                "type": "string",
+                "description": (
+                    "Optional command to run inside the new worktree after creation "
+                    "(e.g. 'npm install')."
+                ),
             },
         },
     }
-    is_read_only = False
+
+    async def check_permissions(
+        self, input: dict[str, Any], ctx: ToolContext
+    ) -> PermissionDecision:
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
-        cwd = os.getcwd()
-        # Check we are in a git repo
-        proc = await asyncio.create_subprocess_exec(
-            "git", "rev-parse", "--git-dir",
-            cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        session_key = _session_key(ctx)
+        if session_key in _WORKTREE_SESSIONS:
+            return "error: Already in a worktree session. Call ExitWorktree first."
+
+        branch = str(input.get("branch") or input.get("name") or "").strip()
+        if not branch:
+            branch = _default_branch_name()
+
+        raw_path = str(input.get("path") or "").strip()
+        if raw_path:
+            worktree_path = ctx.resolve_path(raw_path)
+        else:
+            worktree_path = Path(ctx.session.cwd) / ".worktrees" / branch
+        current_cwd = Path(ctx.session.cwd)
+
+        ok, head_output = await _run_git(current_cwd, ["rev-parse", "HEAD"])
+        original_head = head_output.strip() if ok and head_output.strip() else None
+        if not ok:
+            message = head_output.lower()
+            if "not a git repository" in message or "fatal" in message:
+                return (
+                    "error: Cannot create worktree: the current directory "
+                    f"'{current_cwd}' is not inside a git repository."
+                )
+
+        if worktree_path.exists():
+            return (
+                "error: Cannot create worktree: the path "
+                f"'{worktree_path}' already exists. Provide a different 'path' "
+                "argument or remove the existing directory."
+            )
+
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        ok, output = await _run_git(
+            current_cwd,
+            ["worktree", "add", "-b", branch, str(worktree_path)],
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            return "Error: not inside a git repository."
+        if not ok:
+            lowered = output.lower()
+            if "already exists" in lowered:
+                return (
+                    "error: Failed to create worktree: branch "
+                    f"'{branch}' already exists. Use a different branch name or "
+                    "delete the existing branch first."
+                )
+            if "not a git repository" in lowered:
+                return (
+                    "error: Failed to create worktree: "
+                    f"'{current_cwd}' is not inside a git repository."
+                )
+            return f"error: Failed to create worktree: {output.strip()}"
 
-        branch_name = input.get("name") or f"openh-wt-{uuid.uuid4().hex[:8]}"
-        wt_dir = Path(cwd) / ".openh" / "worktrees" / branch_name
-        wt_dir.parent.mkdir(parents=True, exist_ok=True)
-
-        proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "add", "-b", branch_name, str(wt_dir),
-            cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        _WORKTREE_SESSIONS[session_key] = WorktreeSession(
+            original_cwd=current_cwd,
+            worktree_path=worktree_path,
+            branch=branch,
+            original_head=original_head,
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            return f"Error creating worktree: {stderr.decode().strip()}"
+        ctx.session.cwd = str(worktree_path)
 
-        os.chdir(str(wt_dir))
-        return f"Created worktree at {wt_dir} on branch '{branch_name}'. Working directory changed."
+        post_create_command = str(input.get("post_create_command") or "").strip()
+        post_create_output = ""
+        if post_create_command:
+            ok, output = await _run_shell(post_create_command, worktree_path)
+            if ok:
+                post_create_output = (
+                    f"\nPost-create command '{post_create_command}' completed successfully."
+                )
+                if output:
+                    post_create_output += f"\nOutput: {output}"
+            else:
+                post_create_output = (
+                    f"\nPost-create command '{post_create_command}' exited with error.\n"
+                    f"Stderr: {output}"
+                )
+
+        return (
+            f"Created worktree at {worktree_path} on branch '{branch}'.\n"
+            f"The working directory is now {worktree_path}.\n"
+            f"Use ExitWorktree to return to {current_cwd}.{post_create_output}"
+        )
 
 
 class ExitWorktreeTool(Tool):
-    name = "ExitWorktree"
+    name: ClassVar[str] = "ExitWorktree"
     permission_level = PermissionLevel.WRITE
-    description = (
-        "Exit the current worktree and optionally remove it."
+    description: ClassVar[str] = (
+        "Exit the current worktree session created by EnterWorktree and restore the "
+        "original working directory. Use action='keep' to preserve the worktree on "
+        "disk, or action='remove' to delete it. Only operates on worktrees created "
+        "by EnterWorktree in this session."
     )
-    input_schema: dict[str, Any] = {
+    input_schema: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
                 "enum": ["keep", "remove"],
-                "description": "'keep' leaves the worktree on disk; 'remove' deletes it.",
+                "description": "\"keep\" leaves the worktree on disk; \"remove\" deletes it and its branch.",
+            },
+            "discard_changes": {
+                "type": "boolean",
+                "description": (
+                    "Set true when action=remove and the worktree has "
+                    "uncommitted/unmerged work to discard."
+                ),
             },
         },
         "required": ["action"],
     }
-    is_read_only = False
+
+    async def check_permissions(
+        self, input: dict[str, Any], ctx: ToolContext
+    ) -> PermissionDecision:
+        return PermissionDecision(behavior="allow")
 
     async def run(self, input: dict[str, Any], ctx: ToolContext) -> str:
-        cwd = os.getcwd()
-        action = input.get("action", "keep")
+        session_key = _session_key(ctx)
+        session = _WORKTREE_SESSIONS.get(session_key)
+        if session is None:
+            return (
+                "No-op: there is no active EnterWorktree session to exit. "
+                "This tool only operates on worktrees created by EnterWorktree "
+                "in the current session."
+            )
 
-        # Detect worktree root
-        proc = await asyncio.create_subprocess_exec(
-            "git", "rev-parse", "--show-toplevel",
-            cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        wt_root = stdout.decode().strip()
+        action = str(input.get("action") or "keep").strip().lower() or "keep"
+        discard_changes = bool(input.get("discard_changes"))
+        worktree_str = str(session.worktree_path)
 
-        # Go back to main worktree
-        proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "list", "--porcelain",
-            cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        lines = stdout.decode().splitlines()
-        main_dir = None
-        for line in lines:
-            if line.startswith("worktree "):
-                candidate = line.split(" ", 1)[1]
-                if candidate != wt_root:
-                    main_dir = candidate
-                    break
+        if action == "remove" and not discard_changes:
+            ok, status_output = await _run_git(
+                session.worktree_path,
+                ["status", "--porcelain"],
+            )
+            changed_files = 0
+            if ok:
+                changed_files = len(
+                    [line for line in status_output.splitlines() if line.strip()]
+                )
 
-        if main_dir:
-            os.chdir(main_dir)
+            commit_count = 0
+            if session.original_head:
+                ok, rev_output = await _run_git(
+                    session.worktree_path,
+                    ["rev-list", "--count", f"{session.original_head}..HEAD"],
+                )
+                if ok:
+                    try:
+                        commit_count = int(rev_output.strip() or "0")
+                    except ValueError:
+                        commit_count = 0
+
+            if changed_files > 0 or commit_count > 0:
+                parts: list[str] = []
+                if changed_files > 0:
+                    parts.append(f"{changed_files} uncommitted file(s)")
+                if commit_count > 0:
+                    parts.append(f"{commit_count} commit(s) on the worktree branch")
+                return (
+                    f"error: Worktree has {' and '.join(parts)}. Removing will discard "
+                    "this work permanently. Confirm with the user, then re-invoke with "
+                    "discard_changes=true — or use action=\"keep\" to preserve the worktree."
+                )
+
+        if action == "keep":
+            await _run_git(
+                session.original_cwd,
+                ["worktree", "lock", "--reason", "kept by ExitWorktree", worktree_str],
+            )
+            ctx.session.cwd = str(session.original_cwd)
+            _WORKTREE_SESSIONS.pop(session_key, None)
+            return (
+                f"Exited worktree. Work preserved at {session.worktree_path} on branch "
+                f"{session.branch or '(unknown)'}. Session is now back in "
+                f"{session.original_cwd}."
+            )
 
         if action == "remove":
-            proc = await asyncio.create_subprocess_exec(
-                "git", "worktree", "remove", "--force", wt_root,
-                cwd=main_dir or cwd,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            await _run_git(
+                session.original_cwd,
+                ["worktree", "remove", "--force", worktree_str],
             )
-            await proc.communicate()
-            return f"Removed worktree at {wt_root}. Returned to {main_dir or cwd}."
-        return f"Left worktree at {wt_root} (kept on disk). Returned to {main_dir or cwd}."
+            if session.branch:
+                await _run_git(
+                    session.original_cwd,
+                    ["branch", "-D", session.branch],
+                )
+            ctx.session.cwd = str(session.original_cwd)
+            _WORKTREE_SESSIONS.pop(session_key, None)
+            return (
+                f"Exited and removed worktree at {session.worktree_path}. "
+                f"Session is now back in {session.original_cwd}."
+            )
+
+        return f"error: Unknown action '{action}'. Use 'keep' or 'remove'."

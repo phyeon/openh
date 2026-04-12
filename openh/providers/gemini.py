@@ -95,6 +95,29 @@ class GeminiProvider:
             for b in m.content:
                 if isinstance(b, ToolUseBlock) and b.id == tool_use_id:
                     return b.name
+        raw = tool_use_id.removeprefix("call_")
+        if not raw:
+            return None
+        if "_" in raw:
+            candidate, suffix = raw.rsplit("_", 1)
+            if candidate and suffix.isdigit():
+                raw = candidate
+        return raw or None
+
+    @staticmethod
+    def _map_finish_reason(reason: object) -> str:
+        if hasattr(reason, "name"):
+            reason = getattr(reason, "name")
+        reason_str = str(reason or "").upper()
+        if reason_str in {"FUNCTION_CALL", "TOOL_CODE"}:
+            return "tool_use"
+        if reason_str == "MAX_TOKENS":
+            return "max_tokens"
+        if reason_str in {"SAFETY", "RECITATION"}:
+            return "content_filtered"
+        if reason_str in {"STOP", "END_TURN", ""}:
+            return "end_turn"
+        return str(reason or "end_turn").lower()
         return None
 
     @staticmethod
@@ -167,6 +190,10 @@ class GeminiProvider:
 
             candidates = getattr(chunk, "candidates", None) or []
             for cand in candidates:
+                finish_reason = getattr(cand, "finish_reason", None)
+                mapped_finish_reason = self._map_finish_reason(finish_reason)
+                if mapped_finish_reason != "end_turn" or finish_reason:
+                    stop_reason = mapped_finish_reason
                 content = getattr(cand, "content", None)
                 if content is None:
                     continue
@@ -186,9 +213,9 @@ class GeminiProvider:
                         yield ToolUseStart(id=tool_id, name=fc.name)
                         yield ToolUseEnd(id=tool_id, name=fc.name, input=args, _raw_part=part)
 
-        if emitted_tool_use and not emitted_text:
+        if stop_reason == "end_turn" and emitted_tool_use and not emitted_text:
             stop_reason = "tool_use"
-        elif emitted_tool_use:
+        elif stop_reason == "end_turn" and emitted_tool_use:
             stop_reason = "tool_use"
 
         yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)

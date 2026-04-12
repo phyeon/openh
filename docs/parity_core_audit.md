@@ -70,9 +70,9 @@ Status legend:
 | `[~]` | `openh/tools/ask_user.py` | `crates/tools/src/ask_user.rs` | Reviewed earlier in tool parity pass, but worth another exact schema pass. |
 | `[~]` | `openh/tools/planmode.py` | `crates/tools/src/enter_plan_mode.rs`, `crates/tools/src/exit_plan_mode.rs` | Reviewed earlier. Needs one more exact wording/schema pass. |
 | `[~]` | `openh/tools/skill_tool.py` | `crates/tools/src/skill_tool.rs`, `crates/tools/src/bundled_skills.rs` | Reviewed earlier. Still open for full discovery parity. |
-| `[ ]` | `openh/tools/webfetch.py` | `crates/tools/src/web_fetch.rs` | Not yet fully audited line-by-line. |
-| `[ ]` | `openh/tools/websearch.py` | `crates/tools/src/web_search.rs` | Not yet fully audited line-by-line. |
-| `[ ]` | `openh/tools/worktree.py` | `crates/tools/src/worktree.rs` | Partial checks only. |
+| `[~]` | `openh/tools/webfetch.py` | `crates/tools/src/web_fetch.rs` | Reviewed this pass. URL cache, edge-case HTML detection, and semantic extraction fallback were ported, and the cache now lives under `~/.claurst/web_cache` like the public ref. Still uses local provider wiring instead of the exact public API helper/client path. |
+| `[~]` | `openh/tools/websearch.py` | `crates/tools/src/web_search.rs` | Reviewed this pass. Brave Search + DuckDuckGo fallback, `num_results`, and public-style result formatting were added. Still returns plain tool text instead of a richer result struct. |
+| `[~]` | `openh/tools/worktree.py` | `crates/tools/src/worktree.rs` | Reviewed this pass. Schema, timestamped branch naming, `post_create_command`, `discard_changes`, and keep/remove exit semantics now track the public flow. Local runtime keeps worktree session state per OpenH session instead of a single global slot. |
 | `[-]` | `openh/tools/ls.py` | none | Legacy local helper. Public built-in parity target does not include it. Kept in tree for compatibility, but no longer exposed by default. |
 | `[-]` | `openh/tools/serial_tool.py` | none | FnD/local-only extension, not parity target. |
 | `[-]` | `openh/tools/memory_tools.py` | none | OpenH-local helper surface. |
@@ -83,8 +83,8 @@ Status legend:
 | --- | --- | --- | --- |
 | `[~]` | `openh/providers/base.py` | `crates/query/src/lib.rs`, API client surfaces | Reviewed around compact/max_tokens wiring. |
 | `[~]` | `openh/providers/anthropic.py` | public Anthropic request shaping in query/api path | Reviewed around system boundary/cache usage. Still lighter than reference stack. |
-| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed around tool-call reconstruction, stop-reason handling, and error surface. Request failures now bubble as errors instead of transcript text. |
-| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed around tool-call reconstruction, usage, and error surface. Request failures/retries no longer emit transcript text. Runtime smoke still depends on local `google.genai` availability. |
+| `[~]` | `openh/providers/openai.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/openai.rs` | Reviewed around tool-call reconstruction, stop-reason handling, and error surface. Request failures now bubble as errors instead of transcript text, and assistant tool-call messages now use `content=null` plus a closer finish-reason map. |
+| `[~]` | `openh/providers/gemini.py` | `crates/query/src/lib.rs`, `crates/api/src/providers/google.rs` | Reviewed around tool-call reconstruction, usage, and error surface. Request failures/retries no longer emit transcript text, finish-reason mapping is closer to the public Google adapter, and tool-result name lookup now falls back from `call_*` ids. Runtime smoke still depends on local `google.genai` availability. |
 | `[ ]` | `openh/providers/__init__.py` | provider registry surfaces | Not yet fully audited. |
 
 ## 6. UI / Desktop Runtime
@@ -104,17 +104,17 @@ These are not strict engine parity targets, but they still matter for behavior a
 These are the main open deltas after the reviewed files above:
 
 1. Coordinator / managed-orchestrator prompt and runtime behavior still need another exact pass.
-2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges.
+2. OpenAI/Gemini provider behavior is closer, but still needs more exact parity for unsupported-capability / provider-option edges and model-capability gating.
 3. Permission handler model is much closer, but still not a literal `PermissionManager` port.
 4. Plugin-discovered output styles are still incomplete.
-5. File-by-file audit is still missing for `webfetch.py`, `websearch.py`, `worktree.py`, and most of `flet_app/*`.
+5. File-by-file audit is still missing for most of `flet_app/*`, plus a deeper follow-up on some provider and memory edges.
 
 ## 8. Next audit order
 
 Recommended next line-by-line audit batches:
 
-1. `webfetch.py`, `websearch.py`, `worktree.py`
-2. `providers/openai.py`, `providers/gemini.py` edge-capability pass
-3. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
-4. `memdir.py`
-5. `providers/__init__.py`
+1. `flet_app/main.py` and `flet_app/widgets.py` consistency sweep
+2. `memdir.py`
+3. `providers/__init__.py`
+4. `settings.py`, `prompts.py`, `flet_app/settings_dialog.py`
+5. `providers/openai.py`, `providers/gemini.py` second-pass capability gating
