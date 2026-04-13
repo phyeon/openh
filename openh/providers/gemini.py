@@ -305,9 +305,14 @@ class GeminiProvider:
             candidates = getattr(chunk, "candidates", None) or []
             for cand in candidates:
                 finish_reason = getattr(cand, "finish_reason", None)
-                mapped_finish_reason = self._map_finish_reason(finish_reason)
-                if mapped_finish_reason != "end_turn" or finish_reason:
-                    stop_reason = mapped_finish_reason
+                # Reference google.rs:855-856: skip empty and UNSPECIFIED.
+                finish_reason_str = ""
+                if finish_reason is not None:
+                    finish_reason_str = (
+                        getattr(finish_reason, "name", None) or str(finish_reason)
+                    ).strip()
+                if finish_reason_str and finish_reason_str != "FINISH_REASON_UNSPECIFIED":
+                    stop_reason = self._map_finish_reason(finish_reason)
                 content = getattr(cand, "content", None)
                 if content is None:
                     continue
