@@ -421,12 +421,22 @@ class Agent:
 
             await self._post_usage_compaction(stop_reason)
 
-            # match stop { ... }  — lib.rs:1613-1957
+            # Dispatch on collected tool blocks first, then stop_reason.
+            # Provider edge cases (Anthropic missing message_delta, Gemini
+            # FINISH_REASON_UNSPECIFIED) can leave stop_reason as "end_turn"
+            # even when tool blocks were streamed.  Checking tool_uses first
+            # guarantees they are always executed.
+            if tool_uses:
+                max_tokens_recovery_count = 0
+                tool_results = await self._run_tool_uses(tool_uses)
+                self.session.append_tool_results(tool_results)
+                continue
+
             if stop_reason == "end_turn":
                 await self._maybe_trigger_auto_dream()
                 return
 
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 if max_tokens_recovery_count < self.MAX_TOKENS_RECOVERY_LIMIT:
                     max_tokens_recovery_count += 1
                     await self._emit(
@@ -444,21 +454,10 @@ class Agent:
                         include_in_model=True,
                     )
                     continue
-                # Recovery exhausted.
                 return
 
-            elif stop_reason == "tool_use":
-                max_tokens_recovery_count = 0
-                if not tool_uses:
-                    # Shouldn't happen but treat as end_turn.
-                    return
-                tool_results = await self._run_tool_uses(tool_uses)
-                self.session.append_tool_results(tool_results)
-                continue
-
-            else:
-                # "stop_sequence" / unknown — treat as end_turn.
-                return
+            # stop_sequence / unknown — treat as end_turn.
+            return
 
     @staticmethod
     def _tool_result_chars(block: Block) -> int:
