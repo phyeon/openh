@@ -230,18 +230,6 @@ class SettingsDialog:
                 result.append(ft.dropdown.Option(model))
             return result
 
-        self._provider_radio = ft.RadioGroup(
-            value=self.settings.active_provider,
-            content=ft.Row(
-                [
-                    ft.Radio(value="openai", label="OpenAI"),
-                    ft.Radio(value="anthropic", label="Anthropic"),
-                    ft.Radio(value="gemini", label="Gemini"),
-                ],
-                spacing=16,
-            ),
-        )
-
         self._openai_dropdown = ft.Dropdown(
             value=self.settings.openai_model,
             options=_model_options(OPENAI_MODELS, self.settings.openai_model),
@@ -274,9 +262,6 @@ class SettingsDialog:
 
         return _padded_column(
             [
-                _label("Active provider"),
-                self._provider_radio,
-                ft.Container(height=12),
                 self._openai_dropdown,
                 ft.Container(height=12),
                 self._anth_dropdown,
@@ -1346,7 +1331,6 @@ class SettingsDialog:
     # --------------------------------------------------------- commit
 
     def _commit_general_fields(self) -> None:
-        self.settings.active_provider = self._provider_radio.value or "anthropic"
         self.settings.openai_model = self._openai_dropdown.value or self.settings.openai_model
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
