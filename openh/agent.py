@@ -536,10 +536,10 @@ class Agent:
     async def _run_tool_uses(self, tool_uses: list[ToolUseBlock]) -> list[ToolResultBlock]:
         """Execute a batch of tool calls.
 
-        Read-only tools in the same batch run in parallel via asyncio.gather.
-        Destructive tools run sequentially in the order the model emitted them.
-        Results are returned in the original order so the conversation history
-        keeps its tool_use → tool_result pairing stable.
+        Mirrors the public streaming executor more closely:
+        phase 1 prepares hooks/permission decisions sequentially,
+        phase 2 executes all non-blocked tool bodies concurrently,
+        phase 3 emits results in original order.
         """
         import asyncio
         from .tools.base import ToolContext
@@ -549,36 +549,28 @@ class Agent:
             request_permission=self.permission_cb,
         )
 
-        results: list[ToolResultBlock | None] = [None] * len(tool_uses)
+        prepared: list[tuple[ToolUseBlock, Any | None, ToolResultBlock | None]] = []
+        for use in tool_uses:
+            tool, blocked = await self._prepare_tool_use(use, ctx)
+            prepared.append((use, tool, blocked))
 
-        parallel_indices: list[int] = []
-        sequential_indices: list[int] = []
-        for i, use in enumerate(tool_uses):
-            tool = self._find_tool(use.name)
-            if tool is not None and tool.is_read_only:
-                parallel_indices.append(i)
-            else:
-                sequential_indices.append(i)
-
-        if parallel_indices:
-            coros = [self._execute_one(tool_uses[i], ctx) for i in parallel_indices]
-            parallel_results = await asyncio.gather(*coros, return_exceptions=False)
-            for i, block in zip(parallel_indices, parallel_results):
-                results[i] = block
-
-        for i in sequential_indices:
-            results[i] = await self._execute_one(tool_uses[i], ctx)
-
-        # Emit tool result events in original order so the UI stays coherent
-        for i, use in enumerate(tool_uses):
-            block = results[i]
-            if block is None:
-                block = ToolResultBlock(
+        exec_futures = []
+        for use, tool, blocked in prepared:
+            if blocked is not None or tool is None:
+                ready = blocked or ToolResultBlock(
                     tool_use_id=use.id,
                     content="internal: missing result",
                     is_error=True,
                 )
-                results[i] = block
+                exec_futures.append(asyncio.sleep(0, result=ready))
+            else:
+                exec_futures.append(self._execute_tool_body(use, tool, ctx))
+
+        results = await asyncio.gather(*exec_futures, return_exceptions=False)
+
+        # Emit tool result events in original order so the UI stays coherent
+        for (use, _tool, _blocked), block in zip(prepared, results):
+            await self._post_tool_use(use, block)
             await self._emit(
                 ToolResultEvent(
                     tool_use_id=use.id,
@@ -588,17 +580,17 @@ class Agent:
                 )
             )
 
-        return [r for r in results if r is not None]
+        return list(results)
 
-    async def _execute_one(
+    async def _prepare_tool_use(
         self, use: ToolUseBlock, ctx
-    ) -> ToolResultBlock:
-        """Run one tool call end-to-end: hooks, permission, execution."""
+    ) -> tuple[Any | None, ToolResultBlock | None]:
+        """Run pre-hooks and permission checks before executing the tool body."""
         from .hooks import fire_hook
 
         tool = self._find_tool(use.name)
         if tool is None:
-            return ToolResultBlock(
+            return None, ToolResultBlock(
                 tool_use_id=use.id,
                 content=f"unknown tool: {use.name}",
                 is_error=True,
@@ -612,7 +604,7 @@ class Agent:
                     {"tool_name": use.name, "input": use.input},
                 )
                 if result and result.block:
-                    return ToolResultBlock(
+                    return tool, ToolResultBlock(
                         tool_use_id=use.id,
                         content=f"blocked by PreToolUse hook: {result.stderr or result.stdout}",
                         is_error=True,
@@ -640,7 +632,7 @@ class Agent:
                         "reason": perm_reason or "permission denied",
                     }
                 )
-            return ToolResultBlock(
+            return tool, ToolResultBlock(
                 tool_use_id=use.id,
                 content=perm_reason or "permission denied",
                 is_error=True,
@@ -656,7 +648,7 @@ class Agent:
                         "reason": decision.reason or "permission denied",
                     }
                 )
-            return ToolResultBlock(
+            return tool, ToolResultBlock(
                 tool_use_id=use.id,
                 content=f"permission denied: {decision.reason or 'no reason given'}",
                 is_error=True,
@@ -677,12 +669,18 @@ class Agent:
                             "reason": perm_reason or "user denied permission",
                         }
                     )
-                return ToolResultBlock(
+                return tool, ToolResultBlock(
                     tool_use_id=use.id,
                     content="user denied permission",
                     is_error=True,
                 )
 
+        return tool, None
+
+    async def _execute_tool_body(
+        self, use: ToolUseBlock, tool, ctx
+    ) -> ToolResultBlock:
+        """Execute only the tool body after preflight has succeeded."""
         try:
             output = await tool.run(use.input, ctx)
             content = output if isinstance(output, str) else str(output)
@@ -697,14 +695,22 @@ class Agent:
                 is_error=True,
             )
 
+        return block
+
+    async def _post_tool_use(self, use: ToolUseBlock, block: ToolResultBlock) -> None:
+        from .hooks import fire_hook
+
         if self._hooks:
             try:
                 await fire_hook(
                     self._hooks,
                     "PostToolUse",
-                    {"tool_name": use.name, "input": use.input},
+                    {
+                        "tool_name": use.name,
+                        "input": use.input,
+                        "output": block.content,
+                        "is_error": block.is_error,
+                    },
                 )
             except Exception:
                 pass
-
-        return block
