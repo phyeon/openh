@@ -141,6 +141,7 @@ class SettingsDialog:
             ("Models", self._tab_models),
             ("API keys", self._tab_keys),
             ("Appearance", self._tab_appearance),
+            ("Identity", self._tab_identity),
             ("Tokens", self._tab_tokens),
             ("Agents", self._tab_agents),
             ("Prompt", self._tab_prompt),
@@ -367,6 +368,70 @@ class SettingsDialog:
         )
 
     # --------------------------------------------------------------- tab 3
+
+    def _tab_identity(self) -> ft.Control:
+        self._user_profile_toggle = ft.Switch(
+            value=bool(getattr(self.settings, "user_profile_enabled", False)),
+            label="Apply global user profile",
+            active_color=theme.ACCENT,
+            label_text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+        )
+        self._user_profile_field = ft.TextField(
+            value=str(getattr(self.settings, "user_profile_text", "") or ""),
+            multiline=True,
+            min_lines=4,
+            max_lines=7,
+            label="Who I am / how I work",
+            hint_text="내가 누군지, 주로 뭘 하는지, 답변 선호, 금지사항…",
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
+        )
+        self._agent_persona_toggle = ft.Switch(
+            value=bool(getattr(self.settings, "agent_persona_enabled", False)),
+            label="Apply global agent persona",
+            active_color=theme.ACCENT,
+            label_text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+        )
+        self._agent_persona_field = ft.TextField(
+            value=str(getattr(self.settings, "agent_persona_text", "") or ""),
+            multiline=True,
+            min_lines=4,
+            max_lines=7,
+            label="Agent persona",
+            hint_text="말투, 태도, 설명 깊이, 작업 습관…",
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
+        )
+        return _padded_column(
+            [
+                _label("Global identity"),
+                self._user_profile_toggle,
+                ft.Container(height=8),
+                self._user_profile_field,
+                ft.Container(height=14),
+                _hint(
+                    "모든 세션에 공통으로 실리는 사용자 정보야. 네 배경, 선호 답변 방식, "
+                    "싫어하는 것 같은 고정 문맥을 넣으면 돼."
+                ),
+                ft.Container(height=20),
+                _label("Global persona"),
+                self._agent_persona_toggle,
+                ft.Container(height=8),
+                self._agent_persona_field,
+                ft.Container(height=14),
+                _hint(
+                    "에이전트의 말투나 태도 같은 전역 페르소나야. 끄면 즉시 prompt에서 빠져."
+                ),
+            ]
+        )
+
+    # --------------------------------------------------------------- tab 4
 
     def _tab_tokens(self) -> ft.Control:
         self._max_tokens_field = ft.TextField(
@@ -1270,6 +1335,10 @@ class SettingsDialog:
         )
         self.settings.active_prompt = self._default_preset_name or prompts.BUILTIN_NAME
         self.settings.output_style = self._output_style_dropdown.value or "default"
+        self.settings.user_profile_enabled = bool(self._user_profile_toggle.value)
+        self.settings.user_profile_text = self._user_profile_field.value or ""
+        self.settings.agent_persona_enabled = bool(self._agent_persona_toggle.value)
+        self.settings.agent_persona_text = self._agent_persona_field.value or ""
 
         try:
             self.settings.max_output_tokens = int(self._max_tokens_field.value or 0) or 8192

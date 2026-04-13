@@ -43,6 +43,7 @@ TOOL_USE_GUIDELINES = """
 - For searches, prefer Grep over `grep`; prefer Glob over `find`
 - Parallelize independent tool calls in a single response
 - For file edits: always read the file first, then make targeted edits
+- Use Sleep instead of `Bash(sleep ...)` for waits or polling delays
 - Bash commands timeout after 2 minutes; use background mode for long operations
 """.strip()
 
@@ -173,6 +174,8 @@ class SystemPromptOptions:
     memory_content: str = ""
     custom_system_prompt: str | None = None
     append_system_prompt: str | None = None
+    user_profile: str | None = None
+    agent_persona: str | None = None
     replace_system_prompt: bool = False
     coordinator_mode: bool = False
     skip_env_info: bool = False
@@ -295,6 +298,22 @@ def build_system_prompt(
                 f"<memory>\n{opts.memory_content.strip()}\n</memory>",
             )
         )
+    user_profile = (opts.user_profile or "").strip()
+    if user_profile:
+        dynamic_sections.append(
+            _dynamic_section(
+                "user_profile",
+                f"<user_profile>\n{user_profile}\n</user_profile>",
+            )
+        )
+    agent_persona = (opts.agent_persona or "").strip()
+    if agent_persona:
+        dynamic_sections.append(
+            _dynamic_section(
+                "agent_persona",
+                f"<agent_persona>\n{agent_persona}\n</agent_persona>",
+            )
+        )
     append_system_prompt = (opts.append_system_prompt or "").strip()
     if append_system_prompt:
         dynamic_sections.append(
@@ -322,6 +341,8 @@ def build_runtime_system_prompt(
     is_non_interactive: bool = False,
     prefix: str | SystemPromptPrefix | None = None,
     coordinator_mode: bool = False,
+    user_profile: str = "",
+    agent_persona: str = "",
 ) -> str:
     """Compatibility wrapper around the PB/fresh-style prompt builder."""
     loaded_prompt = (default_prompt or "").strip()
@@ -355,6 +376,8 @@ def build_runtime_system_prompt(
         memory_content=build_memory_content(cwd),
         custom_system_prompt="\n\n".join(part for part in custom_parts if part) or None,
         append_system_prompt=(append_system_prompt or "").strip() or None,
+        user_profile=(user_profile or "").strip() or None,
+        agent_persona=(agent_persona or "").strip() or None,
         replace_system_prompt=replace_system_prompt,
         coordinator_mode=coordinator_mode,
         skip_env_info=skip_env_info,

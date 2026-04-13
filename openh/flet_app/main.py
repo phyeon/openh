@@ -735,6 +735,16 @@ class OpenHApp:
             custom_output_style_prompt=getattr(self.session, "output_style_prompt", ""),
             is_non_interactive=bool(getattr(self.session, "is_non_interactive", False)),
             coordinator_mode=is_coordinator_mode(),
+            user_profile=(
+                str(getattr(self.settings, "user_profile_text", "") or "").strip()
+                if bool(getattr(self.settings, "user_profile_enabled", False))
+                else ""
+            ),
+            agent_persona=(
+                str(getattr(self.settings, "agent_persona_text", "") or "").strip()
+                if bool(getattr(self.settings, "agent_persona_enabled", False))
+                else ""
+            ),
         )
 
     def _set_status_note(self, text: str, timeout_s: float = 2.8) -> None:

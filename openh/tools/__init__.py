@@ -14,6 +14,7 @@ from .planmode import EnterPlanModeTool, ExitPlanModeTool
 from .read import ReadTool
 from .send_message import SendMessageTool
 from .skill_tool import SkillTool
+from .sleep_tool import SleepTool
 from .task_tools import (
     TaskCreateTool,
     TaskGetTool,
@@ -52,6 +53,7 @@ __all__ = [
     "ExitPlanModeTool",
     "NotebookEditTool",
     "SkillTool",
+    "SleepTool",
     "MemorySaveTool",
     "MemoryListTool",
     "MemoryDeleteTool",
@@ -95,6 +97,7 @@ def default_tools() -> list[Tool]:
         EnterPlanModeTool(),
         ExitPlanModeTool(),
         SkillTool(),
+        SleepTool(),
         MemorySaveTool(),
         MemoryListTool(),
         MemoryDeleteTool(),

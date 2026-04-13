@@ -26,6 +26,7 @@ _TOOL_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Read": ("read", "file", "content", "lines", "pdf", "image"),
     "SendMessage": ("message", "agent", "status", "follow-up", "resume"),
     "Skill": ("skill", "template", "prompt", "command", "workflow"),
+    "Sleep": ("sleep", "wait", "delay", "pause", "background"),
     "TaskCreate": ("task", "create", "track", "board", "delegate", "work"),
     "TaskGet": ("task", "get", "status", "details"),
     "TaskUpdate": ("task", "update", "status", "progress"),

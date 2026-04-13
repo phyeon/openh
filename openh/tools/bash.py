@@ -30,6 +30,12 @@ MAX_OUTPUT_CHARS = 100_000  # CC uses 100K
 import platform as _platform
 import shutil as _shutil
 
+
+_BLOCKED_SLEEP_RE = re.compile(
+    r"^\s*(?:\(\s*)?(?:sleep)\s+([0-9]+(?:\.[0-9]+)?)\b",
+    re.IGNORECASE,
+)
+
 def _find_bash() -> str:
     """Return the best bash executable path.
 
@@ -119,6 +125,23 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _detect_blocked_sleep_pattern(command: str) -> str | None:
+    match = _BLOCKED_SLEEP_RE.match(str(command or ""))
+    if match is None:
+        return None
+    try:
+        seconds = float(match.group(1))
+    except Exception:
+        return None
+    if seconds < 2:
+        return None
+    ms = int(seconds * 1000)
+    return (
+        "error: use the Sleep tool instead of Bash(sleep ...). "
+        f"Suggested call: Sleep {{\"ms\": {ms}}}"
+    )
+
+
 def _subprocess_session_kwargs() -> dict[str, Any]:
     if os.name == "nt":
         flags = getattr(_subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -189,6 +212,7 @@ class BashTool(Tool):
         "Executes a given bash command and returns its output. "
         "IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, grep, or find "
         "— use the dedicated Read, Edit, Glob, and Grep tools instead. "
+        "Use Sleep instead of Bash(sleep ...) when you only need to wait. "
         "Never use it for destructive git commands, skipping hooks, or bypassing safety checks "
         "unless the user explicitly asks. "
         "The working directory and environment variables persist between commands. "
@@ -255,6 +279,9 @@ class BashTool(Tool):
         command = input.get("command")
         if not command:
             return "error: command is required"
+        blocked_sleep = _detect_blocked_sleep_pattern(str(command))
+        if blocked_sleep:
+            return blocked_sleep
         background = bool(input.get("run_in_background"))
         description = (input.get("description") or "").strip()
 

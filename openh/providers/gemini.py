@@ -179,10 +179,31 @@ class GeminiProvider:
     ) -> AsyncIterator[StreamEvent]:
         api_model = self._normalize_model_name(self.model)
         contents = self._to_gemini_contents(messages)
+        extra_options = dict(provider_options or {})
         config_kwargs: dict[str, Any] = {"system_instruction": system}
         gemini_tools = self._to_gemini_tools(tools)
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
+            allowed_function_names = [
+                str(tool.get("name") or "").strip()
+                for tool in tools
+                if str(tool.get("name") or "").strip()
+            ]
+            config_kwargs["tool_config"] = extra_options.pop(
+                "tool_config",
+                gtypes.ToolConfig(
+                    function_calling_config=gtypes.FunctionCallingConfig(
+                        mode=gtypes.FunctionCallingConfigMode.AUTO,
+                        allowed_function_names=allowed_function_names or None,
+                        stream_function_call_arguments=True,
+                    ),
+                    include_server_side_tool_invocations=False,
+                ),
+            )
+            config_kwargs["automatic_function_calling"] = extra_options.pop(
+                "automatic_function_calling",
+                gtypes.AutomaticFunctionCallingConfig(disable=True),
+            )
         config_kwargs["max_output_tokens"] = int(max_tokens or MAX_OUTPUT_TOKENS)
         if temperature is not None:
             config_kwargs["temperature"] = float(temperature)
@@ -210,8 +231,8 @@ class GeminiProvider:
                     include_thoughts=True,
                     thinking_budget=budget,
                 )
-        if isinstance(provider_options, dict):
-            for key, value in provider_options.items():
+        if extra_options:
+            for key, value in extra_options.items():
                 if key not in config_kwargs and value is not None:
                     config_kwargs[key] = value
 

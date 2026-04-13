@@ -51,6 +51,10 @@ _KNOWN_KEYS = {
     "color_preset",
     "font_preset",
     "font_size",
+    "user_profile_enabled",
+    "user_profile_text",
+    "agent_persona_enabled",
+    "agent_persona_text",
     "sidebar_width",
     "window_width",
     "window_height",
@@ -76,6 +80,10 @@ class Settings:
     color_preset: str = "Charcoal"
     font_preset: str = "System (Sans)"
     font_size: int = 16
+    user_profile_enabled: bool = False
+    user_profile_text: str = ""
+    agent_persona_enabled: bool = False
+    agent_persona_text: str = ""
     sidebar_width: int = 280
     window_width: int = 1080
     window_height: int = 820
@@ -136,6 +144,10 @@ def normalize_settings(s: Settings) -> Settings:
     s.theme_mode = theme_mode if theme_mode in {"dark", "light"} else "dark"
     s.color_preset = _coerce_str(s.color_preset, "Charcoal")
     s.font_preset = _coerce_str(s.font_preset, "System (Sans)")
+    s.user_profile_enabled = _coerce_bool(s.user_profile_enabled, False)
+    s.user_profile_text = _coerce_str(s.user_profile_text, "")
+    s.agent_persona_enabled = _coerce_bool(s.agent_persona_enabled, False)
+    s.agent_persona_text = _coerce_str(s.agent_persona_text, "")
 
     s.max_output_tokens = _coerce_int(s.max_output_tokens, 8192, minimum=256)
     s.auto_compact_threshold = _coerce_int(s.auto_compact_threshold, 80_000, minimum=0)

@@ -20,13 +20,23 @@ from ..messages import (
 from ..system_prompt import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
 from .base import ToolSchema
 
+ANTHROPIC_BETA_HEADER = (
+    "interleaved-thinking-2025-05-14,"
+    "token-efficient-tools-2025-02-19,"
+    "files-api-2025-04-14,"
+    "effort-2025-11-24"
+)
+
 
 class AnthropicProvider:
     name: str = "anthropic"
 
     def __init__(self, api_key: str, model: str) -> None:
         self.model = model
-        self._client = AsyncAnthropic(api_key=api_key)
+        self._client = AsyncAnthropic(
+            api_key=api_key,
+            default_headers={"anthropic-beta": ANTHROPIC_BETA_HEADER},
+        )
 
     async def stream(
         self,
@@ -50,6 +60,10 @@ class AnthropicProvider:
         kwargs["system"] = self._build_system_blocks(system)
         if tools:
             kwargs["tools"] = list(tools)
+            kwargs["tool_choice"] = {
+                "type": "auto",
+                "disable_parallel_tool_use": False,
+            }
         if temperature is not None:
             kwargs["temperature"] = float(temperature)
         if top_p is not None:

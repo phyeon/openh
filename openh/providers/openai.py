@@ -189,6 +189,7 @@ class OpenAIProvider:
                 f"'{self.model}' requires the OpenAI Responses API which is not yet fully "
                 "implemented. Use gpt-4o or gpt-4o-mini for now."
             )
+        extra_options = dict(provider_options or {})
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._to_openai_messages(messages, system),
@@ -205,8 +206,15 @@ class OpenAIProvider:
         openai_tools = self._to_openai_tools(tools)
         if openai_tools is not None:
             payload["tools"] = openai_tools
-        if isinstance(provider_options, dict):
-            for key, value in provider_options.items():
+            # Keep OpenAI on the same "auto + parallel" baseline as the
+            # other providers so the shared agent loop sees the same kind of
+            # tool batches whenever the model supports them.
+            payload["tool_choice"] = extra_options.pop("tool_choice", "auto")
+            payload["parallel_tool_calls"] = bool(
+                extra_options.pop("parallel_tool_calls", True)
+            )
+        if extra_options:
+            for key, value in extra_options.items():
                 if key not in payload and value is not None:
                     payload[key] = value
 
