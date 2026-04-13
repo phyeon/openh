@@ -1674,12 +1674,15 @@ class OpenHApp:
 
         def apply(e):
             new_text = (field.value or "").strip()
-            if new_text == prompts_mod.resolve_active(self.settings.active_prompt):
-                # Same as global — clear override
+            active_name = self.session.prompt_preset or self.settings.active_prompt or ""
+            if new_text == prompts_mod.resolve_active(active_name):
+                # Same as active preset — clear override
                 self.session.prompt_override = ""
-                self.session.prompt_preset = ""
             else:
                 self.session.prompt_override = new_text
+                # Keep the preset name so the pill shows it, not "default"
+                if not self.session.prompt_preset and active_name:
+                    self.session.prompt_preset = active_name
             self.page.pop_dialog()
             self._refresh_top_bar()
 
