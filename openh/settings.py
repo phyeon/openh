@@ -55,6 +55,7 @@ _KNOWN_KEYS = {
     "user_profile_text",
     "agent_persona_enabled",
     "agent_persona_text",
+    "custom_prefix",
     "sidebar_width",
     "window_width",
     "window_height",
@@ -84,6 +85,7 @@ class Settings:
     user_profile_text: str = ""
     agent_persona_enabled: bool = False
     agent_persona_text: str = ""
+    custom_prefix: str = ""  # overrides "You are Claude Code..." attribution
     sidebar_width: int = 280
     window_width: int = 1080
     window_height: int = 820

@@ -745,6 +745,7 @@ class OpenHApp:
                 if bool(getattr(self.settings, "agent_persona_enabled", False))
                 else ""
             ),
+            custom_prefix=str(getattr(self.settings, "custom_prefix", "") or "").strip(),
         )
 
     def _set_status_note(self, text: str, timeout_s: float = 2.8) -> None:

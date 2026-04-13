@@ -176,6 +176,7 @@ class SystemPromptOptions:
     append_system_prompt: str | None = None
     user_profile: str | None = None
     agent_persona: str | None = None
+    custom_prefix: str | None = None  # overrides "You are Claude Code..." attribution
     replace_system_prompt: bool = False
     coordinator_mode: bool = False
     skip_env_info: bool = False
@@ -245,8 +246,14 @@ def build_system_prompt(
         has_append_system_prompt=opts.has_append_system_prompt,
     )
 
+    # Custom prefix overrides the default attribution line.
+    prefix_text = (
+        opts.custom_prefix if hasattr(opts, "custom_prefix") and opts.custom_prefix
+        else prefix.attribution_text()
+    )
+
     static_sections: list[SystemPromptSection] = [
-        _cached_section(f"prefix:{prefix.value}", prefix.attribution_text()),
+        _cached_section(f"prefix:{prefix.value}", prefix_text),
         _cached_section("core_capabilities", CORE_CAPABILITIES),
         _cached_section("tool_use_guidelines", TOOL_USE_GUIDELINES),
         _cached_section("actions_section", ACTIONS_SECTION),
@@ -340,6 +347,7 @@ def build_runtime_system_prompt(
     custom_output_style_prompt: str = "",
     is_non_interactive: bool = False,
     prefix: str | SystemPromptPrefix | None = None,
+    custom_prefix: str = "",
     coordinator_mode: bool = False,
     user_profile: str = "",
     agent_persona: str = "",
@@ -378,6 +386,7 @@ def build_runtime_system_prompt(
         append_system_prompt=(append_system_prompt or "").strip() or None,
         user_profile=(user_profile or "").strip() or None,
         agent_persona=(agent_persona or "").strip() or None,
+        custom_prefix=(custom_prefix or "").strip() or None,
         replace_system_prompt=replace_system_prompt,
         coordinator_mode=coordinator_mode,
         skip_env_info=skip_env_info,
