@@ -73,6 +73,7 @@ class GeminiProvider:
             or "unsupported" in lowered
             or "unknown field" in lowered
             or "invalid argument" in lowered
+            or "invalid_argument" in lowered
         )
 
     def _to_gemini_contents(self, messages: list[Message]) -> list[gtypes.Content]:
@@ -194,17 +195,11 @@ class GeminiProvider:
         gemini_tools = self._to_gemini_tools(tools)
         if gemini_tools is not None:
             config_kwargs["tools"] = gemini_tools
-            allowed_function_names = [
-                str(tool.get("name") or "").strip()
-                for tool in tools
-                if str(tool.get("name") or "").strip()
-            ]
             config_kwargs["tool_config"] = extra_options.pop(
                 "tool_config",
                 gtypes.ToolConfig(
                     function_calling_config=gtypes.FunctionCallingConfig(
                         mode=gtypes.FunctionCallingConfigMode.AUTO,
-                        allowed_function_names=allowed_function_names or None,
                     ),
                     include_server_side_tool_invocations=False,
                 ),
