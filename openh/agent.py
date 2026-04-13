@@ -422,7 +422,14 @@ class Agent:
             await self._post_usage_compaction(stop_reason)
 
             # Match on stop_reason (mirrors reference match stop { ... }).
-            if stop_reason == "end_turn":
+            # Safety: if tool blocks were collected, always execute them
+            # regardless of stop_reason — the model expects tool_results back
+            # and skipping them would corrupt the conversation state.
+            if tool_uses:
+                max_tokens_recovery_count = 0
+                tool_results = await self._run_tool_uses(tool_uses)
+                self.session.append_tool_results(tool_results)
+            elif stop_reason == "end_turn":
                 await self._maybe_trigger_auto_dream()
                 return
             elif stop_reason == "max_tokens":
@@ -445,15 +452,8 @@ class Agent:
                     continue
                 # Recovery exhausted — surface partial response.
                 return
-            elif stop_reason == "tool_use":
-                max_tokens_recovery_count = 0
-                if not tool_uses:
-                    # Shouldn't happen but treat as end_turn.
-                    return
-                tool_results = await self._run_tool_uses(tool_uses)
-                self.session.append_tool_results(tool_results)
             else:
-                # Unknown stop reason — treat as end_turn.
+                # Unknown stop reason without tool blocks — treat as end_turn.
                 return
 
     @staticmethod
