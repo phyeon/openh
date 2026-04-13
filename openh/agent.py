@@ -294,13 +294,13 @@ class Agent:
         run_start_message_count = len(getattr(self.session, "messages", []))
         max_tokens_recovery_count = 0
         stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
-        effective_max_turns = max(
-            1,
-            int(getattr(self.session, "max_turns", self.MAX_TOOL_LOOP_ITERATIONS) or self.MAX_TOOL_LOOP_ITERATIONS),
-        )
+        raw_max = int(getattr(self.session, "max_turns", 0) or 0)
+        # 0 = unlimited (official default). Positive = explicit cap.
+        # Safety fallback at MAX_TOOL_LOOP_ITERATIONS only when no explicit cap.
+        effective_max_turns = raw_max if raw_max > 0 else self.MAX_TOOL_LOOP_ITERATIONS
         while True:
             turns += 1
-            if turns > effective_max_turns:
+            if raw_max > 0 and turns > effective_max_turns:
                 notice = f"Reached maximum turn limit ({effective_max_turns})."
                 await self._emit(StatusEvent(text=notice))
                 return

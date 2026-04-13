@@ -191,7 +191,7 @@ def _cmd_status(args: list[str], ctx: CommandContext) -> CommandResult:
         f"subagent_tokens: {subagent_tokens:,}",
         f"cost: ${s.total_estimated_cost_usd:.4f}",
         f"tools: {len(s.tools)}",
-        f"max_turns: {getattr(s, 'max_turns', 10)}",
+        f"max_turns: {getattr(s, 'max_turns', 0) or 'unlimited'}",
         f"session_id: {s.session_id}",
         f"title: {s.title or '(untitled)'}",
         f"output_style: {getattr(s, 'output_style', 'default')}",
@@ -216,13 +216,14 @@ def _cmd_compact(args: list[str], ctx: CommandContext) -> CommandResult:
 
 
 def _cmd_max_turns(args: list[str], ctx: CommandContext) -> CommandResult:
-    current = max(1, int(getattr(ctx.session, "max_turns", 10) or 10))
+    current = int(getattr(ctx.session, "max_turns", 0) or 0)
+    label = str(current) if current > 0 else "unlimited"
     if not args:
-        return CommandResult(handled=True, output=f"current max_turns: {current}")
+        return CommandResult(handled=True, output=f"current max_turns: {label}")
     raw = (args[0] or "").strip().lower()
-    if raw in {"default", "reset"}:
-        ctx.session.max_turns = 10
-        return CommandResult(handled=True, output="max_turns reset to 10")
+    if raw in {"default", "reset", "unlimited", "0"}:
+        ctx.session.max_turns = 0
+        return CommandResult(handled=True, output="max_turns reset to unlimited")
     try:
         value = int(raw)
     except Exception:

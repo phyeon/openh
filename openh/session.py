@@ -51,7 +51,7 @@ class AgentSession:
     append_system_prompt: str = ""
     replace_system_prompt: bool = False
     is_non_interactive: bool = False
-    max_turns: int = 200  # headless default is 10; interactive uses higher cap
+    max_turns: int = 0  # 0 = unlimited (official Claude Code default); sub-agents set explicit limits
     tool_result_budget: int = 50_000
     max_budget_usd: float | None = None
     stream_stall_retries: int = 2
