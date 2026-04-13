@@ -65,6 +65,16 @@ class GeminiProvider:
             return f"call_{base}"
         return f"call_{base}_{occurrence + 1}"
 
+    @staticmethod
+    def _looks_like_unsupported_optional_config(error_text: str) -> bool:
+        lowered = str(error_text or "").lower()
+        return (
+            "not supported" in lowered
+            or "unsupported" in lowered
+            or "unknown field" in lowered
+            or "invalid argument" in lowered
+        )
+
     def _to_gemini_contents(self, messages: list[Message]) -> list[gtypes.Content]:
         """Translate canonical Anthropic-format messages into Gemini Content list.
 
@@ -195,7 +205,6 @@ class GeminiProvider:
                     function_calling_config=gtypes.FunctionCallingConfig(
                         mode=gtypes.FunctionCallingConfigMode.AUTO,
                         allowed_function_names=allowed_function_names or None,
-                        stream_function_call_arguments=True,
                     ),
                     include_server_side_tool_invocations=False,
                 ),
@@ -236,8 +245,6 @@ class GeminiProvider:
                 if key not in config_kwargs and value is not None:
                     config_kwargs[key] = value
 
-        config = gtypes.GenerateContentConfig(**config_kwargs)
-
         in_tokens = 0
         out_tokens = 0
         stop_reason = "end_turn"
@@ -249,21 +256,47 @@ class GeminiProvider:
         # Retry on transient errors (503, 429, etc.)
         import asyncio as _aio
         stream = None
-        for _attempt in range(3):
-            try:
-                stream = await self._client.aio.models.generate_content_stream(
-                    model=api_model,
-                    contents=contents,
-                    config=config,
-                )
+        config_variants: list[dict[str, Any]] = [dict(config_kwargs)]
+        if "automatic_function_calling" in config_kwargs:
+            relaxed = dict(config_kwargs)
+            relaxed.pop("automatic_function_calling", None)
+            config_variants.append(relaxed)
+        if "tool_config" in config_kwargs:
+            fallback = dict(config_kwargs)
+            fallback.pop("automatic_function_calling", None)
+            fallback.pop("tool_config", None)
+            config_variants.append(fallback)
+
+        last_exc: Exception | None = None
+        for variant in config_variants:
+            config = gtypes.GenerateContentConfig(**variant)
+            for _attempt in range(3):
+                try:
+                    stream = await self._client.aio.models.generate_content_stream(
+                        model=api_model,
+                        contents=contents,
+                        config=config,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    err_str = str(exc)
+                    if _attempt < 2 and (
+                        "503" in err_str
+                        or "429" in err_str
+                        or "UNAVAILABLE" in err_str
+                        or "overloaded" in err_str.lower()
+                    ):
+                        await _aio.sleep(2 ** (_attempt + 1))
+                        continue
+                    if self._looks_like_unsupported_optional_config(err_str):
+                        break
+                    raise RuntimeError(f"Gemini request failed: {exc}") from exc
+            if stream is not None:
                 break
-            except Exception as exc:  # noqa: BLE001
-                err_str = str(exc)
-                if _attempt < 2 and ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "overloaded" in err_str.lower()):
-                    await _aio.sleep(2 ** (_attempt + 1))
-                    continue
-                raise RuntimeError(f"Gemini request failed: {exc}") from exc
         if stream is None:
+            if last_exc is not None:
+                raise RuntimeError(f"Gemini request failed: {last_exc}") from last_exc
             raise RuntimeError("Gemini request failed: stream could not be created")
 
         async for chunk in stream:
