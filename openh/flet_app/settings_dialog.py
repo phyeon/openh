@@ -1004,6 +1004,20 @@ class SettingsDialog:
         )
         self._refresh_default_preset_controls()
 
+        # Prefix field
+        initial_prefix = prompts.resolve_active_prefix(self._active_preset_name)
+        self._prefix_field = ft.TextField(
+            value=initial_prefix,
+            multiline=False,
+            label="Prefix (첫 줄 — 비우면 기본 'You are Claude Code...')",
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            hint_text="예: 나는 유리나, 주현이의 코딩 파트너.",
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
+            read_only=self._is_builtin_selected(),
+        )
+
         # Editor
         initial = prompts.resolve_active(self._active_preset_name)
         self._prompt_editor = ft.TextField(
@@ -1096,6 +1110,8 @@ class SettingsDialog:
                     vertical_alignment=ft.CrossAxisAlignment.END,
                 ),
                 ft.Container(height=10),
+                self._prefix_field,
+                ft.Container(height=8),
                 self._prompt_editor,
                 ft.Container(height=10),
                 self._name_field,
@@ -1123,13 +1139,17 @@ class SettingsDialog:
         name = self._preset_dropdown.value or prompts.BUILTIN_NAME
         self._active_preset_name = name
         self._prompt_editor.value = prompts.resolve_active(name)
-        self._prompt_editor.read_only = self._is_builtin_selected()
+        self._prefix_field.value = prompts.resolve_active_prefix(name)
+        is_builtin = self._is_builtin_selected()
+        self._prompt_editor.read_only = is_builtin
+        self._prefix_field.read_only = is_builtin
         self._prompt_dirty = False
         self._name_field.value = ""
         self._prompt_feedback.value = ""
         self._refresh_default_preset_controls()
         try:
             self._prompt_editor.update()
+            self._prefix_field.update()
             self._name_field.update()
             self._prompt_feedback.update()
         except Exception:
@@ -1260,8 +1280,9 @@ class SettingsDialog:
                 except Exception:
                     pass
                 return
+        prefix = (self._prefix_field.value or "").strip()
         try:
-            preset = prompts.save_preset(name, text)
+            preset = prompts.save_preset(name, text, prefix=prefix)
         except ValueError as exc:
             self._prompt_feedback.value = f"error: {exc}"
             try:

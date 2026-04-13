@@ -76,9 +76,12 @@ def _decode_preset_document(path: Path, content: str) -> Preset:
     )
 
 
-def _encode_preset_document(name: str, text: str) -> str:
+def _encode_preset_document(name: str, text: str, prefix: str = "") -> str:
     body = str(text or "")
-    return f"<!-- prompt-name: {name.strip()} -->\n\n{body}"
+    header = f"<!-- prompt-name: {name.strip()} -->"
+    if prefix.strip():
+        header += f"\n<!-- prefix: {prefix.strip()} -->"
+    return f"{header}\n\n{body}"
 
 
 def builtin() -> Preset:
@@ -125,7 +128,7 @@ def get_preset(name: str) -> Preset | None:
     return None
 
 
-def save_preset(name: str, text: str) -> Preset:
+def save_preset(name: str, text: str, prefix: str = "") -> Preset:
     """Create or overwrite a named preset. Cannot target the built-in."""
     clean_name = name.strip()
     if clean_name.lower() == BUILTIN_NAME:
@@ -135,13 +138,14 @@ def save_preset(name: str, text: str) -> Preset:
     ensure_dir()
     existing = get_preset(clean_name)
     path = existing.path if existing and existing.path is not None else _path_for(clean_name)
-    path.write_text(_encode_preset_document(clean_name, text), encoding="utf-8")
+    path.write_text(_encode_preset_document(clean_name, text, prefix=prefix), encoding="utf-8")
     return Preset(
         slug=path.stem,
         name=clean_name,
         text=text,
         is_builtin=False,
         path=path,
+        prefix=prefix,
     )
 
 
