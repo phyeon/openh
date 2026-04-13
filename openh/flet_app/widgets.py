@@ -42,6 +42,7 @@ def sidebar(
     on_delete: Callable[[str], None],
     on_star: Callable[[str], None] | None = None,
     on_hide: Callable[[str], None] | None = None,
+    on_toggle_hidden: Callable[[], None] | None = None,
     show_hidden: bool = False,
     user_label: str = "openh",
     width: int = theme.SIDEBAR_WIDTH,
@@ -208,6 +209,34 @@ def sidebar(
         ft.Container(content=new_chat_btn, padding=ft.padding.only(left=8, top=8, bottom=4)),
     ]
 
+    # Count hidden sessions
+    hidden_count = sum(
+        1
+        for items in groups.values()
+        for item in items
+        if len(item) > 4 and item[4]
+    )
+
+    bottom_section: list[ft.Control] = []
+    if hidden_count > 0 or show_hidden:
+        toggle_label = f"Hide hidden ({hidden_count})" if show_hidden else f"Show hidden ({hidden_count})"
+        toggle_icon = ft.Icons.VISIBILITY_OFF if show_hidden else ft.Icons.VISIBILITY
+        bottom_section.append(
+            ft.Container(
+                content=ft.TextButton(
+                    content=ft.Row(
+                        [
+                            ft.Icon(toggle_icon, size=14, color=theme.TEXT_TERTIARY),
+                            ft.Text(toggle_label, size=11, color=theme.TEXT_TERTIARY),
+                        ],
+                        spacing=4,
+                    ),
+                    on_click=lambda _: on_toggle_hidden() if on_toggle_hidden else None,
+                ),
+                padding=ft.padding.only(left=8, bottom=8),
+            )
+        )
+
     return ft.Container(
         width=width,
         bgcolor=theme.BG_SIDEBAR,
@@ -223,6 +252,7 @@ def sidebar(
                     ),
                     expand=True,
                 ),
+                *bottom_section,
             ],
             spacing=0,
             expand=True,

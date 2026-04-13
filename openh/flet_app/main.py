@@ -504,6 +504,7 @@ class OpenHApp:
                 on_delete=self._delete_session_by_id,
                 on_star=self._toggle_star,
                 on_hide=self._toggle_hide,
+                on_toggle_hidden=self._toggle_show_hidden,
                 show_hidden=getattr(self, "_show_hidden", False),
                 width=int(self._sidebar_width),
                 profiles=profiles,
@@ -3011,6 +3012,10 @@ class OpenHApp:
         new_val = not target.starred
         target.starred = new_val
         set_session_flag(session_id, starred=new_val)
+        self._refresh_sidebar()
+
+    def _toggle_show_hidden(self) -> None:
+        self._show_hidden = not getattr(self, "_show_hidden", False)
         self._refresh_sidebar()
 
     def _toggle_hide(self, session_id: str) -> None:
