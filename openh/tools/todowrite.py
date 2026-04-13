@@ -176,15 +176,37 @@ class TodoWriteTool(Tool):
         ctx.session.todos = normalized  # type: ignore[attr-defined]
         _save_todos(ctx.session.session_id, normalized)
 
-        # Validate that at most one is in_progress
-        in_progress = [t for t in normalized if t.get("status") == "in_progress"]
+        # Count by status (matches reference todo_write.rs output).
+        pending_count = sum(1 for t in normalized if t.get("status") == "pending")
+        in_progress_list = [t for t in normalized if t.get("status") == "in_progress"]
+        completed_count = sum(1 for t in normalized if t.get("status") == "completed")
         warn = ""
-        if len(in_progress) > 1:
-            warn = f" (warning: {len(in_progress)} items marked in_progress; should be 1)"
+        if len(in_progress_list) > 1:
+            warn = f" (warning: {len(in_progress_list)} items marked in_progress; should be 1)"
 
-        lines = [f"Todo list updated ({len(normalized)} items){warn}"]
+        lines = [
+            f"Todo list updated ({len(normalized)} total: "
+            f"{pending_count} pending, {len(in_progress_list)} in progress, "
+            f"{completed_count} completed){warn}",
+        ]
         for t in normalized:
             status = t.get("status", "pending")
             mark = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}.get(status, "[ ]")
             lines.append(f"  {mark} {t.get('content', '')}")
+
+        # Status-specific feedback (matches reference).
+        if completed_count == len(normalized) and len(normalized) > 0:
+            lines.append("\nAll tasks completed! Great work.")
+        else:
+            if in_progress_list:
+                lines.append(
+                    f"\nReminder: {len(in_progress_list)} task(s) are in_progress "
+                    "— complete them before marking the session done."
+                )
+            incomplete = pending_count + len(in_progress_list)
+            if incomplete > 0:
+                lines.append(
+                    f"WARNING: {incomplete} task(s) still incomplete. "
+                    "Continue working on them."
+                )
         return "\n".join(lines)
