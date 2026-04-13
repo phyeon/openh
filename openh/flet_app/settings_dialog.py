@@ -389,17 +389,6 @@ class SettingsDialog:
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
             hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
         )
-        self._custom_prefix_field = ft.TextField(
-            value=str(getattr(self.settings, "custom_prefix", "") or ""),
-            multiline=False,
-            label="Custom prefix",
-            hint_text='비우면 기본값: "You are Claude Code, Anthropic\'s official CLI for Claude."',
-            border_color=theme.BORDER_SUBTLE,
-            cursor_color=theme.ACCENT,
-            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12),
-            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
-            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
-        )
         self._agent_persona_toggle = ft.Switch(
             value=bool(getattr(self.settings, "agent_persona_enabled", False)),
             label="Apply global agent persona",
@@ -432,12 +421,6 @@ class SettingsDialog:
                 ),
                 ft.Container(height=20),
                 _label("Global persona"),
-                self._custom_prefix_field,
-                ft.Container(height=6),
-                _hint(
-                    "시스템 프롬프트 첫 줄. 비우면 기본 \"You are Claude Code...\" 유지."
-                ),
-                ft.Container(height=14),
                 self._agent_persona_toggle,
                 ft.Container(height=8),
                 self._agent_persona_field,
@@ -1356,7 +1339,6 @@ class SettingsDialog:
         self.settings.user_profile_text = self._user_profile_field.value or ""
         self.settings.agent_persona_enabled = bool(self._agent_persona_toggle.value)
         self.settings.agent_persona_text = self._agent_persona_field.value or ""
-        self.settings.custom_prefix = self._custom_prefix_field.value or ""
 
         try:
             self.settings.max_output_tokens = int(self._max_tokens_field.value or 0) or 8192

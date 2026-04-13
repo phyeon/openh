@@ -16,6 +16,7 @@ from .config import SYSTEM_PROMPT
 PROMPTS_DIR = Path.home() / ".openh" / "prompts"
 BUILTIN_NAME = "default"
 _NAME_META_RE = re.compile(r"^<!--\s*prompt-name:\s*(.*?)\s*-->\s*$", re.IGNORECASE)
+_PREFIX_META_RE = re.compile(r"^<!--\s*prefix:\s*(.*?)\s*-->\s*$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class Preset:
     text: str
     is_builtin: bool
     path: Path | None
+    prefix: str = ""  # overrides "You are Claude Code..." when non-empty
 
 
 def ensure_dir() -> None:
@@ -46,20 +48,31 @@ def _path_for(name: str) -> Path:
 def _decode_preset_document(path: Path, content: str) -> Preset:
     lines = content.splitlines()
     display_name = path.stem
-    body = content
-    if lines:
-        match = _NAME_META_RE.match(lines[0].strip())
-        if match:
-            parsed_name = match.group(1).strip()
+    prefix = ""
+    # Parse metadata comments at the top of the file.
+    meta_end = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        name_match = _NAME_META_RE.match(stripped)
+        prefix_match = _PREFIX_META_RE.match(stripped)
+        if name_match:
+            parsed_name = name_match.group(1).strip()
             if parsed_name:
                 display_name = parsed_name
-            body = "\n".join(lines[1:]).lstrip("\n")
+            meta_end = i + 1
+        elif prefix_match:
+            prefix = prefix_match.group(1).strip()
+            meta_end = i + 1
+        elif stripped:
+            break  # stop at first non-metadata line
+    body = "\n".join(lines[meta_end:]).lstrip("\n") if meta_end else content
     return Preset(
         slug=path.stem,
         name=display_name,
         text=body,
         is_builtin=False,
         path=path,
+        prefix=prefix,
     )
 
 
@@ -149,3 +162,13 @@ def resolve_active(active_name: str | None) -> str:
     if preset is None:
         return SYSTEM_PROMPT
     return preset.text or SYSTEM_PROMPT
+
+
+def resolve_active_prefix(active_name: str | None) -> str:
+    """Return the prefix from the active preset, or empty for default."""
+    if not active_name:
+        return ""
+    preset = get_preset(active_name)
+    if preset is None:
+        return ""
+    return preset.prefix or ""

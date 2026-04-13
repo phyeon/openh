@@ -580,6 +580,16 @@ class OpenHApp:
         except Exception:
             pass
 
+    def _get_active_preset_prefix(self) -> str:
+        """Return the prefix from the active preset, if any."""
+        session_preset = (self.session.prompt_preset or "").strip()
+        if session_preset and session_preset.lower() != prompts_mod.BUILTIN_NAME:
+            return prompts_mod.resolve_active_prefix(session_preset)
+        active = (self.settings.active_prompt or "").strip()
+        if active and active.lower() != prompts_mod.BUILTIN_NAME:
+            return prompts_mod.resolve_active_prefix(active)
+        return ""
+
     def _get_custom_prompt_text(self) -> str:
         """Return only the selected custom prompt text, if any."""
         if self.session.prompt_override:
@@ -745,7 +755,10 @@ class OpenHApp:
                 if bool(getattr(self.settings, "agent_persona_enabled", False))
                 else ""
             ),
-            custom_prefix=str(getattr(self.settings, "custom_prefix", "") or "").strip(),
+            custom_prefix=(
+                self._get_active_preset_prefix()
+                or str(getattr(self.settings, "custom_prefix", "") or "").strip()
+            ),
         )
 
     def _set_status_note(self, text: str, timeout_s: float = 2.8) -> None:
