@@ -771,7 +771,7 @@ def _message_markdown(value: str, *, subdued: bool = False) -> ft.Markdown:
             codeblock_decoration=ft.BoxDecoration(
                 bgcolor=theme.BG_ELEVATED,
                 border=ft.border.all(1, theme.BORDER_SUBTLE),
-                border_radius=theme.RADIUS_MD,
+                border_radius=theme.RADIUS_CODE,
             ),
         ),
     )

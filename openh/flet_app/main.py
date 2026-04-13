@@ -228,7 +228,9 @@ class OpenHApp:
         self._message_end_spacer = ft.Container(height=20)
         self._session_cache: dict[str, tuple[int, int, list[Any], dict[str, Any]]] = {}
         self._queued_turns: list[tuple[str, list[Any]]] = []
-        self._live_tool_entries: list[tuple[str, dict[str, Any], str | None, bool]] = []
+        self._live_tool_entries: list[
+            tuple[str, str, dict[str, Any], str | None, bool]
+        ] = []
         self._live_tool_stack_widget: ft.Control | None = None
         self._content_width = theme.MESSAGE_MAX_WIDTH
         self._stick_to_bottom = True
@@ -2194,14 +2196,24 @@ class OpenHApp:
             self._finalize_streaming_message()
         elif isinstance(event, ToolUseEnd):
             self._hide_thinking()
-            self._live_tool_entries.append((event.name, event.input, None, False))
+            self._live_tool_entries.append(
+                (event.id, event.name, event.input, None, False)
+            )
             self._update_live_tool_stack()
             self._scroll_to_end()
         elif isinstance(event, ToolResultEvent):
-            if self._live_tool_entries:
-                name, input_dict, _result_content, _prev_error = self._live_tool_entries[-1]
-                self._live_tool_entries[-1] = (name, input_dict, event.content, event.is_error)
+            for idx, (tool_use_id, name, input_dict, _result_content, _prev_error) in enumerate(self._live_tool_entries):
+                if tool_use_id != event.tool_use_id:
+                    continue
+                self._live_tool_entries[idx] = (
+                    tool_use_id,
+                    name,
+                    input_dict,
+                    event.content,
+                    event.is_error,
+                )
                 self._update_live_tool_stack()
+                break
             else:
                 self._append_to_messages(
                     widgets.tool_result_panel(event.content, is_error=event.is_error)
@@ -2216,7 +2228,8 @@ class OpenHApp:
             self._set_status_note(event.text, timeout_s=timeout_s)
         elif isinstance(event, MessageStop):
             self._finalize_streaming_message()
-            self._reset_live_tool_stack()
+            if event.stop_reason != "tool_use":
+                self._reset_live_tool_stack()
 
     def _append_streaming_text(self, delta: str) -> None:
         if self._stream_message_widget is None:
@@ -2340,9 +2353,14 @@ class OpenHApp:
 
     def _build_tool_panel(
         self,
-        entries: list[tuple[str, dict[str, Any], str | None, bool]],
+        entries: list[tuple[str, str, dict[str, Any], str | None, bool]],
     ) -> ft.Control:
-        return widgets.tool_turn_panel(entries)
+        return widgets.tool_turn_panel(
+            [
+                (name, input_dict, result_content, is_error)
+                for _tool_use_id, name, input_dict, result_content, is_error in entries
+            ]
+        )
 
     def _reset_live_tool_stack(self) -> None:
         self._live_tool_entries = []

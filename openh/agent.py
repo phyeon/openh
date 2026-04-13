@@ -81,14 +81,15 @@ class Agent:
             "Make sure to complete all tasks before ending your response."
         )
 
-    def _last_assistant_has_visible_text(self) -> bool:
-        for message in reversed(getattr(self.session, "messages", [])):
+    def _assistant_has_visible_text_since(self, start_index: int) -> bool:
+        for message in getattr(self.session, "messages", [])[start_index:]:
             if getattr(message, "role", "") != "assistant":
                 continue
-            return any(
+            if any(
                 isinstance(block, TextBlock) and block.text.strip()
                 for block in getattr(message, "content", [])
-            )
+            ):
+                return True
         return False
 
     def _system_prompt_for_turn(self, turn: int) -> str:
@@ -290,6 +291,7 @@ class Agent:
         from .tools.agent_tool import drain_coordinator_messages, get_coordination_root
 
         turns = 0
+        run_start_message_count = len(getattr(self.session, "messages", []))
         max_tokens_recovery_count = 0
         stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
         effective_max_turns = max(
@@ -301,7 +303,7 @@ class Agent:
             if turns > effective_max_turns:
                 notice = f"Reached maximum turn limit ({effective_max_turns})."
                 await self._emit(StatusEvent(text=notice))
-                if not self._last_assistant_has_visible_text():
+                if not self._assistant_has_visible_text_since(run_start_message_count):
                     self.session.append_assistant_message([TextBlock(text=notice)])
                 return
 

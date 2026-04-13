@@ -563,6 +563,7 @@ def set_color_preset(name: str) -> None:
 
 
 RADIUS_SM = 6
+RADIUS_CODE = 4
 RADIUS_MD = 10
 RADIUS_LG = 16
 RADIUS_PILL = 999
