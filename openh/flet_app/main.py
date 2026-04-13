@@ -2353,14 +2353,17 @@ class OpenHApp:
 
     def _build_tool_panel(
         self,
-        entries: list[tuple[str, str, dict[str, Any], str | None, bool]],
+        entries: list[tuple[Any, ...]],
     ) -> ft.Control:
-        return widgets.tool_turn_panel(
-            [
-                (name, input_dict, result_content, is_error)
-                for _tool_use_id, name, input_dict, result_content, is_error in entries
-            ]
-        )
+        normalized: list[tuple[str, dict[str, Any], str | None, bool]] = []
+        for entry in entries:
+            if len(entry) == 5:
+                _tool_use_id, name, input_dict, result_content, is_error = entry
+                normalized.append((name, input_dict, result_content, is_error))
+            elif len(entry) == 4:
+                name, input_dict, result_content, is_error = entry
+                normalized.append((name, input_dict, result_content, is_error))
+        return widgets.tool_turn_panel(normalized)
 
     def _reset_live_tool_stack(self) -> None:
         self._live_tool_entries = []
