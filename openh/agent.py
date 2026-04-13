@@ -304,6 +304,7 @@ class Agent:
                 notice = f"Reached maximum turn limit ({effective_max_turns})."
                 await self._emit(StatusEvent(text=notice))
                 if not self._assistant_has_visible_text_since(run_start_message_count):
+                    await self._emit(TextDelta(text=notice))
                     self.session.append_assistant_message([TextBlock(text=notice)])
                 return
 
