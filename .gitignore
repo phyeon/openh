@@ -7,3 +7,4 @@ build/
 dist/
 .clawgui_sessions/
 .DS_Store
+.env

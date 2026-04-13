@@ -41,6 +41,212 @@ class OpenAIProvider:
             or model_name.startswith("gpt-5")
         )
 
+    # ── Responses API helpers ──────────────────────────────────────────
+
+    def _to_responses_input(self, messages: list[Message], system: str) -> list[dict[str, Any]]:
+        """Convert internal messages to Responses API *input* format."""
+        converted: list[dict[str, Any]] = [
+            {"role": "developer", "content": system},
+        ]
+        for msg in messages:
+            if msg.role == "assistant":
+                # Text parts → assistant message
+                text_chunks: list[str] = []
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        if block.text:
+                            text_chunks.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        # Emit any preceding text first
+                        if text_chunks:
+                            converted.append({"role": "assistant", "content": "".join(text_chunks)})
+                            text_chunks = []
+                        converted.append({
+                            "type": "function_call",
+                            "call_id": block.id,
+                            "name": block.name,
+                            "arguments": json.dumps(block.input or {}, ensure_ascii=False),
+                        })
+                    elif isinstance(block, ToolResultBlock):
+                        # Flush text
+                        if text_chunks:
+                            converted.append({"role": "assistant", "content": "".join(text_chunks)})
+                            text_chunks = []
+                        converted.append({
+                            "type": "function_call_output",
+                            "call_id": block.tool_use_id,
+                            "output": block.content or "",
+                        })
+                if text_chunks:
+                    converted.append({"role": "assistant", "content": "".join(text_chunks)})
+                continue
+
+            # user role
+            user_parts: list[dict[str, Any]] = []
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    if block.text:
+                        user_parts.append({"type": "input_text", "text": block.text})
+                elif isinstance(block, ImageBlock):
+                    user_parts.append({
+                        "type": "input_image",
+                        "image_url": f"data:{block.media_type};base64,{block.data_base64}",
+                    })
+                elif isinstance(block, DocumentBlock):
+                    user_parts.append({
+                        "type": "input_text",
+                        "text": "[Attached PDF omitted: OpenAI Responses API does not forward PDF blocks yet.]",
+                    })
+                elif isinstance(block, ToolResultBlock):
+                    # tool results from user messages
+                    converted.append({
+                        "type": "function_call_output",
+                        "call_id": block.tool_use_id,
+                        "output": block.content or "",
+                    })
+            if user_parts:
+                converted.append({"role": "user", "content": user_parts})
+        return converted
+
+    @staticmethod
+    def _to_responses_tools(tools: list[ToolSchema]) -> list[dict[str, Any]] | None:
+        """Convert tool schemas to Responses API tool format."""
+        if not tools:
+            return None
+        return [
+            {
+                "type": "function",
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["input_schema"],
+            }
+            for tool in tools
+        ]
+
+    async def _stream_responses(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolSchema],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream using the OpenAI Responses API (gpt-5*, o3*, o4*)."""
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "input": self._to_responses_input(messages, system),
+            "stream": True,
+            "max_output_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
+        }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        if top_p is not None:
+            payload["top_p"] = float(top_p)
+        resp_tools = self._to_responses_tools(tools)
+        if resp_tools is not None:
+            payload["tools"] = resp_tools
+        if extra_options:
+            for key, value in extra_options.items():
+                if key not in payload and value is not None:
+                    payload[key] = value
+
+        try:
+            stream = await self._client.responses.create(**payload)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"OpenAI Responses API request failed: {exc}") from exc
+
+        # Track function call state per output item
+        fc_buffers: dict[str, dict[str, Any]] = {}  # keyed by call_id
+        in_tokens = 0
+        out_tokens = 0
+
+        async for event in stream:
+            event_type = getattr(event, "type", "")
+
+            # ── Text deltas ──
+            if event_type == "response.output_text.delta":
+                delta_text = getattr(event, "delta", "")
+                if delta_text:
+                    yield TextDelta(text=delta_text)
+
+            # ── Function call: new item added ──
+            elif event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if item and getattr(item, "type", "") == "function_call":
+                    call_id = getattr(item, "call_id", "") or ""
+                    name = getattr(item, "name", "") or ""
+                    fc_buffers[call_id] = {"name": name, "json": "", "started": False}
+                    if name:
+                        fc_buffers[call_id]["started"] = True
+                        yield ToolUseStart(id=call_id, name=name)
+
+            # ── Function call arguments delta ──
+            elif event_type == "response.function_call_arguments.delta":
+                delta_args = getattr(event, "delta", "")
+                call_id = getattr(event, "item_id", "") or getattr(event, "call_id", "") or ""
+                # Try to find the buffer
+                buf = None
+                if call_id in fc_buffers:
+                    buf = fc_buffers[call_id]
+                elif fc_buffers:
+                    # fallback: use last buffer if call_id doesn't match
+                    buf = list(fc_buffers.values())[-1]
+                    call_id = list(fc_buffers.keys())[-1]
+                if buf and delta_args:
+                    buf["json"] += delta_args
+                    yield ToolUseDelta(id=call_id, partial_json=delta_args)
+
+            # ── Function call arguments done ──
+            elif event_type == "response.function_call_arguments.done":
+                call_id = getattr(event, "item_id", "") or getattr(event, "call_id", "") or ""
+                arguments = getattr(event, "arguments", "")
+                buf = fc_buffers.get(call_id)
+                if buf is None and fc_buffers:
+                    call_id = list(fc_buffers.keys())[-1]
+                    buf = fc_buffers[call_id]
+                if buf:
+                    if not buf["started"] and buf["name"]:
+                        buf["started"] = True
+                        yield ToolUseStart(id=call_id, name=buf["name"])
+                    try:
+                        parsed = json.loads(arguments or buf["json"]) if (arguments or buf["json"]) else {}
+                    except json.JSONDecodeError:
+                        parsed = {}
+                    yield ToolUseEnd(id=call_id, name=buf["name"], input=parsed)
+
+            # ── Output item done (for function calls not caught above) ──
+            elif event_type == "response.output_item.done":
+                item = getattr(event, "item", None)
+                if item and getattr(item, "type", "") == "function_call":
+                    call_id = getattr(item, "call_id", "") or ""
+                    name = getattr(item, "name", "") or ""
+                    # If we haven't emitted ToolUseEnd yet
+                    if call_id not in fc_buffers or not fc_buffers.get(call_id, {}).get("ended"):
+                        arguments = getattr(item, "arguments", "")
+                        try:
+                            parsed = json.loads(arguments) if arguments else {}
+                        except json.JSONDecodeError:
+                            parsed = {}
+                        if call_id not in fc_buffers:
+                            yield ToolUseStart(id=call_id, name=name)
+                        yield ToolUseEnd(id=call_id, name=name, input=parsed)
+
+            # ── Response completed → usage ──
+            elif event_type == "response.completed":
+                resp = getattr(event, "response", None)
+                if resp:
+                    usage_obj = getattr(resp, "usage", None)
+                    if usage_obj:
+                        in_tokens = getattr(usage_obj, "input_tokens", 0) or 0
+                        out_tokens = getattr(usage_obj, "output_tokens", 0) or 0
+
+        yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)
+        yield MessageStop(stop_reason="end_turn")
+
+    # ── Chat Completions helpers ─────────────────────────────────────
+
     def _to_openai_messages(self, messages: list[Message], system: str) -> list[dict[str, Any]]:
         converted: list[dict[str, Any]] = [
             {"role": "system", "content": system},
@@ -183,13 +389,17 @@ class OpenAIProvider:
         thinking_budget: int | None = None,
         provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        if self._use_responses_api(self.model):
-            raise RuntimeError(
-                "Model "
-                f"'{self.model}' requires the OpenAI Responses API which is not yet fully "
-                "implemented. Use gpt-4o or gpt-4o-mini for now."
-            )
         extra_options = dict(provider_options or {})
+        if self._use_responses_api(self.model):
+            async for event in self._stream_responses(
+                messages, system, tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                extra_options=extra_options,
+            ):
+                yield event
+            return
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._to_openai_messages(messages, system),
