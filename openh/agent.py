@@ -303,9 +303,6 @@ class Agent:
             if turns > effective_max_turns:
                 notice = f"Reached maximum turn limit ({effective_max_turns})."
                 await self._emit(StatusEvent(text=notice))
-                if not self._assistant_has_visible_text_since(run_start_message_count):
-                    await self._emit(TextDelta(text=notice))
-                    self.session.append_assistant_message([TextBlock(text=notice)])
                 return
 
             for text in list(getattr(self.session, "pending_messages", [])):
@@ -409,37 +406,54 @@ class Agent:
             stall_retries_left = max(0, int(getattr(self.session, "stream_stall_retries", 2) or 0))
 
             self.session.append_assistant_message(assistant_blocks)
+
+            # Budget guard: abort the loop if the configured USD cap is exceeded.
+            max_budget = getattr(self.session, "max_budget_usd", None)
+            if max_budget is not None:
+                spent = getattr(self.session, "total_estimated_cost_usd", 0.0)
+                if spent >= max_budget:
+                    await self._emit(
+                        StatusEvent(
+                            text=f"Budget limit ${max_budget:.4f} exceeded (spent ${spent:.4f}) — stopping."
+                        )
+                    )
+                    return
+
             await self._post_usage_compaction(stop_reason)
 
-            if not tool_uses:
-                if stop_reason == "max_tokens":
-                    if max_tokens_recovery_count < self.MAX_TOKENS_RECOVERY_LIMIT:
-                        max_tokens_recovery_count += 1
-                        turns -= 1
-                        await self._emit(
-                            StatusEvent(
-                                text=(
-                                    "Output token limit hit — continuing "
-                                    f"(attempt {max_tokens_recovery_count}/{self.MAX_TOKENS_RECOVERY_LIMIT})"
-                                )
+            # Match on stop_reason (mirrors reference match stop { ... }).
+            if stop_reason == "end_turn":
+                await self._maybe_trigger_auto_dream()
+                return
+            elif stop_reason == "max_tokens":
+                if max_tokens_recovery_count < self.MAX_TOKENS_RECOVERY_LIMIT:
+                    max_tokens_recovery_count += 1
+                    await self._emit(
+                        StatusEvent(
+                            text=(
+                                "Output token limit hit — continuing "
+                                f"(attempt {max_tokens_recovery_count}/{self.MAX_TOKENS_RECOVERY_LIMIT})"
                             )
                         )
-                        self.session.append_message(
-                            "user",
-                            [TextBlock(text=self.MAX_TOKENS_RECOVERY_MSG)],
-                            include_in_transcript=False,
-                            include_in_model=True,
-                        )
-                        continue
-                if stop_reason == "end_turn":
-                    await self._maybe_trigger_auto_dream()
+                    )
+                    self.session.append_message(
+                        "user",
+                        [TextBlock(text=self.MAX_TOKENS_RECOVERY_MSG)],
+                        include_in_transcript=False,
+                        include_in_model=True,
+                    )
+                    continue
+                # Recovery exhausted — surface partial response.
                 return
-
-            max_tokens_recovery_count = 0
-            tool_results = await self._run_tool_uses(tool_uses)
-            self.session.append_tool_results(tool_results)
-
-            if stop_reason not in ("tool_use", "end_turn"):
+            elif stop_reason == "tool_use":
+                max_tokens_recovery_count = 0
+                if not tool_uses:
+                    # Shouldn't happen but treat as end_turn.
+                    return
+                tool_results = await self._run_tool_uses(tool_uses)
+                self.session.append_tool_results(tool_results)
+            else:
+                # Unknown stop reason — treat as end_turn.
                 return
 
     @staticmethod
