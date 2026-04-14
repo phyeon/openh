@@ -13,6 +13,7 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float, float, float]] = {
     "claude-haiku-4-5": (0.8, 4.0, 1.0, 0.08),
     # Gemini — cache_read = 67-90% off input (implicit caching)
     "gemini-3.1-pro-preview": (2.0, 12.0, 0.0, 0.20),   # 90% off
+    "gemini-3.1-flash-lite-preview": (0.25, 1.50, 0.0, 0.025),  # 90% off
     "gemini-3-flash-preview": (0.50, 3.0, 0.0, 0.05),    # 90% off  (note: free tier)
     "gemini-2.5-flash": (0.15, 0.60, 0.0, 0.03),         # 80% off
     "gemini-2.5-pro": (1.25, 10.0, 0.0, 0.125),          # 90% off

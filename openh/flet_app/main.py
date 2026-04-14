@@ -1085,8 +1085,8 @@ class OpenHApp:
             "claude-sonnet-4": 200_000, "claude-haiku-4-5": 200_000,
             "claude-haiku-4": 200_000,
             "gemini-3.1-pro-preview": 1_000_000,
+            "gemini-3.1-flash-lite-preview": 1_000_000,
             "gemini-3-flash-preview": 1_000_000,
-            "gemini-2.5-flash": 1_000_000,
         }
         context_limit = ctx_limits.get(model, 200_000)
         bar = widgets.bottom_status_bar(

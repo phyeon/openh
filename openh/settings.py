@@ -25,8 +25,8 @@ ANTHROPIC_MODELS = [
 
 GEMINI_MODELS = [
     "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview",
     "gemini-3-flash-preview",
-    "gemini-2.5-flash",
 ]
 GEMINI_THINKING_EFFORTS = [
     "low",
@@ -70,7 +70,7 @@ class Settings:
     active_provider: str = "anthropic"
     openai_model: str = "gpt-5.4-mini"
     anthropic_model: str = "claude-sonnet-4-6"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     gemini_thinking_effort: str = "low"
     output_style: str = "default"
     max_output_tokens: int = 8192
@@ -134,7 +134,7 @@ def normalize_settings(s: Settings) -> Settings:
 
     s.openai_model = _coerce_str(s.openai_model, "gpt-5.4-mini")
     s.anthropic_model = _coerce_str(s.anthropic_model, "claude-sonnet-4-6")
-    s.gemini_model = _coerce_str(s.gemini_model, "gemini-2.5-flash")
+    s.gemini_model = _coerce_str(s.gemini_model, "gemini-3-flash-preview")
     gemini_effort = _coerce_str(s.gemini_thinking_effort, "low").lower()
     s.gemini_thinking_effort = (
         gemini_effort if gemini_effort in set(GEMINI_THINKING_EFFORTS) else "low"
