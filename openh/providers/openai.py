@@ -161,6 +161,7 @@ class OpenAIProvider:
         fc_buffers: dict[str, dict[str, Any]] = {}  # keyed by call_id
         in_tokens = 0
         out_tokens = 0
+        cached_tokens = 0
 
         async for event in stream:
             event_type = getattr(event, "type", "")
@@ -241,8 +242,16 @@ class OpenAIProvider:
                     if usage_obj:
                         in_tokens = getattr(usage_obj, "input_tokens", 0) or 0
                         out_tokens = getattr(usage_obj, "output_tokens", 0) or 0
+                        # OpenAI automatic prompt caching
+                        details = getattr(usage_obj, "input_tokens_details", None)
+                        if details:
+                            cached_tokens = getattr(details, "cached_tokens", 0) or 0
 
-        yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)
+        yield Usage(
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cache_read_input_tokens=cached_tokens,
+        )
         yield MessageStop(stop_reason="end_turn")
 
     # ── Chat Completions helpers ─────────────────────────────────────
@@ -436,6 +445,7 @@ class OpenAIProvider:
         tool_buffers: dict[int, dict[str, Any]] = {}
         in_tokens = 0
         out_tokens = 0
+        cached_tokens = 0
         stop_reason = "end_turn"
 
         async for chunk in stream:
@@ -443,6 +453,10 @@ class OpenAIProvider:
             if usage is not None:
                 in_tokens = getattr(usage, "prompt_tokens", in_tokens) or in_tokens
                 out_tokens = getattr(usage, "completion_tokens", out_tokens) or out_tokens
+                # OpenAI automatic prompt caching (Chat Completions)
+                details = getattr(usage, "prompt_tokens_details", None)
+                if details:
+                    cached_tokens = getattr(details, "cached_tokens", cached_tokens) or cached_tokens
 
             for choice in getattr(chunk, "choices", []) or []:
                 delta = getattr(choice, "delta", None)
@@ -488,5 +502,9 @@ class OpenAIProvider:
             if buf["name"]:
                 yield ToolUseEnd(id=buf["id"], name=buf["name"], input=parsed)
 
-        yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)
+        yield Usage(
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cache_read_input_tokens=cached_tokens,
+        )
         yield MessageStop(stop_reason=stop_reason)

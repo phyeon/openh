@@ -294,12 +294,18 @@ class GeminiProvider:
                 raise RuntimeError(f"Gemini request failed: {last_exc}") from last_exc
             raise RuntimeError("Gemini request failed: stream could not be created")
 
+        cached_tokens = 0
         async for chunk in stream:
             usage = getattr(chunk, "usage_metadata", None)
             if usage is not None:
                 in_tokens = getattr(usage, "prompt_token_count", in_tokens) or in_tokens
                 out_tokens = (
                     getattr(usage, "candidates_token_count", out_tokens) or out_tokens
+                )
+                # Gemini implicit caching: cached_content_token_count
+                cached_tokens = (
+                    getattr(usage, "cached_content_token_count", cached_tokens)
+                    or cached_tokens
                 )
 
             candidates = getattr(chunk, "candidates", None) or []
@@ -348,7 +354,11 @@ class GeminiProvider:
         elif stop_reason == "end_turn" and emitted_tool_use:
             stop_reason = "tool_use"
 
-        yield Usage(input_tokens=in_tokens, output_tokens=out_tokens)
+        yield Usage(
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cache_read_input_tokens=cached_tokens,
+        )
         yield MessageStop(stop_reason=stop_reason)
 
 
