@@ -895,8 +895,8 @@ class OpenHApp:
                     font_family=theme.FONT_SANS,
                     opacity=0.84,
                     offset=ft.Offset(0, 0),
-                    animate_offset=240,
-                    animate_opacity=240,
+                    animate_offset=ft.Animation(800, ft.AnimationCurve.EASE_IN_OUT),
+                    animate_opacity=ft.Animation(800, ft.AnimationCurve.EASE_IN_OUT),
                 )
             )
         self._welcome_wordmark_letters = letters
@@ -989,6 +989,7 @@ class OpenHApp:
             elements = self._welcome_wordmark_letters
             if not elements:
                 return
+            # --- intro: stagger each letter in ---
             for el in elements:
                 if not self._welcome_wordmark_should_run or self._welcome_widget is None:
                     break
@@ -997,26 +998,45 @@ class OpenHApp:
                 if self._welcome_wordmark_host is not None:
                     self._welcome_wordmark_host.update()
                 await asyncio.sleep(0.12)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.4)
             for el in elements:
                 el.opacity = 0.9
             if self._welcome_wordmark_host is not None:
                 self._welcome_wordmark_host.update()
 
-            if theme.is_fnd():
-                while self._welcome_wordmark_should_run and self._welcome_widget is not None:
-                    for el in elements:
-                        el.opacity = 0.6
+            # --- idle: subtle Apple-style breathing with intermittent drift ---
+            while self._welcome_wordmark_should_run and self._welcome_widget is not None:
+                # breathe down
+                for el in elements:
+                    el.opacity = 0.55
+                if self._welcome_wordmark_host is not None:
+                    self._welcome_wordmark_host.update()
+                await asyncio.sleep(2.4)
+                if not self._welcome_wordmark_should_run:
+                    break
+                # breathe up
+                for el in elements:
+                    el.opacity = 0.92
+                if self._welcome_wordmark_host is not None:
+                    self._welcome_wordmark_host.update()
+                await asyncio.sleep(2.4)
+                if not self._welcome_wordmark_should_run:
+                    break
+                # intermittent single-letter drift (every other cycle)
+                if random.random() < 0.45:
+                    idx = random.randint(0, len(elements) - 1)
+                    elements[idx].offset = ft.Offset(0, -0.08)
+                    elements[idx].opacity = 1.0
                     if self._welcome_wordmark_host is not None:
                         self._welcome_wordmark_host.update()
-                    await asyncio.sleep(1.8)
+                    await asyncio.sleep(0.9)
                     if not self._welcome_wordmark_should_run:
                         break
-                    for el in elements:
-                        el.opacity = 0.95
+                    elements[idx].offset = ft.Offset(0, 0)
+                    elements[idx].opacity = 0.9
                     if self._welcome_wordmark_host is not None:
                         self._welcome_wordmark_host.update()
-                    await asyncio.sleep(1.8)
+                    await asyncio.sleep(1.2)
         except Exception:
             pass
         finally:

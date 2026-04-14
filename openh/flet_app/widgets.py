@@ -1044,7 +1044,7 @@ def _thinking_panel(
     return _make_collapsible_panel(
         header,
         _message_markdown(thought or "…", subdued=True),
-        bg=theme.BG_ELEVATED,
+        bg=theme.BG_PAGE,
         border_color=theme.BORDER_FAINT,
         margin_top=0,
         margin_bottom=8,
