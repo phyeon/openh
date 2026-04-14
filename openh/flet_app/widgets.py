@@ -504,6 +504,7 @@ def bottom_status_bar(
     cost_usd: float | None = None,
     context_tokens: int = 0,
     context_limit: int = 200_000,
+    on_cost_click: Callable | None = None,
 ) -> ft.Container:
     """Thin status strip — cwd + token counts + cost estimate + context usage."""
     cost = (
@@ -558,16 +559,22 @@ def bottom_status_bar(
                 font_family=theme.FONT_MONO,
             )
         )
-    right_parts.extend(
-        [
-        ft.Text(
-            cost_str,
-            color=theme.ACCENT if cost > 0.01 else theme.TEXT_TERTIARY,
-            size=11,
-            font_family=theme.FONT_MONO,
-        ),
-        ]
+    cost_widget = ft.Text(
+        cost_str,
+        color=theme.ACCENT if cost > 0.01 else theme.TEXT_TERTIARY,
+        size=11,
+        font_family=theme.FONT_MONO,
     )
+    if on_cost_click:
+        cost_widget = ft.Container(
+            content=cost_widget,
+            on_click=lambda _: on_cost_click(),
+            tooltip="Usage dashboard",
+            ink=True,
+            border_radius=4,
+            padding=ft.padding.symmetric(horizontal=4),
+        )
+    right_parts.append(cost_widget)
 
     # Context usage bar
     if context_tokens > 0 and context_limit > 0:

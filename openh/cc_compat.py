@@ -986,6 +986,95 @@ def group_sessions(metas: list[CCSessionMeta]) -> dict[str, list[CCSessionMeta]]
 
 
 # ============================================================================
+#  Usage aggregation — cross-session token/cost summaries
+# ============================================================================
+
+
+@dataclass
+class UsageAggregate:
+    """Aggregated usage across multiple sessions."""
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_creation_input_tokens: int = 0
+    total_cache_read_input_tokens: int = 0
+    total_cost_usd: float = 0.0
+    session_count: int = 0
+    usage_by_model: dict = field(default_factory=dict)
+    cost_by_date: dict = field(default_factory=dict)  # "2026-04-13" -> cost
+
+
+def aggregate_usage(
+    since: float = 0.0,
+    until: float = 0.0,
+    limit: int = 500,
+) -> UsageAggregate:
+    """Scan sessions and aggregate token/cost data within a date range.
+
+    Args:
+        since: Unix epoch — include sessions with mtime >= this value. 0 = no lower bound.
+        until: Unix epoch — include sessions with mtime <= this value. 0 = no upper bound.
+        limit: Max sessions to scan.
+    """
+    import time
+    from datetime import datetime
+
+    if until <= 0:
+        until = time.time() + 86400  # future-proof
+
+    sessions = list_all_recent_sessions(limit=limit)
+    agg = UsageAggregate()
+
+    for meta in sessions:
+        if meta.mtime < since or meta.mtime > until:
+            continue
+        try:
+            data = read_session_meta(meta.path)
+        except Exception:
+            continue
+
+        in_tok = int(data.get("total_input_tokens", 0) or 0)
+        out_tok = int(data.get("total_output_tokens", 0) or 0)
+        cache_create = int(data.get("total_cache_creation_input_tokens", 0) or 0)
+        cache_read = int(data.get("total_cache_read_input_tokens", 0) or 0)
+        cost = float(data.get("total_estimated_cost_usd", 0) or 0)
+
+        if in_tok == 0 and out_tok == 0 and cost == 0:
+            continue
+
+        agg.total_input_tokens += in_tok
+        agg.total_output_tokens += out_tok
+        agg.total_cache_creation_input_tokens += cache_create
+        agg.total_cache_read_input_tokens += cache_read
+        agg.total_cost_usd += cost
+        agg.session_count += 1
+
+        # Per-model breakdown
+        by_model = data.get("usage_by_model")
+        if isinstance(by_model, dict):
+            for model_name, model_data in by_model.items():
+                if not isinstance(model_data, dict):
+                    continue
+                existing = agg.usage_by_model.setdefault(model_name, {
+                    "input_tokens": 0, "output_tokens": 0,
+                    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                    "cost_usd": 0.0, "requests": 0,
+                })
+                for key in ("input_tokens", "output_tokens",
+                            "cache_creation_input_tokens", "cache_read_input_tokens",
+                            "requests"):
+                    existing[key] = existing.get(key, 0) + int(model_data.get(key, 0) or 0)
+                existing["cost_usd"] = existing.get("cost_usd", 0.0) + float(
+                    model_data.get("cost_usd", 0) or 0
+                )
+
+        # Per-day cost
+        day_str = datetime.fromtimestamp(meta.mtime).strftime("%Y-%m-%d")
+        agg.cost_by_date[day_str] = agg.cost_by_date.get(day_str, 0.0) + cost
+
+    return agg
+
+
+# ============================================================================
 #  Session flags (starred / hidden) — stored in ~/.openh/session_flags.json
 # ============================================================================
 

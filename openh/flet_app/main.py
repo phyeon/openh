@@ -1100,12 +1100,18 @@ class OpenHApp:
             cost_usd=self.session.total_estimated_cost_usd,
             context_tokens=context_tokens,
             context_limit=context_limit,
+            on_cost_click=self._open_usage_dialog,
         )
         self.status_bar_holder.content = bar
         try:
             self.status_bar_holder.update()
         except Exception:
             pass
+
+    def _open_usage_dialog(self) -> None:
+        from .usage_dialog import UsageDialog
+        dialog = UsageDialog(page=self.page)
+        dialog.open()
 
     def _refresh_input(self) -> None:
         pending = getattr(self, "_pending_media", None) or []
