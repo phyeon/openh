@@ -2777,13 +2777,45 @@ class OpenHApp:
         else:
             wordmark_display = wordmark_text
 
-        wordmark_host = ft.Container(
-            content=wordmark_display,
-            opacity=0.95 if _is_dark else 0.9,
-            offset=ft.Offset(0, 0),
-            animate_offset=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
-            animate_opacity=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
-        )
+        # Wrap wordmark with neon backlight (dark) or plain (light)
+        if _is_dark:
+            # Neon backlight glow — radial gradient behind the text
+            wordmark_host = ft.Container(
+                content=ft.Stack(
+                    [
+                        # Backlight glow layer
+                        ft.Container(
+                            width=320, height=80,
+                            gradient=ft.RadialGradient(
+                                center=ft.Alignment(0, 0),
+                                radius=0.8,
+                                colors=["#20ff2a8f", "#08c850f0", "#00000000"],
+                                stops=[0.0, 0.5, 1.0],
+                            ),
+                            opacity=0.8,
+                            animate_opacity=ft.Animation(3000, ft.AnimationCurve.EASE_IN_OUT),
+                        ),
+                        # Text on top
+                        ft.Container(
+                            content=wordmark_display,
+                            alignment=ft.Alignment(0, 0),
+                        ),
+                    ],
+                    width=320, height=80,
+                ),
+                opacity=0.95,
+                offset=ft.Offset(0, 0),
+                animate_offset=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+            )
+        else:
+            wordmark_host = ft.Container(
+                content=wordmark_display,
+                opacity=0.9,
+                offset=ft.Offset(0, 0),
+                animate_offset=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+                animate_opacity=ft.Animation(500, ft.AnimationCurve.EASE_OUT),
+            )
 
         # We animate emoji + wordmark together via a simple list
         self._welcome_wordmark_letters = _emoji_items + [wordmark_host]
