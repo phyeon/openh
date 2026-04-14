@@ -26,13 +26,7 @@ class ToolUseBlock:
     _raw_part: Any = field(default=None, repr=False)  # preserve provider-specific Part (e.g. Gemini thought_signature)
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
-        if self._raw_part is not None:
-            try:
-                d["_raw_part_json"] = self._raw_part.to_json_dict()
-            except Exception:
-                pass
-        return d
+        return {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
 
 
 @dataclass
