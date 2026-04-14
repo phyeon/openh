@@ -1836,7 +1836,7 @@ def input_area(
                         tight=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    bgcolor=theme.ACCENT_FAINT,
+                    bgcolor=theme.BG_HOVER,
                     border_radius=12,
                     padding=ft.padding.only(left=10, right=6, top=5, bottom=5),
                 )
