@@ -83,6 +83,7 @@ class GeminiProvider:
         tool_result → function_response (must live on a user-role Content).
         """
         contents: list[gtypes.Content] = []
+        _no_sig_tool_ids: set[str] = set()  # tool calls without thought_signature (model switch)
         import base64 as _b64
         for msg in messages:
             parts: list[gtypes.Part] = []
@@ -111,17 +112,37 @@ class GeminiProvider:
                     if getattr(block, "_raw_part", None) is not None:
                         parts.append(block._raw_part)
                     else:
-                        parts.append(
-                            gtypes.Part.from_function_call(name=block.name, args=block.input or {})
-                        )
+                        # No raw part (model switch mid-conversation) — Gemini 3.x
+                        # requires thought_signature which only exists for its own
+                        # tool calls, so fall back to text representation.
+                        import json as _json
+                        arg_str = _json.dumps(block.input or {}, ensure_ascii=False)
+                        parts.append(gtypes.Part.from_text(
+                            text=f"[Called tool {block.name}({arg_str})]",
+                        ))
+                        _no_sig_tool_ids.add(block.id)
                 elif isinstance(block, ToolResultBlock):
-                    tool_name = self._lookup_tool_name(messages, block.tool_use_id) or "tool"
-                    response_payload = {"content": block.content}
-                    if block.is_error:
-                        response_payload["is_error"] = True
-                    parts.append(
-                        gtypes.Part.from_function_response(name=tool_name, response=response_payload)
-                    )
+                    if block.tool_use_id in _no_sig_tool_ids:
+                        # Matching result for a tool call without thought_signature
+                        content = block.content
+                        if isinstance(content, list):
+                            content = " ".join(
+                                p.get("text", "") if isinstance(p, dict) else str(p)
+                                for p in content
+                            )
+                        prefix = "[Error] " if block.is_error else ""
+                        text = f"[Tool result: {prefix}{content}]"
+                        if len(text) > 4000:
+                            text = text[:4000] + "…]"
+                        parts.append(gtypes.Part.from_text(text=text))
+                    else:
+                        tool_name = self._lookup_tool_name(messages, block.tool_use_id) or "tool"
+                        response_payload = {"content": block.content}
+                        if block.is_error:
+                            response_payload["is_error"] = True
+                        parts.append(
+                            gtypes.Part.from_function_response(name=tool_name, response=response_payload)
+                        )
             if not parts:
                 continue
             role = "model" if msg.role == "assistant" else "user"

@@ -290,12 +290,18 @@ def _block_to_cc_dict(block: Block) -> dict[str, Any]:
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
     if isinstance(block, ToolUseBlock):
-        return {
+        d: dict[str, Any] = {
             "type": "tool_use",
             "id": block.id,
             "name": block.name,
             "input": block.input,
         }
+        if block._raw_part is not None:
+            try:
+                d["_raw_part_json"] = block._raw_part.to_json_dict()
+            except Exception:
+                pass
+        return d
     if isinstance(block, ToolResultBlock):
         return {
             "type": "tool_result",
@@ -330,10 +336,19 @@ def _cc_dict_to_block(d: dict[str, Any]) -> Block | None:
     if t == "text":
         return TextBlock(text=d.get("text", ""))
     if t == "tool_use":
+        raw_part = None
+        raw_part_json = d.get("_raw_part_json")
+        if raw_part_json:
+            try:
+                from google.genai import types as gtypes
+                raw_part = gtypes.Part.model_validate(raw_part_json)
+            except Exception:
+                pass
         return ToolUseBlock(
             id=d.get("id", ""),
             name=d.get("name", ""),
             input=d.get("input") or {},
+            _raw_part=raw_part,
         )
     if t == "tool_result":
         content = d.get("content", "")
