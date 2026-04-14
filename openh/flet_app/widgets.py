@@ -67,9 +67,7 @@ def sidebar(
         style=ft.ButtonStyle(
             shape=ft.CircleBorder(),
             padding=ft.padding.all(8),
-            bgcolor=(
-                "#10192a" if is_fnd and theme.is_dark() else ("#fff4ed" if is_fnd else None)
-            ),
+            bgcolor=None,
             overlay_color=theme.BG_HOVER,
         ),
     )
