@@ -336,6 +336,15 @@ class Agent:
                     budget,
                 )
 
+            # Safety net: strip any tool_result block whose matching tool_use
+            # is missing from earlier messages.  Such orphans can appear from
+            # buggy earlier compactions, manual session edits, or provider
+            # switches, and all providers will reject them as invalid input.
+            from .compaction import sanitize_orphan_tool_results
+            self.session.model_messages = sanitize_orphan_tool_results(
+                self.session.model_messages
+            )
+
             assistant_blocks: list[Block] = []
             current_text: list[str] = []
             tool_uses: list[ToolUseBlock] = []

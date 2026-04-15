@@ -7,6 +7,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from .messages import (
+    Block,
     DocumentBlock,
     ImageBlock,
     Message,
@@ -413,6 +414,65 @@ async def micro_compact_if_needed(
         return None
 
 
+def _adjust_split_for_tool_pairs(messages: list[Message], split_at: int) -> int:
+    """Shrink ``split_at`` until ``messages[split_at:]`` has no orphan tool_result
+    blocks (i.e. every tool_result in the tail has its matching tool_use in the
+    tail too).  Without this, a pair can be cut by compaction, leaving the tail
+    starting with a dangling tool_result that every provider will reject.
+
+    Worst case: returns 0, i.e. the tail becomes the full conversation and no
+    compaction happens — safer than producing an invalid message sequence.
+    """
+    if split_at <= 0 or split_at >= len(messages):
+        return split_at
+    while split_at > 0:
+        known_ids: set[str] = set()
+        orphan = False
+        for m in messages[split_at:]:
+            if m.role == "assistant":
+                for b in m.content:
+                    if isinstance(b, ToolUseBlock):
+                        known_ids.add(b.id)
+                continue
+            for b in m.content:
+                if isinstance(b, ToolResultBlock) and b.tool_use_id not in known_ids:
+                    orphan = True
+                    break
+            if orphan:
+                break
+        if not orphan:
+            return split_at
+        split_at -= 1
+    return split_at
+
+
+def sanitize_orphan_tool_results(messages: list[Message]) -> list[Message]:
+    """Drop tool_result blocks whose matching tool_use is missing from the
+    preceding conversation.  Used as a final safety net before sending to the
+    provider — protects against sessions that were already broken by earlier
+    buggy compaction, manual edits, or provider-switch edge cases.
+
+    Empty user messages that result from dropping are skipped entirely.
+    """
+    known_ids: set[str] = set()
+    new_messages: list[Message] = []
+    for m in messages:
+        if m.role == "assistant":
+            for b in m.content:
+                if isinstance(b, ToolUseBlock):
+                    known_ids.add(b.id)
+            new_messages.append(m)
+            continue
+        new_blocks: list[Block] = []
+        for b in m.content:
+            if isinstance(b, ToolResultBlock) and b.tool_use_id not in known_ids:
+                continue
+            new_blocks.append(b)
+        if new_blocks:
+            new_messages.append(Message(role=m.role, content=new_blocks, uuid=m.uuid))
+    return new_messages
+
+
 async def _summarise_head(
     messages: list[Message],
     split_at: int,
@@ -422,6 +482,11 @@ async def _summarise_head(
     max_summary_tokens: int,
     session: "AgentSession | None" = None,
 ) -> list[Message]:
+    if split_at == 0:
+        return [_copy_message(message) for message in messages]
+
+    # Avoid cutting a tool_use/tool_result pair across the compaction boundary.
+    split_at = _adjust_split_for_tool_pairs(messages, split_at)
     if split_at == 0:
         return [_copy_message(message) for message in messages]
 
