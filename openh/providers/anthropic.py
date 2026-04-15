@@ -24,7 +24,8 @@ ANTHROPIC_BETA_HEADER = (
     "interleaved-thinking-2025-05-14,"
     "token-efficient-tools-2025-02-19,"
     "files-api-2025-04-14,"
-    "effort-2025-11-24"
+    "effort-2025-11-24,"
+    "extended-cache-ttl-2025-04-11"
 )
 
 # Content block types that accept an ``cache_control`` field on the Anthropic
@@ -34,25 +35,36 @@ _CACHEABLE_BLOCK_TYPES = frozenset(
     {"text", "tool_use", "tool_result", "image", "document"}
 )
 
+# Cache TTL choices.  ``5m`` (the default Anthropic charges 1.25x input for)
+# is right for content that churns every turn — the conversation tail.  ``1h``
+# costs 2x creation but pays for itself after a single 5-minute pause, which
+# is typical for long coding sessions where the user reads / thinks before
+# replying.  We put 1h on system + tools (stable for the whole session) and
+# 5m on the conversation tail (changes every turn).
+_CACHE_TTL_LONG = {"type": "ephemeral", "ttl": "1h"}
+_CACHE_TTL_SHORT = {"type": "ephemeral", "ttl": "5m"}
 
-def _mark_block_for_caching(block: dict[str, Any]) -> bool:
-    """In-place add an ephemeral ``cache_control`` marker to a content block.
-    Returns True if the marker was applied, False if the block was skipped
-    (unknown shape or type that rejects cache_control).
+
+def _mark_block_for_caching(
+    block: dict[str, Any], cache_control: dict[str, Any]
+) -> bool:
+    """In-place add a ``cache_control`` marker to a content block.  Returns
+    True if the marker was applied, False if the block was skipped (unknown
+    shape or type that rejects cache_control).
     """
     if not isinstance(block, dict):
         return False
     if block.get("type") not in _CACHEABLE_BLOCK_TYPES:
         return False
-    block["cache_control"] = {"type": "ephemeral"}
+    block["cache_control"] = dict(cache_control)
     return True
 
 
 def _mark_conversation_cache_breakpoints(msg_dicts: list[dict[str, Any]]) -> None:
-    """Add ephemeral ``cache_control`` markers to the last content block of
-    the two most recent messages.  This follows Anthropic's recommended
-    pattern for long agent loops: a marker at the current tail caches every
-    call inside the current turn, and a marker one message earlier keeps the
+    """Add 5m-ttl ``cache_control`` markers to the last content block of the
+    two most recent messages.  This follows Anthropic's recommended pattern
+    for long agent loops: a marker at the current tail caches every call
+    inside the current turn, and a marker one message earlier keeps the
     previous turn's prefix cached even after new content is appended — so
     the cache compounds rather than evicting itself each iteration.
 
@@ -75,7 +87,7 @@ def _mark_conversation_cache_breakpoints(msg_dicts: list[dict[str, Any]]) -> Non
         if not isinstance(content, list) or not content:
             continue
         last_block = content[-1]
-        if _mark_block_for_caching(last_block):
+        if _mark_block_for_caching(last_block, _CACHE_TTL_SHORT):
             marked += 1
 
 
@@ -122,11 +134,14 @@ class AnthropicProvider:
             # Cache breakpoint 4: tool schemas.  Claude-Code-style tool
             # definitions are easily 10-20k tokens; caching them cuts the
             # dominant per-turn cost once the first call seeds the cache.
+            # Use 1h TTL because tool schemas are stable for the whole
+            # session — paying 2x creation once to avoid re-billing across
+            # a pause longer than 5 minutes is a trivially good trade.
             tools_list = [dict(t) for t in tools]
             if tools_list:
                 tools_list[-1] = {
                     **tools_list[-1],
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": dict(_CACHE_TTL_LONG),
                 }
             kwargs["tools"] = tools_list
             kwargs["tool_choice"] = {
@@ -258,7 +273,10 @@ class AnthropicProvider:
                 {
                     "type": "text",
                     "text": static_text,
-                    "cache_control": {"type": "ephemeral"},
+                    # 1h TTL: the static system prompt is the most stable
+                    # chunk in the whole request, so pay 2x creation once to
+                    # survive long pauses.
+                    "cache_control": dict(_CACHE_TTL_LONG),
                 }
             )
 
