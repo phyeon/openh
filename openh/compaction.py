@@ -446,22 +446,38 @@ def _adjust_split_for_tool_pairs(messages: list[Message], split_at: int) -> int:
     return split_at
 
 
-def sanitize_orphan_tool_results(messages: list[Message]) -> list[Message]:
-    """Drop tool_result blocks whose matching tool_use is missing from the
-    preceding conversation.  Used as a final safety net before sending to the
-    provider — protects against sessions that were already broken by earlier
-    buggy compaction, manual edits, or provider-switch edge cases.
+_SYNTHETIC_TOOL_RESULT_TEXT = (
+    "[tool call did not complete — synthetic placeholder inserted to keep the "
+    "conversation valid after a crash, manual edit, or interrupted session]"
+)
 
-    Empty user messages that result from dropping are skipped entirely.
+
+def sanitize_orphan_tool_results(messages: list[Message]) -> list[Message]:
+    """Repair the tool_use/tool_result pairing invariant that every provider
+    enforces.  Used as a final safety net before sending to the provider —
+    protects against sessions that were already broken by earlier buggy
+    compaction, manual edits, provider switches, or tool execution that
+    crashed between ``append_assistant_message`` and ``append_tool_results``.
+
+    Two passes:
+      1. Drop ``tool_result`` blocks whose matching ``tool_use`` is missing
+         from the preceding conversation.  Empty user messages that result
+         from dropping are skipped entirely.
+      2. For every ``tool_use`` whose matching ``tool_result`` is missing
+         from the immediately-following user message, insert a synthetic
+         error ``tool_result`` so the sequence remains valid.  If there is
+         no following user message, a new one is inserted; otherwise the
+         synthetic blocks are merged into the existing next user message.
     """
+    # Pass 1: drop user tool_results with no preceding tool_use.
     known_ids: set[str] = set()
-    new_messages: list[Message] = []
+    stage1: list[Message] = []
     for m in messages:
         if m.role == "assistant":
             for b in m.content:
                 if isinstance(b, ToolUseBlock):
                     known_ids.add(b.id)
-            new_messages.append(m)
+            stage1.append(m)
             continue
         new_blocks: list[Block] = []
         for b in m.content:
@@ -469,8 +485,50 @@ def sanitize_orphan_tool_results(messages: list[Message]) -> list[Message]:
                 continue
             new_blocks.append(b)
         if new_blocks:
-            new_messages.append(Message(role=m.role, content=new_blocks, uuid=m.uuid))
-    return new_messages
+            stage1.append(Message(role=m.role, content=new_blocks, uuid=m.uuid))
+
+    # Pass 2: fill in missing tool_results after assistant tool_uses.
+    result: list[Message] = []
+    i = 0
+    while i < len(stage1):
+        m = stage1[i]
+        if m.role != "assistant":
+            result.append(m)
+            i += 1
+            continue
+        tool_use_ids = [b.id for b in m.content if isinstance(b, ToolUseBlock)]
+        if not tool_use_ids:
+            result.append(m)
+            i += 1
+            continue
+        nxt = stage1[i + 1] if i + 1 < len(stage1) else None
+        provided: set[str] = set()
+        if nxt is not None and nxt.role == "user":
+            provided = {
+                b.tool_use_id for b in nxt.content if isinstance(b, ToolResultBlock)
+            }
+        missing = [tid for tid in tool_use_ids if tid not in provided]
+        result.append(m)
+        if not missing:
+            i += 1
+            continue
+        synth = [
+            ToolResultBlock(
+                tool_use_id=tid,
+                content=_SYNTHETIC_TOOL_RESULT_TEXT,
+                is_error=True,
+            )
+            for tid in missing
+        ]
+        if nxt is not None and nxt.role == "user":
+            result.append(
+                Message(role="user", content=synth + list(nxt.content), uuid=nxt.uuid)
+            )
+            i += 2
+        else:
+            result.append(Message(role="user", content=synth))
+            i += 1
+    return result
 
 
 async def _summarise_head(
