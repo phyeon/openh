@@ -52,7 +52,7 @@ class UsageDialog:
             border_color=theme.BORDER_SUBTLE,
             text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
             width=180,
-            on_change=self._on_range_change,
+            on_select=self._on_range_change,
         )
 
     def open(self) -> None:
