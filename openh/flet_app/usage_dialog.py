@@ -59,7 +59,7 @@ class UsageDialog:
         self._body.controls = [
             ft.Container(
                 content=self._loading,
-                alignment=ft.alignment.center,
+                alignment=ft.Alignment.CENTER,
                 padding=40,
             )
         ]
@@ -97,7 +97,7 @@ class UsageDialog:
         self._body.controls = [
             ft.Container(
                 content=self._loading,
-                alignment=ft.alignment.center,
+                alignment=ft.Alignment.CENTER,
                 padding=40,
             )
         ]
@@ -125,7 +125,7 @@ class UsageDialog:
                         italic=True,
                     ),
                     padding=20,
-                    alignment=ft.alignment.center,
+                    alignment=ft.Alignment.CENTER,
                 )
             )
             self._body.controls = controls
