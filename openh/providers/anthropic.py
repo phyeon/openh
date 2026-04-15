@@ -27,6 +27,57 @@ ANTHROPIC_BETA_HEADER = (
     "effort-2025-11-24"
 )
 
+# Content block types that accept an ``cache_control`` field on the Anthropic
+# Messages API.  A block with another type (or an unknown shape) is silently
+# skipped rather than risking a 400 from the API.
+_CACHEABLE_BLOCK_TYPES = frozenset(
+    {"text", "tool_use", "tool_result", "image", "document"}
+)
+
+
+def _mark_block_for_caching(block: dict[str, Any]) -> bool:
+    """In-place add an ephemeral ``cache_control`` marker to a content block.
+    Returns True if the marker was applied, False if the block was skipped
+    (unknown shape or type that rejects cache_control).
+    """
+    if not isinstance(block, dict):
+        return False
+    if block.get("type") not in _CACHEABLE_BLOCK_TYPES:
+        return False
+    block["cache_control"] = {"type": "ephemeral"}
+    return True
+
+
+def _mark_conversation_cache_breakpoints(msg_dicts: list[dict[str, Any]]) -> None:
+    """Add ephemeral ``cache_control`` markers to the last content block of
+    the two most recent messages.  This follows Anthropic's recommended
+    pattern for long agent loops: a marker at the current tail caches every
+    call inside the current turn, and a marker one message earlier keeps the
+    previous turn's prefix cached even after new content is appended — so
+    the cache compounds rather than evicting itself each iteration.
+
+    Anthropic caps cache_control at 4 breakpoints per request.  Combined with
+    the markers on ``system`` (1) and the last tool schema (1), this brings
+    us to the full 4.
+
+    Operates in-place on dicts produced by ``Message.to_anthropic_dict``; no-op
+    if the structure is not recognised.
+    """
+    if not msg_dicts:
+        return
+    marked = 0
+    for msg in reversed(msg_dicts):
+        if marked >= 2:
+            break
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list) or not content:
+            continue
+        last_block = content[-1]
+        if _mark_block_for_caching(last_block):
+            marked += 1
+
 
 class AnthropicProvider:
     name: str = "anthropic"
@@ -52,14 +103,32 @@ class AnthropicProvider:
         provider_options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         msg_dicts = [m.to_anthropic_dict() for m in messages]
+        # Cache breakpoints 1-2 (of 4 allowed): conversation history.  Two
+        # markers on the tail of the message list turn every prior turn into
+        # a cache read (~10% of input cost) and let the cache compound across
+        # iterations of the tool-use loop.  Without these, every tool_use /
+        # tool_result dance in a long session is re-billed at full input rate
+        # on every single turn.
+        _mark_conversation_cache_breakpoints(msg_dicts)
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": msg_dicts,
             "max_tokens": int(max_tokens or MAX_OUTPUT_TOKENS),
         }
+        # Cache breakpoint 3: system static part (handled inside).
         kwargs["system"] = self._build_system_blocks(system)
         if tools:
-            kwargs["tools"] = list(tools)
+            # Cache breakpoint 4: tool schemas.  Claude-Code-style tool
+            # definitions are easily 10-20k tokens; caching them cuts the
+            # dominant per-turn cost once the first call seeds the cache.
+            tools_list = [dict(t) for t in tools]
+            if tools_list:
+                tools_list[-1] = {
+                    **tools_list[-1],
+                    "cache_control": {"type": "ephemeral"},
+                }
+            kwargs["tools"] = tools_list
             kwargs["tool_choice"] = {
                 "type": "auto",
                 "disable_parallel_tool_use": False,
