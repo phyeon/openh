@@ -1,6 +1,9 @@
 """Gemini provider — translates Anthropic message format ↔ Gemini Content."""
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 from typing import Any, AsyncIterator
 
 from google import genai
@@ -21,7 +24,60 @@ from ..messages import (
     ToolUseStart,
     Usage,
 )
+from ..system_prompt import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
 from .base import ToolSchema
+
+# Explicit cache TTL.  One hour matches Anthropic's extended cache TTL so
+# long coding sessions pay storage rather than re-creation whenever the user
+# thinks between turns.  Format is Gemini's protobuf duration string.
+_GEMINI_CACHE_TTL_SECONDS = 3600
+_GEMINI_CACHE_TTL_STR = f"{_GEMINI_CACHE_TTL_SECONDS}s"
+
+# Gemini rejects explicit cache creation below a model-specific token floor
+# (typically 1024-4096).  After any failure we stop trying for the rest of
+# the provider's lifetime rather than bombard the API on every turn.
+_GEMINI_CACHE_DISABLE_AFTER_ERRORS = 2
+
+
+def _split_static_dynamic_system(system: str) -> tuple[str, str]:
+    """Split a ``build_system_prompt`` string on the dynamic boundary marker.
+    Returns ``(static, dynamic)``; both may be empty.  The boundary literal
+    itself is stripped.  If the marker is absent the whole prompt is treated
+    as static so we do not accidentally regress existing behaviour.
+    """
+    text = system or ""
+    if SYSTEM_PROMPT_DYNAMIC_BOUNDARY not in text:
+        return text.strip(), ""
+    static, dynamic = text.split(SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 1)
+    return static.strip(), dynamic.strip()
+
+
+def _prepend_dynamic_context(
+    contents: list["gtypes.Content"], dynamic_text: str
+) -> list["gtypes.Content"]:
+    """Return a new ``contents`` list with ``dynamic_text`` prepended to the
+    first user-role message as a leading text Part.  If there is no user
+    message yet, a fresh one is inserted at the front.
+
+    Keeping the per-turn dynamic data (date, cwd, memory, …) out of
+    ``system_instruction`` is what lets Gemini's implicit cache actually
+    match across turns — the cache is keyed on the exact prompt prefix and
+    any variation invalidates it.
+    """
+    if not dynamic_text:
+        return contents
+    preamble_part = gtypes.Part.from_text(text=dynamic_text)
+    new_contents = list(contents)
+    for idx, content in enumerate(new_contents):
+        if content.role != "user":
+            continue
+        merged_parts = [preamble_part, *(content.parts or [])]
+        new_contents[idx] = gtypes.Content(role="user", parts=merged_parts)
+        return new_contents
+    # No user message yet — inject one at the front so Gemini still sees
+    # the dynamic context before the model starts responding.
+    new_contents.insert(0, gtypes.Content(role="user", parts=[preamble_part]))
+    return new_contents
 
 
 class GeminiProvider:
@@ -30,6 +86,82 @@ class GeminiProvider:
     def __init__(self, api_key: str, model: str) -> None:
         self.model = model
         self._client = genai.Client(api_key=api_key)
+        # Explicit-caching state.  One cache per (model, system, tools)
+        # fingerprint; we rebuild whenever any of those change and fall
+        # back silently to implicit caching if the API refuses.
+        self._cache_name: str | None = None
+        self._cache_key: str | None = None
+        self._cache_expires_at: float = 0.0
+        self._cache_error_count: int = 0
+
+    @staticmethod
+    def _cache_fingerprint(
+        api_model: str, static_system: str, tools: list[ToolSchema] | None
+    ) -> str:
+        h = hashlib.sha256()
+        h.update(api_model.encode("utf-8"))
+        h.update(b"\x1e")
+        h.update((static_system or "").encode("utf-8"))
+        h.update(b"\x1e")
+        for t in tools or []:
+            h.update(
+                json.dumps(t, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            )
+            h.update(b"\x1e")
+        return h.hexdigest()[:16]
+
+    async def _ensure_explicit_cache(
+        self,
+        *,
+        api_model: str,
+        static_system: str,
+        gemini_tools: list[gtypes.Tool] | None,
+        tool_config: Any | None,
+    ) -> str | None:
+        """Return the name of an active ``cachedContent`` covering the current
+        static system instruction + tools, creating one if needed.  Returns
+        None (and disables further attempts) on any failure — caller falls
+        back to passing system/tools in the live request.
+        """
+        if self._cache_error_count >= _GEMINI_CACHE_DISABLE_AFTER_ERRORS:
+            return None
+        if not static_system and not gemini_tools:
+            return None
+        key = self._cache_fingerprint(api_model, static_system, None)
+        # Hash with original tool schema dicts is tricky once we've converted
+        # to Gemini Tool objects, but the static_system change already covers
+        # the most volatile input; tool schemas almost never change mid-session.
+        now = time.time()
+        # Renew a little before TTL to avoid racing expiration mid-call.
+        renewal_margin = 120.0
+        if (
+            self._cache_name
+            and self._cache_key == key
+            and now < self._cache_expires_at - renewal_margin
+        ):
+            return self._cache_name
+        try:
+            cfg_kwargs: dict[str, Any] = {"ttl": _GEMINI_CACHE_TTL_STR}
+            if static_system:
+                cfg_kwargs["system_instruction"] = static_system
+            if gemini_tools:
+                cfg_kwargs["tools"] = gemini_tools
+                if tool_config is not None:
+                    cfg_kwargs["tool_config"] = tool_config
+            cache = await self._client.aio.caches.create(
+                model=api_model,
+                config=gtypes.CreateCachedContentConfig(**cfg_kwargs),
+            )
+        except Exception:
+            # Most common reason is "content too small to cache" for the
+            # chosen model; there's nothing we can do about it at the call
+            # site so just step aside and let implicit caching handle it.
+            self._cache_error_count += 1
+            return None
+        self._cache_name = getattr(cache, "name", None)
+        self._cache_key = key
+        self._cache_expires_at = now + _GEMINI_CACHE_TTL_SECONDS
+        return self._cache_name
 
     @staticmethod
     def _normalize_model_name(model: str) -> str:
@@ -190,12 +322,19 @@ class GeminiProvider:
     ) -> AsyncIterator[StreamEvent]:
         api_model = self._normalize_model_name(self.model)
         contents = self._to_gemini_contents(messages)
+        # Keep system_instruction static across turns so Gemini's implicit
+        # cache can key on it — any drift (today's date, cwd, memory, …)
+        # invalidates the entire prompt prefix and re-bills full input rate.
+        # Dynamic per-turn context rides on the first user message instead.
+        static_system, dynamic_system = _split_static_dynamic_system(system)
+        if dynamic_system:
+            contents = _prepend_dynamic_context(contents, dynamic_system)
         extra_options = dict(provider_options or {})
-        config_kwargs: dict[str, Any] = {"system_instruction": system}
+        config_kwargs: dict[str, Any] = {}
         gemini_tools = self._to_gemini_tools(tools)
+        tool_config: Any | None = None
         if gemini_tools is not None:
-            config_kwargs["tools"] = gemini_tools
-            config_kwargs["tool_config"] = extra_options.pop(
+            tool_config = extra_options.pop(
                 "tool_config",
                 gtypes.ToolConfig(
                     function_calling_config=gtypes.FunctionCallingConfig(
@@ -204,10 +343,33 @@ class GeminiProvider:
                     include_server_side_tool_invocations=False,
                 ),
             )
+            # Automatic function calling is a per-call setting; it does not
+            # live inside the explicit cache.
             config_kwargs["automatic_function_calling"] = extra_options.pop(
                 "automatic_function_calling",
                 gtypes.AutomaticFunctionCallingConfig(disable=True),
             )
+
+        # Try explicit cachedContent first.  When it works every subsequent
+        # call in the session sees system_instruction + tools at roughly 10%
+        # of input cost.  On any failure we fall back to inline system/tools
+        # (which still benefits from Gemini's implicit cache when the prompt
+        # prefix happens to match).
+        cache_name = await self._ensure_explicit_cache(
+            api_model=api_model,
+            static_system=static_system,
+            gemini_tools=gemini_tools,
+            tool_config=tool_config,
+        )
+        if cache_name is not None:
+            config_kwargs["cached_content"] = cache_name
+        else:
+            if static_system:
+                config_kwargs["system_instruction"] = static_system
+            if gemini_tools is not None:
+                config_kwargs["tools"] = gemini_tools
+                if tool_config is not None:
+                    config_kwargs["tool_config"] = tool_config
         config_kwargs["max_output_tokens"] = int(max_tokens or MAX_OUTPUT_TOKENS)
         if temperature is not None:
             config_kwargs["temperature"] = float(temperature)
@@ -252,6 +414,20 @@ class GeminiProvider:
         import asyncio as _aio
         stream = None
         config_variants: list[dict[str, Any]] = [dict(config_kwargs)]
+        if "cached_content" in config_kwargs:
+            # Cache can be evicted / deleted server-side between turns.  If
+            # that happens, rebuild a variant that carries the system / tool
+            # definitions inline so the call still succeeds, and clear our
+            # cached name so next turn re-creates.
+            without_cache = dict(config_kwargs)
+            without_cache.pop("cached_content", None)
+            if static_system:
+                without_cache["system_instruction"] = static_system
+            if gemini_tools is not None:
+                without_cache["tools"] = gemini_tools
+                if tool_config is not None:
+                    without_cache["tool_config"] = tool_config
+            config_variants.append(without_cache)
         if "automatic_function_calling" in config_kwargs:
             relaxed = dict(config_kwargs)
             relaxed.pop("automatic_function_calling", None)
@@ -264,6 +440,7 @@ class GeminiProvider:
 
         last_exc: Exception | None = None
         for variant in config_variants:
+            variant_uses_cache = "cached_content" in variant
             config = gtypes.GenerateContentConfig(**variant)
             for _attempt in range(3):
                 try:
@@ -287,6 +464,12 @@ class GeminiProvider:
                     if self._looks_like_unsupported_optional_config(err_str):
                         break
                     raise RuntimeError(f"Gemini request failed: {exc}") from exc
+            if stream is None and variant_uses_cache:
+                # The cached_content reference failed — probably evicted
+                # server-side.  Wipe local state so the next turn rebuilds.
+                self._cache_name = None
+                self._cache_key = None
+                self._cache_expires_at = 0.0
             if stream is not None:
                 break
         if stream is None:
