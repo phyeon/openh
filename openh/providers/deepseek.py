@@ -12,11 +12,16 @@ Verified against the official docs (api-docs.deepseek.com) + live calls:
   * Thinking is toggled with the body parameter
     ``thinking = {"type": "enabled"|"disabled", "reasoning_effort": "high"|"max"}``.
     It is passed via the OpenAI SDK's ``extra_body``.
-  * The model returns a separate ``reasoning_content`` (chain of thought). It
-    MUST NOT be echoed back in the message history or the API returns 400. The
-    shared OpenAI stream parser only reads ``delta.content`` (never
-    ``reasoning_content``), so the CoT is dropped and never re-sent — exactly
-    what the multi-turn rule requires. Trade-off: the CoT is not displayed.
+  * In *thinking* mode the model returns a separate ``reasoning_content`` (CoT).
+    DeepSeek encodes the reasoning continuity into the GENUINE ``tool_call`` id
+    it issues (ids look like ``call_00_...``). As long as that real id is echoed
+    back on the follow-up request, thinking + tool use works WITHOUT re-sending
+    ``reasoning_content`` — verified live across single, parallel, and multi-turn
+    tool flows. (Only a *fabricated* tool_call id makes the API demand
+    "reasoning_content ... must be passed back".) openh preserves the real id
+    end to end (capture → persistence → replay), so the shared stream parser can
+    keep dropping ``reasoning_content`` and thinking still works. Trade-off: the
+    CoT itself is not displayed.
   * ``temperature``/``top_p`` have no effect in thinking mode (ignored, not an
     error); ``logprobs``/``top_logprobs`` would error but we never send them.
 """
@@ -34,9 +39,11 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 class DeepSeekProvider(OpenAIProvider):
     name: str = "deepseek"
 
-    # Thinking on by default — it is the reason to pick v4-pro (its SWE-bench
-    # 80.6 is measured with thinking). "high" is DeepSeek's default effort;
-    # callers can override (incl. "max" for heavy agent work, or type "disabled")
+    # Thinking ON by default — it is the reason to pick v4-pro (SWE-bench 80.6 is
+    # measured with thinking) and it works with tool use because DeepSeek carries
+    # the reasoning continuity in the genuine tool_call id, which openh preserves
+    # (so reasoning_content need not be re-sent). "high" is DeepSeek's default
+    # effort. Override (incl. {"type": "disabled"} or "reasoning_effort": "max")
     # via provider_options["extra_body"]["thinking"].
     DEFAULT_THINKING: dict[str, Any] = {"type": "enabled", "reasoning_effort": "high"}
 

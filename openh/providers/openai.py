@@ -329,9 +329,14 @@ class OpenAIProvider:
                             "text": "[Attached PDF omitted: OpenAI provider does not forward PDF blocks yet.]",
                         }
                     )
+            # Tool results MUST come immediately after the assistant tool_calls
+            # message. DeepSeek enforces strict adjacency and rejects an
+            # intervening user message ("insufficient tool messages following
+            # tool_calls"); OpenAI tolerated the old text-first order. Emitting
+            # results first (then any user text) is also the correct chronology.
+            converted.extend(tool_messages)
             if user_parts:
                 converted.append({"role": "user", "content": user_parts})
-            converted.extend(tool_messages)
 
         # Patch orphan tool_calls: if an assistant message has tool_calls but
         # the following messages don't include matching tool results, the API
