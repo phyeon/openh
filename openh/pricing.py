@@ -21,6 +21,9 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float, float, float]] = {
     # DeepSeek — standard rate (post-promo, 2026-06).  cache_read ≈ 1/10 input.
     "deepseek-v4-pro": (1.74, 3.48, 0.0, 0.0145),
     "deepseek-v4-flash": (0.28, 0.42, 0.0, 0.028),       # approx — verify on deepseek.ai/pricing
+    # Moonshot / Kimi — cache_hit ≈ 1/6 input
+    "kimi-k2.6": (0.95, 4.00, 0.0, 0.16),
+    "kimi-k2.7-code": (0.95, 4.00, 0.0, 0.16),           # approx — verify on platform.moonshot.ai
 }
 
 

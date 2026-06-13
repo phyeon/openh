@@ -1597,7 +1597,7 @@ def model_dropdown(
     on_pick: Callable[[str, str], None],  # (provider, model) -> None
 ) -> ft.PopupMenuButton:
     """Real dropdown with grouped model options. Click → menu → pick one."""
-    from ..settings import ANTHROPIC_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, OPENAI_MODELS
+    from ..settings import ANTHROPIC_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, MOONSHOT_MODELS, OPENAI_MODELS
 
     def header(label: str) -> ft.PopupMenuItem:
         return ft.PopupMenuItem(
@@ -1652,6 +1652,10 @@ def model_dropdown(
     items.append(header("DEEPSEEK"))
     for m in DEEPSEEK_MODELS:
         items.append(choice("deepseek", m, provider_name == "deepseek" and m == model))
+    items.append(ft.PopupMenuItem())  # divider
+    items.append(header("MOONSHOT"))
+    for m in MOONSHOT_MODELS:
+        items.append(choice("moonshot", m, provider_name == "moonshot" and m == model))
 
     return ft.PopupMenuButton(
         content=ft.Container(

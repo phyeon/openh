@@ -39,8 +39,12 @@ DEEPSEEK_MODELS = [
     "deepseek-v4-pro",
     "deepseek-v4-flash",
 ]
+MOONSHOT_MODELS = [
+    "kimi-k2.6",
+    "kimi-k2.7-code",
+]
 
-_PROVIDERS = {"openai", "anthropic", "gemini", "deepseek"}
+_PROVIDERS = {"openai", "anthropic", "gemini", "deepseek", "moonshot"}
 _KNOWN_KEYS = {
     "active_provider",
     "openai_model",
@@ -48,6 +52,7 @@ _KNOWN_KEYS = {
     "gemini_model",
     "gemini_thinking_effort",
     "deepseek_model",
+    "moonshot_model",
     "output_style",
     "max_output_tokens",
     "auto_compact_threshold",
@@ -79,6 +84,7 @@ class Settings:
     gemini_model: str = "gemini-3.5-flash"
     gemini_thinking_effort: str = "low"
     deepseek_model: str = "deepseek-v4-pro"
+    moonshot_model: str = "kimi-k2.6"
     output_style: str = "default"
     max_output_tokens: int = 8192
     auto_compact_threshold: int = 80_000
@@ -143,6 +149,7 @@ def normalize_settings(s: Settings) -> Settings:
     s.anthropic_model = _coerce_str(s.anthropic_model, "claude-sonnet-4-6")
     s.gemini_model = _coerce_str(s.gemini_model, "gemini-3.5-flash")
     s.deepseek_model = _coerce_str(s.deepseek_model, "deepseek-v4-pro")
+    s.moonshot_model = _coerce_str(s.moonshot_model, "kimi-k2.6")
     gemini_effort = _coerce_str(s.gemini_thinking_effort, "low").lower()
     s.gemini_thinking_effort = (
         gemini_effort if gemini_effort in set(GEMINI_THINKING_EFFORTS) else "low"

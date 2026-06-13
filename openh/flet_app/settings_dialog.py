@@ -1,7 +1,7 @@
 """Settings dialog — runtime configuration UI.
 
 Sections:
-  1. Models (dropdowns for OpenAI + Anthropic + Gemini + DeepSeek)
+  1. Models (dropdowns for OpenAI + Anthropic + Gemini + DeepSeek + Moonshot)
   2. API keys (masked fields; reads repo .env + ~/.openh/.env)
   3. Tokens (max_output_tokens, auto_compact_threshold)
   4. Agents (subagent_parallel)
@@ -25,6 +25,7 @@ from .. import output_styles, prompts, settings as settings_mod
 from ..settings import (
     ANTHROPIC_MODELS,
     DEEPSEEK_MODELS,
+    MOONSHOT_MODELS,
     GEMINI_MODELS,
     GEMINI_THINKING_EFFORTS,
     OPENAI_MODELS,
@@ -271,6 +272,16 @@ class SettingsDialog:
             expand=True,
         )
 
+        self._ms_dropdown = ft.Dropdown(
+            value=self.settings.moonshot_model,
+            options=_model_options(MOONSHOT_MODELS, self.settings.moonshot_model),
+            border_color=theme.BORDER_SUBTLE,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=13),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            label="Moonshot (Kimi) model",
+            expand=True,
+        )
+
         return _padded_column(
             [
                 self._openai_dropdown,
@@ -280,6 +291,8 @@ class SettingsDialog:
                 self._gem_dropdown,
                 ft.Container(height=12),
                 self._ds_dropdown,
+                ft.Container(height=12),
+                self._ms_dropdown,
                 ft.Container(height=16),
                 _hint(
                     "Provider can also be toggled at runtime with ⌘M or the "
@@ -298,6 +311,7 @@ class SettingsDialog:
         anth_key = os.environ.get("ANTHROPIC_API_KEY", "")
         gem_key = os.environ.get("GEMINI_API_KEY", "")
         ds_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        ms_key = os.environ.get("MOONSHOT_API_KEY", "")
 
         self._openai_key_field = ft.TextField(
             value=openai_key,
@@ -347,6 +361,18 @@ class SettingsDialog:
             label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
             hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
         )
+        self._ms_key_field = ft.TextField(
+            value=ms_key,
+            password=True,
+            can_reveal_password=True,
+            label="MOONSHOT_API_KEY",
+            hint_text="sk-…",
+            border_color=theme.BORDER_SUBTLE,
+            cursor_color=theme.ACCENT,
+            text_style=ft.TextStyle(color=theme.TEXT_PRIMARY, size=12, font_family=theme.FONT_MONO),
+            label_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=12),
+            hint_style=ft.TextStyle(color=theme.TEXT_TERTIARY, size=11),
+        )
 
         status_openai =("●  OPENAI_API_KEY is currently set" if openai_key
                          else "○  OPENAI_API_KEY is NOT set")
@@ -356,6 +382,8 @@ class SettingsDialog:
                       else "○  GEMINI_API_KEY is NOT set")
         status_ds = ("●  DEEPSEEK_API_KEY is currently set" if ds_key
                      else "○  DEEPSEEK_API_KEY is NOT set")
+        status_ms = ("●  MOONSHOT_API_KEY is currently set" if ms_key
+                     else "○  MOONSHOT_API_KEY is NOT set")
 
         return _padded_column(
             [
@@ -364,6 +392,7 @@ class SettingsDialog:
                 ft.Text(status_anth, color=theme.SUCCESS if anth_key else theme.WARN, size=11),
                 ft.Text(status_gem, color=theme.SUCCESS if gem_key else theme.WARN, size=11),
                 ft.Text(status_ds, color=theme.SUCCESS if ds_key else theme.WARN, size=11),
+                ft.Text(status_ms, color=theme.SUCCESS if ms_key else theme.WARN, size=11),
                 ft.Container(height=10),
                 self._openai_key_field,
                 ft.Container(height=10),
@@ -372,6 +401,8 @@ class SettingsDialog:
                 self._gem_key_field,
                 ft.Container(height=10),
                 self._ds_key_field,
+                ft.Container(height=10),
+                self._ms_key_field,
                 ft.Container(height=14),
                 _hint(
                     "Keys are read from "
@@ -1366,6 +1397,7 @@ class SettingsDialog:
         self.settings.anthropic_model = self._anth_dropdown.value or self.settings.anthropic_model
         self.settings.gemini_model = self._gem_dropdown.value or self.settings.gemini_model
         self.settings.deepseek_model = self._ds_dropdown.value or self.settings.deepseek_model
+        self.settings.moonshot_model = self._ms_dropdown.value or self.settings.moonshot_model
         self.settings.gemini_thinking_effort = (
             self._gemini_thinking_dropdown.value
             or getattr(self.settings, "gemini_thinking_effort", "low")
@@ -1398,11 +1430,12 @@ class SettingsDialog:
                 self._anth_key_field.value or "",
                 self._gem_key_field.value or "",
                 self._ds_key_field.value or "",
+                self._ms_key_field.value or "",
             )
         except Exception:
             pass
 
-    def _persist_keys(self, openai: str, anth: str, gem: str, deepseek: str = "") -> None:
+    def _persist_keys(self, openai: str, anth: str, gem: str, deepseek: str = "", moonshot: str = "") -> None:
         """Upsert provider API keys into the .env file.
 
         SAFETY: empty values are NEVER written. If the user leaves a field blank,
@@ -1413,7 +1446,8 @@ class SettingsDialog:
         anth = (anth or "").strip()
         gem = (gem or "").strip()
         deepseek = (deepseek or "").strip()
-        if not openai and not anth and not gem and not deepseek:
+        moonshot = (moonshot or "").strip()
+        if not openai and not anth and not gem and not deepseek and not moonshot:
             return  # nothing to do
         if not self._env_path.exists():
             self._env_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1424,6 +1458,7 @@ class SettingsDialog:
         seen_anth = False
         seen_gem = False
         seen_ds = False
+        seen_ms = False
         for line in lines:
             stripped = line.strip()
             if stripped.startswith("OPENAI_API_KEY="):
@@ -1450,6 +1485,12 @@ class SettingsDialog:
                 else:
                     out.append(line)  # keep existing
                 seen_ds = True
+            elif stripped.startswith("MOONSHOT_API_KEY="):
+                if moonshot:
+                    out.append(f"MOONSHOT_API_KEY={moonshot}")
+                else:
+                    out.append(line)  # keep existing
+                seen_ms = True
             else:
                 out.append(line)
         if not seen_openai and openai:
@@ -1460,6 +1501,8 @@ class SettingsDialog:
             out.append(f"GEMINI_API_KEY={gem}")
         if not seen_ds and deepseek:
             out.append(f"DEEPSEEK_API_KEY={deepseek}")
+        if not seen_ms and moonshot:
+            out.append(f"MOONSHOT_API_KEY={moonshot}")
         self._env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
         load_env_files()
 

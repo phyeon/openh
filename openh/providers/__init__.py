@@ -6,7 +6,7 @@ from .base import Provider, ToolSchema
 
 __all__ = ["Provider", "ToolSchema", "get_provider", "PROVIDER_NAMES"]
 
-PROVIDER_NAMES = ("openai", "anthropic", "gemini", "deepseek")
+PROVIDER_NAMES = ("openai", "anthropic", "gemini", "deepseek", "moonshot")
 
 
 def get_provider(name: str, config: Config) -> Provider:
@@ -46,4 +46,13 @@ def get_provider(name: str, config: Config) -> Provider:
         if not config.deepseek_api_key:
             raise RuntimeError("DEEPSEEK_API_KEY not set")
         return DeepSeekProvider(api_key=config.deepseek_api_key, model=config.deepseek_model)
+    if name == "moonshot":
+        try:
+            from .moonshot import MoonshotProvider
+        except (ModuleNotFoundError, ImportError) as exc:
+            raise RuntimeError("OpenAI SDK not installed (Moonshot uses it). Reinstall dependencies first.") from exc
+
+        if not config.moonshot_api_key:
+            raise RuntimeError("MOONSHOT_API_KEY not set")
+        return MoonshotProvider(api_key=config.moonshot_api_key, model=config.moonshot_model)
     raise ValueError(f"unknown provider: {name}")

@@ -116,10 +116,12 @@ class OpenHApp:
                 anthropic_api_key=self.config.anthropic_api_key,
                 gemini_api_key=self.config.gemini_api_key,
                 deepseek_api_key=self.config.deepseek_api_key,
+                moonshot_api_key=self.config.moonshot_api_key,
                 openai_model=self.config.openai_model,
                 anthropic_model=self.config.anthropic_model,
                 gemini_model=self.config.gemini_model,
                 deepseek_model=self.config.deepseek_model,
+                moonshot_model=self.config.moonshot_model,
                 cwd=preferred_cwd,
             )
 
@@ -130,10 +132,12 @@ class OpenHApp:
                 anthropic_api_key=self.config.anthropic_api_key,
                 gemini_api_key=self.config.gemini_api_key,
                 deepseek_api_key=self.config.deepseek_api_key,
+                moonshot_api_key=self.config.moonshot_api_key,
                 openai_model=self.settings.openai_model,
                 anthropic_model=self.settings.anthropic_model,
                 gemini_model=self.settings.gemini_model,
                 deepseek_model=self.settings.deepseek_model,
+                moonshot_model=self.settings.moonshot_model,
                 cwd=self.config.cwd,
             )
 
@@ -142,13 +146,14 @@ class OpenHApp:
             and not self.config.anthropic_api_key
             and not self.config.gemini_api_key
             and not self.config.deepseek_api_key
+            and not self.config.moonshot_api_key
         ):
             env_locations = ", ".join(str(path) for path in dotenv_paths())
             page.add(
                 widgets.error_panel(
                     "No API keys found. "
                     f"Checked: {env_locations}. "
-                    "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, and/or DEEPSEEK_API_KEY."
+                    "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY, and/or MOONSHOT_API_KEY."
                 )
             )
             return
@@ -161,6 +166,7 @@ class OpenHApp:
             "anthropic": bool(self.config.anthropic_api_key) and _importlib_util.find_spec("anthropic") is not None,
             "gemini": bool(self.config.gemini_api_key) and _importlib_util.find_spec("google.genai") is not None,
             "deepseek": bool(self.config.deepseek_api_key) and _importlib_util.find_spec("openai") is not None,
+            "moonshot": bool(self.config.moonshot_api_key) and _importlib_util.find_spec("openai") is not None,
         }
         if not any(availability.values()):
             page.add(
@@ -171,7 +177,7 @@ class OpenHApp:
             )
             return
         if not availability.get(initial, False):
-            for candidate in ("openai", "anthropic", "gemini", "deepseek"):
+            for candidate in ("openai", "anthropic", "gemini", "deepseek", "moonshot"):
                 if availability.get(candidate):
                     initial = candidate
                     break
@@ -1116,6 +1122,8 @@ class OpenHApp:
             "gemini-3-flash-preview": 1_000_000,
             "deepseek-v4-pro": 1_000_000,
             "deepseek-v4-flash": 1_000_000,
+            "kimi-k2.6": 256_000,
+            "kimi-k2.7-code": 256_000,
         }
         context_limit = ctx_limits.get(model, 200_000)
         bar = widgets.bottom_status_bar(
@@ -1244,10 +1252,12 @@ class OpenHApp:
             anthropic_api_key=self.config.anthropic_api_key,
             gemini_api_key=self.config.gemini_api_key,
             deepseek_api_key=self.config.deepseek_api_key,
+            moonshot_api_key=self.config.moonshot_api_key,
             openai_model=self.settings.openai_model,
             anthropic_model=self.settings.anthropic_model,
             gemini_model=self.settings.gemini_model,
             deepseek_model=self.settings.deepseek_model,
+            moonshot_model=self.settings.moonshot_model,
             cwd=target,
         )
         self.session.config = self.config
@@ -1285,6 +1295,8 @@ class OpenHApp:
             self.settings.anthropic_model = model
         elif provider_name == "deepseek":
             self.settings.deepseek_model = model
+        elif provider_name == "moonshot":
+            self.settings.moonshot_model = model
         else:
             self.settings.gemini_model = model
 
@@ -1294,10 +1306,12 @@ class OpenHApp:
             anthropic_api_key=self.config.anthropic_api_key,
             gemini_api_key=self.config.gemini_api_key,
             deepseek_api_key=self.config.deepseek_api_key,
+            moonshot_api_key=self.config.moonshot_api_key,
             openai_model=self.settings.openai_model,
             anthropic_model=self.settings.anthropic_model,
             gemini_model=self.settings.gemini_model,
             deepseek_model=self.settings.deepseek_model,
+            moonshot_model=self.settings.moonshot_model,
             cwd=self.config.cwd,
         )
         self.config = new_config
@@ -1333,10 +1347,12 @@ class OpenHApp:
         old_anth = self.settings.anthropic_model
         old_gem = self.settings.gemini_model
         old_ds = self.settings.deepseek_model
+        old_ms = self.settings.moonshot_model
         old_openai_key = self.config.openai_api_key
         old_anth_key = self.config.anthropic_api_key
         old_gem_key = self.config.gemini_api_key
         old_ds_key = self.config.deepseek_api_key
+        old_ms_key = self.config.moonshot_api_key
 
         self.settings = new_settings
         self._skip_permissions = new_settings.skip_permissions
@@ -1351,10 +1367,12 @@ class OpenHApp:
             anthropic_api_key=env_config.anthropic_api_key,
             gemini_api_key=env_config.gemini_api_key,
             deepseek_api_key=env_config.deepseek_api_key,
+            moonshot_api_key=env_config.moonshot_api_key,
             openai_model=new_settings.openai_model,
             anthropic_model=new_settings.anthropic_model,
             gemini_model=new_settings.gemini_model,
             deepseek_model=new_settings.deepseek_model,
+            moonshot_model=new_settings.moonshot_model,
             cwd=self.config.cwd,
         )
         self.config = new_config
@@ -1366,10 +1384,12 @@ class OpenHApp:
             or (new_settings.active_provider == "anthropic" and new_settings.anthropic_model != old_anth)
             or (new_settings.active_provider == "gemini" and new_settings.gemini_model != old_gem)
             or (new_settings.active_provider == "deepseek" and new_settings.deepseek_model != old_ds)
+            or (new_settings.active_provider == "moonshot" and new_settings.moonshot_model != old_ms)
             or new_config.openai_api_key != old_openai_key
             or new_config.anthropic_api_key != old_anth_key
             or new_config.gemini_api_key != old_gem_key
             or new_config.deepseek_api_key != old_ds_key
+            or new_config.moonshot_api_key != old_ms_key
         )
         if provider_needs_reload:
             try:
@@ -1922,7 +1942,7 @@ class OpenHApp:
                 provider_name, model_name = model_name.split("/", 1)
                 provider_name = provider_name.strip().lower()
                 model_name = model_name.strip()
-            if provider_name not in ("openai", "anthropic", "gemini", "deepseek"):
+            if provider_name not in ("openai", "anthropic", "gemini", "deepseek", "moonshot"):
                 raise RuntimeError(f"unknown provider: {provider_name}")
             if not model_name:
                 raise RuntimeError("missing model name")
@@ -1933,6 +1953,8 @@ class OpenHApp:
                 self.settings.anthropic_model = model_name
             elif provider_name == "deepseek":
                 self.settings.deepseek_model = model_name
+            elif provider_name == "moonshot":
+                self.settings.moonshot_model = model_name
             else:
                 self.settings.gemini_model = model_name
             self.settings.active_provider = provider_name
@@ -1943,10 +1965,12 @@ class OpenHApp:
                 anthropic_api_key=env_config.anthropic_api_key,
                 gemini_api_key=env_config.gemini_api_key,
                 deepseek_api_key=env_config.deepseek_api_key,
+                moonshot_api_key=env_config.moonshot_api_key,
                 openai_model=self.settings.openai_model,
                 anthropic_model=self.settings.anthropic_model,
                 gemini_model=self.settings.gemini_model,
                 deepseek_model=self.settings.deepseek_model,
+                moonshot_model=self.settings.moonshot_model,
                 cwd=self.config.cwd,
             )
             self.config = new_config
@@ -2550,6 +2574,7 @@ class OpenHApp:
                 ("anthropic", bool(self.config.anthropic_api_key) and _importlib_util.find_spec("anthropic") is not None),
                 ("gemini", bool(self.config.gemini_api_key) and _importlib_util.find_spec("google.genai") is not None),
                 ("deepseek", bool(self.config.deepseek_api_key) and _importlib_util.find_spec("openai") is not None),
+                ("moonshot", bool(self.config.moonshot_api_key) and _importlib_util.find_spec("openai") is not None),
             )
             if ok
         ]
