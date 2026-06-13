@@ -6,7 +6,7 @@ from .base import Provider, ToolSchema
 
 __all__ = ["Provider", "ToolSchema", "get_provider", "PROVIDER_NAMES"]
 
-PROVIDER_NAMES = ("openai", "anthropic", "gemini")
+PROVIDER_NAMES = ("openai", "anthropic", "gemini", "deepseek")
 
 
 def get_provider(name: str, config: Config) -> Provider:
@@ -37,4 +37,13 @@ def get_provider(name: str, config: Config) -> Provider:
         if not config.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY not set")
         return GeminiProvider(api_key=config.gemini_api_key, model=config.gemini_model)
+    if name == "deepseek":
+        try:
+            from .deepseek import DeepSeekProvider
+        except (ModuleNotFoundError, ImportError) as exc:
+            raise RuntimeError("OpenAI SDK not installed (DeepSeek uses it). Reinstall dependencies first.") from exc
+
+        if not config.deepseek_api_key:
+            raise RuntimeError("DEEPSEEK_API_KEY not set")
+        return DeepSeekProvider(api_key=config.deepseek_api_key, model=config.deepseek_model)
     raise ValueError(f"unknown provider: {name}")

@@ -28,9 +28,12 @@ from .base import ToolSchema
 class OpenAIProvider:
     name: str = "openai"
 
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
         self.model = model
-        self._client = AsyncOpenAI(api_key=api_key)
+        client_kwargs: dict[str, Any] = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self._client = AsyncOpenAI(**client_kwargs)
 
     @staticmethod
     def _use_responses_api(model: str) -> bool:

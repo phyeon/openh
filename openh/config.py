@@ -18,6 +18,7 @@ SYSTEM_PROMPT_FILE = OPENH_DIR / "system_prompt.md"
 OPENAI_DEFAULT_MODEL = "gpt-5.4-mini"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
 GEMINI_DEFAULT_MODEL = "gemini-3.5-flash"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-pro"
 
 MAX_OUTPUT_TOKENS = 16384
 AUTO_COMPACT_THRESHOLD = 80_000
@@ -35,6 +36,8 @@ class Config:
     anthropic_model: str
     gemini_model: str
     cwd: str
+    deepseek_api_key: str | None = None
+    deepseek_model: str = DEEPSEEK_DEFAULT_MODEL
 
 
 def _get_nonempty(name: str) -> str | None:
@@ -73,9 +76,11 @@ def load_config() -> Config:
         openai_api_key=_get_nonempty("OPENAI_API_KEY"),
         anthropic_api_key=_get_nonempty("ANTHROPIC_API_KEY"),
         gemini_api_key=_get_nonempty("GEMINI_API_KEY"),
+        deepseek_api_key=_get_nonempty("DEEPSEEK_API_KEY"),
         openai_model=os.environ.get("OPENH_OPENAI_MODEL") or OPENAI_DEFAULT_MODEL,
         anthropic_model=os.environ.get("OPENH_ANTHROPIC_MODEL") or ANTHROPIC_DEFAULT_MODEL,
         gemini_model=os.environ.get("OPENH_GEMINI_MODEL") or GEMINI_DEFAULT_MODEL,
+        deepseek_model=os.environ.get("OPENH_DEEPSEEK_MODEL") or DEEPSEEK_DEFAULT_MODEL,
         cwd=os.getcwd(),
     )
 

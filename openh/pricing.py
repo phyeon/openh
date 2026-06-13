@@ -18,6 +18,9 @@ MODEL_PRICING_USD_PER_MILLION: dict[str, tuple[float, float, float, float]] = {
     "gemini-3-flash-preview": (0.50, 3.0, 0.0, 0.05),    # 90% off  (note: free tier)
     "gemini-2.5-flash": (0.15, 0.60, 0.0, 0.03),         # 80% off
     "gemini-2.5-pro": (1.25, 10.0, 0.0, 0.125),          # 90% off
+    # DeepSeek — standard rate (post-promo, 2026-06).  cache_read ≈ 1/10 input.
+    "deepseek-v4-pro": (1.74, 3.48, 0.0, 0.0145),
+    "deepseek-v4-flash": (0.28, 0.42, 0.0, 0.028),       # approx — verify on deepseek.ai/pricing
 }
 
 
