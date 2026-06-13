@@ -1104,6 +1104,7 @@ class OpenHApp:
             "claude-sonnet-4-6": 1_000_000, "claude-sonnet-4-5": 200_000,
             "claude-sonnet-4": 200_000, "claude-haiku-4-5": 200_000,
             "claude-haiku-4": 200_000,
+            "gemini-3.5-flash": 1_000_000,
             "gemini-3.1-pro-preview": 1_000_000,
             "gemini-3.1-flash-lite-preview": 1_000_000,
             "gemini-3-flash-preview": 1_000_000,
