@@ -290,12 +290,15 @@ def _block_to_cc_dict(block: Block) -> dict[str, Any]:
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
     if isinstance(block, ToolUseBlock):
-        return {
+        d: dict[str, Any] = {
             "type": "tool_use",
             "id": block.id,
             "name": block.name,
             "input": block.input,
         }
+        if getattr(block, "thought_signature", None):
+            d["thought_signature"] = block.thought_signature
+        return d
     if isinstance(block, ToolResultBlock):
         return {
             "type": "tool_result",
@@ -334,6 +337,7 @@ def _cc_dict_to_block(d: dict[str, Any]) -> Block | None:
             id=d.get("id", ""),
             name=d.get("name", ""),
             input=d.get("input") or {},
+            thought_signature=d.get("thought_signature"),
         )
     if t == "tool_result":
         content = d.get("content", "")

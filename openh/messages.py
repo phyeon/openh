@@ -24,9 +24,15 @@ class ToolUseBlock:
     input: dict[str, Any]
     type: Literal["tool_use"] = "tool_use"
     _raw_part: Any = field(default=None, repr=False)  # preserve provider-specific Part (e.g. Gemini thought_signature)
+    # base64-encoded Gemini thought_signature; survives persistence/cc_compat round-trips
+    # (the raw Part above is in-memory only). Required to replay Gemini 3.x tool calls.
+    thought_signature: str | None = field(default=None)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
+        d: dict[str, Any] = {"type": "tool_use", "id": self.id, "name": self.name, "input": self.input}
+        if self.thought_signature:
+            d["thought_signature"] = self.thought_signature
+        return d
 
 
 @dataclass
@@ -130,6 +136,7 @@ class ToolUseEnd:
     name: str
     input: dict[str, Any]
     _raw_part: Any = field(default=None, repr=False)
+    thought_signature: str | None = None
 
 
 @dataclass

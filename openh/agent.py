@@ -378,7 +378,7 @@ class Agent:
                         if current_text:
                             assistant_blocks.append(TextBlock(text="".join(current_text)))
                             current_text = []
-                        block = ToolUseBlock(id=event.id, name=event.name, input=event.input, _raw_part=getattr(event, "_raw_part", None))
+                        block = ToolUseBlock(id=event.id, name=event.name, input=event.input, _raw_part=getattr(event, "_raw_part", None), thought_signature=getattr(event, "thought_signature", None))
                         assistant_blocks.append(block)
                         tool_uses.append(block)
                     elif isinstance(event, Usage):

@@ -52,6 +52,27 @@ def _split_static_dynamic_system(system: str) -> tuple[str, str]:
     return static.strip(), dynamic.strip()
 
 
+def _encode_thought_signature(part: Any) -> str | None:
+    """Extract a Gemini 3.x ``thought_signature`` (bytes) from a response Part and
+    base64-encode it so it survives JSON persistence.  Returns None when absent.
+
+    Gemini 3.x attaches an opaque signature to each functionCall part; it MUST be
+    echoed back on replay or the API rejects the request (HTTP 400).  The live raw
+    Part carries it in memory, but persistence/cc_compat drop the Part, so we keep
+    a serializable copy here.
+    """
+    sig = getattr(part, "thought_signature", None)
+    if not sig:
+        return None
+    if isinstance(sig, str):
+        return sig
+    try:
+        import base64 as _b64
+        return _b64.b64encode(bytes(sig)).decode("ascii")
+    except Exception:
+        return None
+
+
 def _prepend_dynamic_context(
     contents: list["gtypes.Content"], dynamic_text: str
 ) -> list["gtypes.Content"]:
@@ -239,13 +260,13 @@ class GeminiProvider:
                     except Exception:
                         pass
                 elif isinstance(block, ToolUseBlock):
-                    # Use raw Part if available (preserves thought_signature for Gemini 3.x)
+                    # Use raw Part if available (preserves thought_signature for Gemini 3.x).
+                    # After persistence/cc_compat round-trips the raw Part is gone, so rebuild
+                    # the function_call Part and reattach the persisted thought_signature.
                     if getattr(block, "_raw_part", None) is not None:
                         parts.append(block._raw_part)
                     else:
-                        parts.append(
-                            gtypes.Part.from_function_call(name=block.name, args=block.input or {})
-                        )
+                        parts.append(self._rebuild_function_call_part(block))
                 elif isinstance(block, ToolResultBlock):
                     tool_name = self._lookup_tool_name(messages, block.tool_use_id) or "tool"
                     response_payload = {"content": block.content}
@@ -259,6 +280,25 @@ class GeminiProvider:
             role = "model" if msg.role == "assistant" else "user"
             contents.append(gtypes.Content(role=role, parts=parts))
         return contents
+
+    @staticmethod
+    def _rebuild_function_call_part(block: ToolUseBlock) -> "gtypes.Part":
+        """Rebuild a function_call Part once the in-memory raw Part is gone
+        (after persistence/cc_compat), reattaching the persisted thought_signature.
+        Gemini 3.x rejects replayed function calls that lack it (HTTP 400)."""
+        sig_b64 = getattr(block, "thought_signature", None)
+        if sig_b64:
+            try:
+                import base64 as _b64
+                return gtypes.Part(
+                    function_call=gtypes.FunctionCall(
+                        name=block.name, args=block.input or {}
+                    ),
+                    thought_signature=_b64.b64decode(sig_b64),
+                )
+            except Exception:
+                pass
+        return gtypes.Part.from_function_call(name=block.name, args=block.input or {})
 
     @staticmethod
     def _lookup_tool_name(messages: list[Message], tool_use_id: str) -> str | None:
@@ -530,7 +570,13 @@ class GeminiProvider:
         for part_idx in sorted(pending_tool_calls):
             tool_id, name, args, raw_part = pending_tool_calls[part_idx]
             yield ToolUseStart(id=tool_id, name=name)
-            yield ToolUseEnd(id=tool_id, name=name, input=args, _raw_part=raw_part)
+            yield ToolUseEnd(
+                id=tool_id,
+                name=name,
+                input=args,
+                _raw_part=raw_part,
+                thought_signature=_encode_thought_signature(raw_part),
+            )
 
         if stop_reason == "end_turn" and emitted_tool_use and not emitted_text:
             stop_reason = "tool_use"
